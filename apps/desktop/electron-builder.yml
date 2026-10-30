@@ -7,6 +7,12 @@ directories:
 files:
   - dist/**/*
   - package.json
+# The browser bridge's native host runs outside the asar archive, and the unpacked extension is kept for loading.
+extraResources:
+  - from: ../browser-ext/native-host
+    to: browser-ext/native-host
+  - from: ../browser-ext/dist
+    to: browser-ext/extension
 asar: true
 # Unsigned local builds are fine for development. Release builds need signing identities in CI secrets:
 #   macOS:   CSC_LINK, CSC_KEY_PASSWORD, APPLE_API_KEY, APPLE_API_KEY_ID, APPLE_API_ISSUER

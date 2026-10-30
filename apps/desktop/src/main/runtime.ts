@@ -25,11 +25,14 @@ import {
   normalizeAppName,
 } from '@companyos/twin-core';
 import { randomUUID } from 'node:crypto';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { BROWSER_APP_NAMES, startBrowserBridge, type BrowserBridge, type BrowserVisit } from './browser-bridge';
 import { CaptureService } from './capture';
 import { destroyStoredSecrets, loadOrCreateDataKey } from './keys';
 import { detectHardware } from './hardware';
 import { ModelManager } from './models';
+import { browserCapturePaths, installNativeHost, isBrowserCaptureSupported, removeNativeHost } from './native-host-install';
 import { runOpenMausBotTask } from './openmausbot';
 import { choosePlatform, type Platform } from './platform';
 
@@ -45,6 +48,8 @@ export interface RuntimeOptions {
   onOffer: (offer: PendingRunView) => void;
   /** Called after a level 4 run so the owner can see that it ran or stopped. */
   onUnattendedRun?: (result: RunResult) => void;
+  /** The native messaging host script shipped with the app. Browser capture cannot start without it. */
+  browserHostScript?: string;
   fetchImpl?: typeof fetch;
 }
 
@@ -66,6 +71,9 @@ export class TwinRuntime {
   private readonly capture: CaptureService;
   private readonly platform: Platform | undefined;
   private readonly models: ModelManager;
+  /** Listens for visits from the browser extension. Exists only while browser capture is on. */
+  private browserBridge: BrowserBridge | undefined;
+  private browserChanges: Promise<void> = Promise.resolve();
   private hardwareProfile: Promise<HardwareProfile> | undefined;
   private readonly gate = new TriggerGate();
   /** Offers waiting for an answer. At most one at a time. */
@@ -103,11 +111,15 @@ export class TwinRuntime {
     this.agent.prune();
     await this.models.reconcile();
     this.capture.start();
+    // A bridge that cannot start leaves the setting on with no browser URLs. The app still starts.
+    if (this.agent.configuration.watchBrowsers) await this.setBrowserCapture(true).catch(() => undefined);
     setInterval(() => this.agent.prune(), DAY_MS).unref();
   }
 
   stop(): void {
     this.capture.stop();
+    this.browserBridge?.stop();
+    this.browserBridge = undefined;
   }
 
   setLocked(locked: boolean): void {
@@ -180,8 +192,14 @@ export class TwinRuntime {
     };
   }
 
-  updateConfig(patch: Partial<TwinConfig>): TwinConfig {
-    return this.agent.updateConfig(TwinConfigSchema.partial().parse(patch));
+  /**
+   * Turning browser capture on starts the local bridge and installs the native host first. If that fails, the
+   * setting stays off and the error reaches the page.
+   */
+  async updateConfig(patch: Partial<TwinConfig>): Promise<TwinConfig> {
+    const parsed = TwinConfigSchema.partial().parse(patch);
+    if (parsed.watchBrowsers !== undefined) await this.setBrowserCapture(parsed.watchBrowsers);
+    return this.agent.updateConfig(parsed);
   }
 
   stopAllAutomations(): void {
@@ -339,8 +357,53 @@ export class TwinRuntime {
   /** Destroys the stored data and the key. Nothing can be recovered afterwards. */
   deleteAll(): void {
     this.stop();
+    this.disableBrowserCapture();
     this.agent.wipe();
     destroyStoredSecrets(this.options.userData);
+  }
+
+  /**
+   * A visit from the browser extension. It goes through the engine's normal ingest, so the browser setting and the
+   * private-window rule apply. It does not trigger a routine offer, which is for app focus alone.
+   */
+  private observeBrowserVisit(visit: BrowserVisit): void {
+    this.agent.ingest({ kind: 'focus', ts: Date.now(), app: BROWSER_APP_NAMES[visit.browser], url: `https://${visit.template}` });
+  }
+
+  /**
+   * Browser capture changes run one at a time. Otherwise a quick off after an on could run before the bridge
+   * exists, and the bridge would then start while the setting is off.
+   */
+  private setBrowserCapture(enabled: boolean): Promise<void> {
+    const change = this.browserChanges.then(() => (enabled ? this.enableBrowserCapture() : this.disableBrowserCapture()));
+    this.browserChanges = change.catch(() => undefined);
+    return change;
+  }
+
+  /** Starts the bridge, then writes the native host. Unsupported systems keep the setting but start nothing. */
+  private async enableBrowserCapture(): Promise<void> {
+    if (!isBrowserCaptureSupported() || this.browserBridge) return;
+    const hostScript = this.options.browserHostScript;
+    if (!hostScript) throw new Error('The browser host is missing from this build.');
+
+    const paths = browserCapturePaths(this.options.userData);
+    this.browserBridge = await startBrowserBridge({
+      socketPath: paths.socketPath,
+      tokenPath: paths.tokenPath,
+      onVisit: visit => this.observeBrowserVisit(visit),
+    });
+    try {
+      installNativeHost({ userData: this.options.userData, home: homedir(), runtime: process.execPath, hostScript });
+    } catch (error) {
+      this.disableBrowserCapture();
+      throw error;
+    }
+  }
+
+  private disableBrowserCapture(): void {
+    this.browserBridge?.stop();
+    this.browserBridge = undefined;
+    if (isBrowserCaptureSupported()) removeNativeHost({ userData: this.options.userData, home: homedir() });
   }
 
   private suggestionViews(): SuggestionView[] {

@@ -1,6 +1,7 @@
 export * from './types';
 export * from './classify';
 export * from './redact';
+export * from './url';
 export * from './store';
 export * from './segment';
 export * from './mine';

@@ -29,6 +29,7 @@ import {
 import { APP_ORIGIN, IPC } from '../shared/ipc';
 import { solidPng } from './icon';
 import { SecureStorageUnavailableError } from './keys';
+import { nativeHostScript } from './native-host-install';
 import { buildOpenMausBotPrompt } from './openmausbot';
 import { TwinRuntime } from './runtime';
 
@@ -371,6 +372,7 @@ async function boot(): Promise<void> {
   try {
     runtime = await TwinRuntime.create({
       userData,
+      browserHostScript: nativeHostScript({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, mainDir: __dirname }),
       approve: approveStep,
       // The test platform has no real input device, so idle time is pinned to zero for it.
       idleSeconds: () => (process.env.COMPANYOS_TEST_FAKE_PLATFORM ? 0 : powerMonitor.getSystemIdleTime()),
