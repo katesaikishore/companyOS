@@ -13,7 +13,7 @@
     "test:e2e": "node test/e2e.cjs"
   },
   "devDependencies": {
-    "electron": "^45.1.0",
+    "electron": "45.1.0",
     "electron-builder": "^26.18.0",
     "typescript": "^5.9.3",
     "@types/cross-spawn": "^6.0.6"
