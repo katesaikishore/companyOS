@@ -54,7 +54,7 @@ On Linux without a keyring, the app refuses to start. The end-to-end test sets `
 
 - Engine: redaction, encrypted storage, segmentation, routine mining, compilation into automations, policy, runners (dry, supervised, unattended), promotion and demotion gates, dismissals, a stop-all switch, and time estimates.
 - Setup: the wizard detects the device (CPU, memory, GPU vendor, free disk) and recommends the largest open chat model that fits, plus the embedding model. Downloads are verified and cancellable.
-- Pages: overview, suggestions, automation detail with the autonomy ladder and promotion gate, network ledger, settings. Light and dark themes. `Ctrl/⌘ K` opens a searchable command palette for pages, routines, and capture controls.
+- Pages: an overview with first-run guidance, local app-usage bars and a routine timing map; suggestions; automation detail with the autonomy ladder and promotion gate; network ledger; and settings. Light and dark themes. `Ctrl/⌘ K` opens a searchable command palette for pages, routines, and capture controls.
 - Tray popover with the stop-all button. The stop-all shortcut is Control+Alt+. (it is skipped if another app owns it).
 - Level 4 routines run on their trigger only when unattended runs are enabled, the global automation switch is on, and the configured maximum allows level 4. They remain limited to local, reversible steps and show a native completion or stop notification.
 - Stop all cancels the remaining steps of an in-flight routine, even if automations are turned back on immediately. Privacy and autonomy settings are re-read after approval dialogs and before each step.

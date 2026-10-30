@@ -388,6 +388,12 @@ a {
   background: var(--dot-paused);
 }
 
+.dot-idle,
+.dot-locked,
+.dot-unsupported {
+  background: var(--dot-off);
+}
+
 .main {
   min-width: 0;
   padding: 32px 40px 48px;
@@ -415,6 +421,69 @@ a {
   flex-direction: column;
   gap: 6px;
   min-width: 0;
+}
+
+.overview-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 24px;
+  padding: 26px 28px;
+  border: 1px solid var(--accent-soft-2);
+  border-radius: 16px;
+  background: linear-gradient(125deg, var(--accent-tint), var(--card) 72%);
+}
+
+.overview-hero-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  max-width: 680px;
+}
+
+.hero-eyebrow {
+  color: var(--accent-text);
+}
+
+.overview-hero .page-title {
+  font-size: 36px;
+}
+
+.overview-hero-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 14px;
+}
+
+.capture-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 550;
+  white-space: nowrap;
+}
+
+.capture-pill-paused {
+  border-color: var(--warn-bg);
+  background: var(--warn-bg);
+  color: var(--warn-ink);
+}
+
+.capture-pill-unsupported {
+  color: var(--muted);
+}
+
+.overview-hero-actions {
+  justify-content: flex-end;
 }
 
 .page-title {
@@ -814,6 +883,79 @@ a {
   overflow-wrap: anywhere;
 }
 
+.stat {
+  min-height: 116px;
+  justify-content: space-between;
+  padding: 16px 18px;
+}
+
+.stat-value {
+  font-variant-numeric: tabular-nums;
+}
+
+.learning-panel {
+  gap: 18px;
+  border-color: var(--accent-soft-2);
+  background: var(--accent-tint);
+}
+
+.learning-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.learning-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 760px;
+  min-width: 0;
+}
+
+.learning-copy .eyebrow {
+  color: var(--accent-text);
+}
+
+.learning-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.learning-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  min-width: 0;
+  min-height: 70px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+}
+
+.learning-step.is-current {
+  border-color: var(--accent-heat);
+  box-shadow: inset 0 0 0 1px var(--accent-heat);
+}
+
+.learning-number {
+  padding-top: 1px;
+  color: var(--accent-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.learning-step-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  font-size: 13px;
+}
+
 .split {
   display: grid;
   grid-template-columns: minmax(0, 1.65fr) minmax(280px, 1fr);
@@ -923,6 +1065,63 @@ a {
   padding-left: 36px;
   font-size: 11px;
   color: var(--muted);
+}
+
+.usage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.usage-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.usage-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.usage-app {
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-bar {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--divider);
+}
+
+.usage-bar > span {
+  display: block;
+  height: 100%;
+  min-width: 3px;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent-heat), var(--accent));
+}
+
+.manage-data-link {
+  align-self: flex-start;
+  color: var(--accent-text);
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.manage-data-link:hover {
+  text-decoration: underline;
 }
 
 /* Suggestions */
@@ -1912,6 +2111,21 @@ a {
 /* Narrower windows: the two-column layouts stack, and the stat cards go to two columns. */
 
 @media (max-width: 1099px) {
+  .overview-hero {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .overview-hero-side {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+
+  .overview-hero-actions {
+    justify-content: flex-start;
+  }
+
   .stat-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1932,5 +2146,29 @@ a {
 
   .setup-foot {
     padding: 16px 28px;
+  }
+}
+
+@media (max-width: 760px) {
+  .overview-hero {
+    padding: 22px 20px;
+  }
+
+  .overview-hero .page-title {
+    font-size: 30px;
+  }
+
+  .overview-hero-side {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .learning-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .learning-steps {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

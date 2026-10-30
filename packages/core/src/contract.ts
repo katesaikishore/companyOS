@@ -43,7 +43,7 @@ export interface StatsView {
   routinesLearned: number;
   /** Suggestions not yet accepted, plus automations still at draft. */
   waiting: number;
-  /** Automations at level 4, running without a person. */
+  /** Level 4 automations currently enabled for unattended execution. */
   unattendedReady: number;
   /** Estimated minutes per week across automations at level 3 or above. */
   minutesBackPerWeek: number;

@@ -1,9 +1,9 @@
 import type { AutomationView, TwinStatus } from '@companyos/twin-core';
 import { h, type Child } from '../dom.js';
-import { button, fact, levelMeter, panel, panelHead, pageHeader, emptyState } from '../components/ui.js';
+import { button, fact, levelMeter, panel, panelHead, emptyState } from '../components/ui.js';
 import { DAY_MS, formatBytes, formatHours, formatRate, plural } from '../format.js';
-import { appsSummary, levelLabel } from '../labels.js';
-import { confirmDeleteAll, go } from '../store.js';
+import { appsSummary, captureTitle, levelLabel } from '../labels.js';
+import { call, go, state } from '../store.js';
 
 const HOURS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -15,17 +15,8 @@ export function overviewView(status: TwinStatus): HTMLElement {
   return h(
     'div',
     { class: 'stack', 'data-testid': 'view-overview' },
-    pageHeader(
-      'Your twin',
-      `Built on this device from ${stats.observedDays} days of activity. Raw data has not left this device.`,
-      [
-        button('Network ledger', { onClick: () => go('#/ledger') }),
-        button(`Review ${plural(suggestions.length, 'suggestion')}`, {
-          variant: 'primary',
-          onClick: () => go('#/suggestions'),
-        }),
-      ],
-    ),
+    overviewHero(status),
+    stats.routinesLearned === 0 ? learningPanel(status) : undefined,
     h(
       'section',
       { class: 'stat-grid', 'data-testid': 'overview-stats', 'aria-label': 'Summary' },
@@ -37,8 +28,143 @@ export function overviewView(status: TwinStatus): HTMLElement {
     h(
       'div',
       { class: 'split' },
-      routinesPanel(automations),
-      h('div', { class: 'stack' }, heatmapPanel(status.activity), devicePanel(status.storageBytes, callsThisWeek)),
+      routinesPanel(automations, suggestions.length),
+      h(
+        'div',
+        { class: 'stack' },
+        heatmapPanel(status.activity),
+        usagePanel(status.usage),
+        devicePanel(status.storageBytes, callsThisWeek),
+      ),
+    ),
+  );
+}
+
+function overviewHero(status: TwinStatus): HTMLElement {
+  const { suggestions, automations } = status;
+  const primary =
+    suggestions.length > 0
+      ? button(`Review ${plural(suggestions.length, 'suggestion')}`, {
+          variant: 'primary',
+          onClick: () => go('#/suggestions'),
+        })
+      : automations.length > 0
+        ? button('View automations', { variant: 'primary', onClick: () => go('#/automations') })
+        : undefined;
+  const summary =
+    status.recordedFocusEvents > 0
+      ? `${plural(status.recordedFocusEvents, 'app switch')} observed over ${status.stats.observedDays} days. ` +
+        'Your data stays encrypted on this device.'
+      : 'Learn repeated work patterns from app names and timing. Your activity stays encrypted on this device.';
+
+  return h(
+    'header',
+    { class: 'overview-hero' },
+    h(
+      'div',
+      { class: 'overview-hero-copy' },
+      h('span', { class: 'eyebrow hero-eyebrow' }, 'PRIVATE WORK TWIN'),
+      h('h1', { class: 'page-title' }, 'Your twin'),
+      h('p', { class: 'page-sub' }, summary),
+    ),
+    h(
+      'div',
+      { class: 'overview-hero-side' },
+      h(
+        'span',
+        { class: `capture-pill capture-pill-${status.capture.state}`, 'data-testid': 'overview-capture-state' },
+        h('span', { class: `dot dot-${status.capture.state}`, 'aria-hidden': 'true' }),
+        captureTitle(status.capture.state),
+      ),
+      h(
+        'div',
+        { class: 'actions overview-hero-actions' },
+        button('Network ledger', { onClick: () => go('#/ledger') }),
+        primary,
+      ),
+    ),
+  );
+}
+
+function learningPanel(status: TwinStatus): HTMLElement {
+  const paused = status.capture.state === 'paused';
+  const unsupported = status.capture.state === 'unsupported';
+  const locked = status.capture.state === 'locked';
+  const idle = status.capture.state === 'idle';
+  const repeatDescription =
+    'Use the same short sequence of apps naturally over a few days. Suggestions appear when a pattern repeats.';
+  let heading: string;
+  let description: string;
+  if (unsupported) {
+    heading = 'Capture is not available in this session';
+    description = status.capture.detail || 'Activity capture is unavailable on this desktop session.';
+  } else if (paused) {
+    heading = 'Capture is paused';
+    description = 'Resume capture when you want the twin to keep learning from app names and timing.';
+  } else if (locked) {
+    heading = 'Capture will resume when you unlock';
+    description = 'Your twin pauses app capture while the screen is locked.';
+  } else if (idle) {
+    heading = 'Capture is idle while you are away';
+    description = 'Capture resumes when you return to your desktop.';
+  } else if (status.recordedFocusEvents === 0) {
+    heading = 'Your twin is ready to learn';
+    description = repeatDescription;
+  } else {
+    heading = 'Your twin is learning your rhythm';
+    description = repeatDescription;
+  }
+  const captureDetail = unsupported
+    ? 'Unavailable'
+    : paused
+      ? 'Paused'
+      : locked
+        ? 'Screen locked'
+        : idle
+          ? 'Waiting for you'
+          : 'On this device';
+
+  return panel(
+    { testid: 'overview-learning', extra: 'learning-panel', labelledBy: 'learning-title' },
+    h(
+      'div',
+      { class: 'learning-head' },
+      h('div', { class: 'learning-copy' },
+        h('span', { class: 'eyebrow' }, 'GETTING STARTED'),
+        h('h2', { class: 'panel-title', id: 'learning-title' }, heading),
+        h('p', { class: 'muted' }, description),
+      ),
+      paused
+        ? button('Resume capture', {
+            variant: 'primary',
+            disabled: state.pending.has('capture'),
+            onClick: () => void call('capture', twin => twin.setPaused(false)),
+          })
+        : undefined,
+    ),
+    h(
+      'div',
+      { class: 'learning-steps' },
+      learningStep(
+        '01',
+        'Capture',
+        captureDetail,
+        status.capture.state === 'capturing',
+      ),
+      learningStep('02', 'Repeat', 'Follow your normal app sequence', false),
+      learningStep('03', 'Review', 'You decide what becomes an automation', false),
+    ),
+  );
+}
+
+function learningStep(number: string, title: string, detail: string, current: boolean): HTMLElement {
+  return h(
+    'div',
+    { class: current ? 'learning-step is-current' : 'learning-step' },
+    h('span', { class: 'learning-number mono' }, number),
+    h('span', { class: 'learning-step-copy' },
+      h('strong', null, title),
+      h('span', { class: 'muted small' }, detail),
     ),
   );
 }
@@ -53,7 +179,7 @@ function statCard(label: string, value: string, note: string): HTMLElement {
   );
 }
 
-function routinesPanel(views: readonly AutomationView[]): HTMLElement {
+function routinesPanel(views: readonly AutomationView[], suggestionCount: number): HTMLElement {
   const header: Child = h(
     'div',
     { class: 'table-head' },
@@ -62,9 +188,22 @@ function routinesPanel(views: readonly AutomationView[]): HTMLElement {
     h('span', null, 'Apps'),
     h('span', null, 'Autonomy'),
   );
-  return panel({ testid: 'overview-routines', labelledBy: 'routines-title' }, panelHead('Routines the twin has learned', 'Mined from structure, not content', 'routines-title'), views.length === 0
-    ? emptyState('No routines accepted yet.', 'Accepted routines appear here with how often they run and how much autonomy they have.')
-    : h('div', { class: 'table-scroll' }, h('div', { class: 'table' }, header, ...views.map(routineRow))));
+  return panel(
+    { testid: 'overview-routines', labelledBy: 'routines-title' },
+    panelHead('Your automations', 'Accepted routines and their autonomy', 'routines-title'),
+    views.length === 0
+      ? suggestionCount > 0
+        ? emptyState(
+            'Turn a suggestion into a draft.',
+            `${plural(suggestionCount, 'routine')} ready for your review. Nothing runs until you raise its level.`,
+            button('Review suggestions', { variant: 'primary', onClick: () => go('#/suggestions') }),
+          )
+        : emptyState(
+            'No automations yet.',
+            'New patterns appear in Suggestions. Accepting one creates a draft here for you to review.',
+          )
+      : h('div', { class: 'table-scroll' }, h('div', { class: 'table' }, header, ...views.map(routineRow))),
+  );
 }
 
 function routineRow(view: AutomationView): HTMLElement {
@@ -73,7 +212,11 @@ function routineRow(view: AutomationView): HTMLElement {
   return h(
     'div',
     { class: 'table-row' },
-    h('a', { class: 'row-link', href: `#/automations/${encodeURIComponent(view.automation.id)}` }, view.automation.name),
+    h(
+      'a',
+      { class: 'row-link', href: `#/automations/${encodeURIComponent(view.automation.id)}` },
+      view.automation.name,
+    ),
     h('span', { class: 'mono small' }, estimate ? `${formatRate(estimate.occurrencesPerWeek)}× / wk` : '—'),
     h('span', { class: 'muted small' }, appsSummary(view)),
     h('span', { class: 'autonomy' }, levelMeter(level), h('span', { class: 'mono small' }, levelLabel(level))),
@@ -108,7 +251,7 @@ function heatmapPanel(activity: number[][]): HTMLElement {
     ),
     h(
       'div',
-      { class: 'heat' },
+      { class: 'heat', role: 'img', 'aria-label': 'App switches by weekday and hour for the past four weeks' },
       ...DAY_LABELS.map((day, r) =>
         h(
           'div',
@@ -134,6 +277,42 @@ function heatmapPanel(activity: number[][]): HTMLElement {
   );
 }
 
+function usagePanel(usage: TwinStatus['usage']): HTMLElement {
+  const top = [...usage].sort((a, b) => b.events - a.events).slice(0, 5);
+  const max = top[0]?.events ?? 0;
+  return panel(
+    { testid: 'overview-usage', labelledBy: 'usage-title' },
+    panelHead('Apps in your week', 'App switches · past 7 days', 'usage-title'),
+    top.length === 0
+      ? emptyState('No app activity yet.', 'Your app usage summary stays on this device.')
+      : h('div', { class: 'usage-list' }, ...top.map(app => usageRow(app, max))),
+  );
+}
+
+function usageRow(app: TwinStatus['usage'][number], max: number): HTMLElement {
+  const fraction = max > 0 ? app.events / max : 0;
+  return h(
+    'div',
+    { class: 'usage-row' },
+    h('div', { class: 'usage-meta' },
+      h('span', { class: 'usage-app' }, app.app),
+      h('span', { class: 'mono small muted' }, `${app.events} ${app.events === 1 ? 'switch' : 'switches'}`),
+    ),
+    h(
+      'div',
+      {
+        class: 'usage-bar',
+        role: 'progressbar',
+        'aria-label': `${app.app}: ${app.events} app switches in the past seven days`,
+        'aria-valuemin': 0,
+        'aria-valuemax': max,
+        'aria-valuenow': app.events,
+      },
+      h('span', { style: { width: `${Math.round(fraction * 100)}%` } }),
+    ),
+  );
+}
+
 function devicePanel(storageBytes: number, callsThisWeek: number): HTMLElement {
   return panel({ testid: 'overview-device', labelledBy: 'device-title' },
     h('h2', { class: 'panel-title', id: 'device-title' }, 'On this device'),
@@ -149,6 +328,6 @@ function devicePanel(storageBytes: number, callsThisWeek: number): HTMLElement {
       ),
       fact('Shared with employer', 'Nothing (personal mode)'),
     ),
-    button('Delete my twin', { variant: 'danger-outline', testid: 'overview-delete', onClick: confirmDeleteAll }, 'btn-start'),
+    h('a', { class: 'manage-data-link', href: '#/settings' }, 'Manage privacy and data in Settings →'),
   );
 }
