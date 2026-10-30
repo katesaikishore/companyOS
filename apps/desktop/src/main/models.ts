@@ -177,8 +177,6 @@ export interface RoutineNamerOptions {
   onBattery: () => boolean;
   /** The chat model this device was recommended, when there is one. */
   preferredModelId: () => Promise<string | undefined>;
-  /** Called once after a pass that names a routine, so open pages refresh. */
-  onChange: () => void;
 }
 
 /** The worker keeps the model in memory only while it is in use, then stops. */
@@ -186,7 +184,8 @@ const WORKER_IDLE_STOP_MS = 5 * 60_000;
 
 /**
  * Wires the engine's naming job to this device: the models folder, the utility process that runs the model, and the
- * power and idle state. The job itself is in the engine, where it is tested with fakes.
+ * power and idle state. The job itself is in the engine, where it is tested with fakes. A new name is not pushed to
+ * the page. An open page reads it on its next status poll, within two seconds while the window is visible.
  */
 export function createRoutineNamer(options: RoutineNamerOptions): RoutineNamingJob {
   const { agent, models } = options;
@@ -205,7 +204,5 @@ export function createRoutineNamer(options: RoutineNamerOptions): RoutineNamingJ
         idleStopMs: WORKER_IDLE_STOP_MS,
       }),
     allowed: () => modelWorkAllowed({ onBattery: options.onBattery(), idleSeconds: options.idleSeconds() }),
-    // Called once after a pass that kept a name. A rename does not call it a second time.
-    changed: options.onChange,
   });
 }

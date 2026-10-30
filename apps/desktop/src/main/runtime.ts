@@ -102,7 +102,6 @@ export class TwinRuntime {
       idleSeconds: options.idleSeconds,
       onBattery: options.onBattery,
       preferredModelId: async () => (await this.setupPlan()).chat?.spec.id,
-      onChange: options.onChange,
     });
   }
 
