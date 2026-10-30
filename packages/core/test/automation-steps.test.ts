@@ -408,6 +408,38 @@ describe('Windows script hosts and launchers as targets', () => {
   });
 });
 
+describe('trailing dots and spaces on shell names', () => {
+  // Windows drops a trailing dot or space from a name, so "wscript.exe." starts the same program as "wscript.exe".
+  it.each(['wscript.exe.', 'py.exe.', 'cmd .', 'powershell.exe', 'POWERSHELL.EXE', 'powershell.exe ', 'wscript .exe.', 'Terminal.'])(
+    'counts %s as a shell',
+    app => {
+      expect(isShellApp(app)).toBe(true);
+    },
+  );
+
+  it.each(['wscript.exe.', 'py.exe.', 'cmd .', 'powershell.exe', 'POWERSHELL.EXE'])(
+    'refuses %s as the app for an open file or a press shortcut step',
+    app => {
+      expect(StepSchema.safeParse({ op: 'open_file', app, path: '/Users/me/Documents/budget.xlsx' }).success).toBe(false);
+      expect(StepSchema.safeParse({ op: 'press_shortcut', app, shortcut: 'cmd+k' }).success).toBe(false);
+    },
+  );
+
+  it('still accepts a normal app such as Slack as the app for an open file or a press shortcut step', () => {
+    expect(isShellApp('Slack')).toBe(false);
+    expect(StepSchema.safeParse({ op: 'open_file', app: 'Slack', path: '/Users/me/Documents/budget.xlsx' }).success).toBe(true);
+    expect(StepSchema.safeParse({ op: 'press_shortcut', app: 'Slack', shortcut: 'cmd+k' }).success).toBe(true);
+  });
+
+  // The path rules already refuse a name that ends in a dot or a space. These cases keep it that way.
+  it.each(['/Users/me/Documents/budget.', '/Users/me/Documents/notes.txt.', '/Users/me/Documents/notes.txt ', '/Users/me/Documents/budget.xlsx .'])(
+    'refuses the file name in %s for an open file step',
+    path => {
+      expect(StepSchema.safeParse({ op: 'open_file', app: 'Slack', path }).success).toBe(false);
+    },
+  );
+});
+
 describe('promotion gate for the new steps', () => {
   const NOW = Date.UTC(2026, 9, 30);
   const config = { maxLevel: 4 as const, allowUnattended: true };

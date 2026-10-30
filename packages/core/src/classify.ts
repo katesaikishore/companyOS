@@ -112,13 +112,19 @@ const SHELL_APPS = [
   'zsh',
 ];
 
+/** Windows drops a trailing dot or space from a name, so "wscript.exe." runs as "wscript.exe". */
+const TRAILING_DOTS_AND_SPACES = /[\s.]+$/;
+
 /**
  * True for a shell, a script interpreter or host, or a terminal app. A file handed to one of them, or keys sent to one,
- * can run commands, so none of them may be the target of an open or a key press.
+ * can run commands, so none of them may be the target of an open or a key press. The name is cut the way Windows cuts
+ * it before the list is checked, so every spelling of a shell is refused.
  */
 export function isShellApp(name: string): boolean {
-  const normalized = normalizeAppName(name);
-  return classifyApp(name) === 'terminal' || SHELL_APPS.includes(normalized) || /^python[\d.]*$/.test(normalized);
+  const windowsName = name.replace(TRAILING_DOTS_AND_SPACES, '');
+  // A second cut catches a space left in front of the extension, as in "wscript .exe.".
+  const normalized = normalizeAppName(windowsName).replace(TRAILING_DOTS_AND_SPACES, '');
+  return classifyApp(windowsName) === 'terminal' || SHELL_APPS.includes(normalized) || /^python[\d.]*$/.test(normalized);
 }
 
 /**
