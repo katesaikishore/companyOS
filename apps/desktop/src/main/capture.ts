@@ -6,6 +6,8 @@ export type CaptureState = 'capturing' | 'paused' | 'idle' | 'locked' | 'unsuppo
 export interface CaptureDeps {
   agent: TwinAgent;
   platform: Platform | undefined;
+  /** Called for each focus change the agent kept (not dropped by redaction). */
+  onFocus?: (app: string) => void;
   /** Seconds since the last keyboard or mouse input, from the OS. */
   idleSeconds: () => number;
   now?: () => number;
@@ -92,7 +94,7 @@ export class CaptureService {
     if (!app || app === this.lastApp || isOwnApp(app)) return;
 
     this.lastApp = app;
-    this.deps.agent.ingest({ kind: 'focus', ts, app });
+    if (this.deps.agent.ingest({ kind: 'focus', ts, app })) this.deps.onFocus?.(app);
   }
 }
 

@@ -1,4 +1,6 @@
 import {
+  TRIGGER_RULES,
+  TriggerGate,
   TwinAgent,
   TwinConfigSchema,
   effectOfOp,
@@ -18,7 +20,10 @@ import {
   type SuggestionView,
   type TwinConfig,
   type TwinStatus,
+  type PendingRunView,
+  normalizeAppName,
 } from '@companyos/twin-core';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { CaptureService } from './capture';
 import { destroyStoredSecrets, loadOrCreateDataKey } from './keys';
@@ -34,6 +39,8 @@ export interface RuntimeOptions {
   idleSeconds: () => number;
   /** Called when model downloads change, so open pages refresh. */
   onChange: () => void;
+  /** Called when a routine is offered. The main process shows the tray and a notification. */
+  onOffer: (offer: PendingRunView) => void;
   fetchImpl?: typeof fetch;
 }
 
@@ -56,6 +63,11 @@ export class TwinRuntime {
   private readonly platform: Platform | undefined;
   private readonly models: ModelManager;
   private hardwareProfile: Promise<HardwareProfile> | undefined;
+  private readonly gate = new TriggerGate();
+  /** Offers waiting for an answer. At most one at a time. */
+  private pending: PendingRunView[] = [];
+  /** Runs in progress. No offers are made while one runs, so the run's own app switches cannot trigger one. */
+  private activeRuns = 0;
 
   private constructor(
     private readonly options: RuntimeOptions,
@@ -65,7 +77,10 @@ export class TwinRuntime {
   ) {
     this.platform = platform;
     this.agent = new TwinAgent({ dataDir: join(options.userData, 'twin'), dataKey });
-    this.capture = new CaptureService({ agent: this.agent, platform, idleSeconds: options.idleSeconds }, detail);
+    this.capture = new CaptureService(
+      { agent: this.agent, platform, idleSeconds: options.idleSeconds, onFocus: app => this.observeFocus(app) },
+      detail,
+    );
     this.models = new ModelManager({
       modelsDir: join(options.userData, 'models'),
       agent: this.agent,
@@ -150,6 +165,7 @@ export class TwinRuntime {
         observedDays: observed.observedDays,
       },
       downloads: this.models.states(),
+      pendingRuns: this.livePending(),
     };
   }
 
@@ -187,18 +203,80 @@ export class TwinRuntime {
   }
 
   async supervisedRun(automationId: string): Promise<RunResult> {
-    const platform = this.platform;
-    if (!platform) throw new Error('App control is not available on this system yet.');
-    const automation = this.agent.automations().find(view => view.automation.id === automationId)?.automation;
-    if (!automation) throw new Error('Unknown automation.');
-    return this.agent.run(
-      automationId,
-      {
-        mode: 'supervised',
-        approve: (step, decision) => this.options.approve(automation, step, decision),
-      },
-      { focusApp: app => platform.focus(app), frontmostApp: () => platform.frontmost() },
-    );
+    return this.withRun(async () => {
+      const platform = this.platform;
+      if (!platform) throw new Error('App control is not available on this system yet.');
+      const automation = this.agent.automations().find(view => view.automation.id === automationId)?.automation;
+      if (!automation) throw new Error('Unknown automation.');
+      return this.agent.run(
+        automationId,
+        {
+          mode: 'supervised',
+          approve: (step, decision) => this.options.approve(automation, step, decision),
+        },
+        { focusApp: app => platform.focus(app), frontmostApp: () => platform.frontmost() },
+      );
+    });
+  }
+
+  /**
+   * Called for every focus change the twin recorded. Offers at most one routine at a time, and only a routine
+   * the person set to level 3 or above, and only when the gate allows it. An offer never starts a run.
+   */
+  observeFocus(app: string): void {
+    if (this.activeRuns > 0) return;
+    this.expireOffers();
+    if (this.pending.length > 0) return;
+    const pick = this.agent.triggerCandidates(app).find(view => this.gate.eligible(view.automation.id));
+    if (!pick) return;
+    const createdAt = Date.now();
+    const offer: PendingRunView = {
+      id: randomUUID(),
+      automationId: pick.automation.id,
+      automationName: pick.automation.name,
+      app: normalizeAppName(app),
+      createdAt,
+      expiresAt: createdAt + TRIGGER_RULES.offerTtlMs,
+    };
+    this.pending = [...this.pending, offer];
+    this.gate.recordOffer(pick.automation.id);
+    this.options.onOffer(offer);
+  }
+
+  hasPendingOffers(): boolean {
+    return this.livePending().length > 0;
+  }
+
+  /** `run: true` starts a supervised run, where each external step still asks. `false` leaves the routine alone for a while. */
+  async answerPendingRun(id: string, run: boolean): Promise<void> {
+    const offer = this.livePending().find(candidate => candidate.id === id);
+    if (!offer) throw new Error('That request has expired.');
+    this.pending = this.pending.filter(candidate => candidate !== offer);
+    if (!run) {
+      this.gate.recordDecline(offer.automationId);
+      return;
+    }
+    await this.supervisedRun(offer.automationId);
+  }
+
+  private async withRun<T>(task: () => Promise<T>): Promise<T> {
+    this.activeRuns++;
+    try {
+      return await task();
+    } finally {
+      this.activeRuns--;
+      this.gate.quietAfterRun();
+    }
+  }
+
+  private livePending(): PendingRunView[] {
+    this.expireOffers();
+    return [...this.pending];
+  }
+
+  private expireOffers(): void {
+    const now = Date.now();
+    this.pending = this.pending.filter(offer => offer.expiresAt > now);
   }
 
   exportData(): string {

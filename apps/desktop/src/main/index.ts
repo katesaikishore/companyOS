@@ -10,6 +10,7 @@ import {
   powerMonitor,
   protocol,
   screen,
+  Notification,
   Tray,
   type MessageBoxOptions,
   type SaveDialogOptions,
@@ -17,7 +18,14 @@ import {
 import { writeFileSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { AutonomyLevelSchema, TwinConfigSchema, type Automation, type Decision, type Step } from '@companyos/twin-core';
+import {
+  AutonomyLevelSchema,
+  TwinConfigSchema,
+  type Automation,
+  type Decision,
+  type PendingRunView,
+  type Step,
+} from '@companyos/twin-core';
 import { APP_ORIGIN, IPC } from '../shared/ipc';
 import { solidPng } from './icon';
 import { SecureStorageUnavailableError } from './keys';
@@ -100,6 +108,12 @@ function registerIpc(): void {
   handle(IPC.dryRun, id => requireRuntime().dryRun(automationId(id)));
   handle(IPC.supervisedRun, id => requireRuntime().supervisedRun(automationId(id)));
   handle(IPC.revertLast, id => requireRuntime().revertLast(automationId(id)));
+  handle(IPC.answerPendingRun, async (id, run) => {
+    const offer = text(id, /^[0-9a-f-]{36}$/, 'Invalid request id.');
+    if (typeof run !== 'boolean') throw new Error('Invalid answer.');
+    await requireRuntime().answerPendingRun(offer, run);
+    if (!requireRuntime().hasPendingOffers()) hideTray();
+  });
 
   handle(IPC.openMainWindow, route => {
     if (route !== undefined && (typeof route !== 'string' || !/^#\/[a-z0-9/-]{0,80}$/.test(route))) {
@@ -226,7 +240,10 @@ function createTrayWindow(): void {
     backgroundColor: '#101214',
     webPreferences: WEB_PREFERENCES,
   });
-  trayWindow.on('blur', () => hideTray());
+  trayWindow.on('blur', () => {
+    // An open offer stays on screen until it is answered or expires.
+    if (!runtime?.hasPendingOffers()) hideTray();
+  });
   void trayWindow.loadURL(`${APP_ORIGIN}/tray.html`);
 }
 
@@ -234,13 +251,8 @@ function hideTray(): void {
   if (trayWindow && !trayWindow.isDestroyed() && trayWindow.isVisible()) trayWindow.hide();
 }
 
-/** Opens the tray popover under the menu bar icon, clamped to the screen it appears on. */
-function toggleTray(): void {
-  if (!trayWindow || trayWindow.isDestroyed()) createTrayWindow();
-  if (trayWindow?.isVisible()) {
-    trayWindow.hide();
-    return;
-  }
+/** Places the tray popover under the menu bar icon, clamped to the screen it appears on. */
+function positionTray(): void {
   const primary = screen.getPrimaryDisplay().workArea;
   const bounds = tray?.getBounds();
   const anchor =
@@ -256,8 +268,40 @@ function toggleTray(): void {
   const belowAnchor = anchor.y < area.y + area.height / 2;
   const y = belowAnchor ? anchor.y + anchor.height + 6 : anchor.y - size.height - 6;
   trayWindow?.setPosition(x, Math.max(area.y + 8, y));
+}
+
+/** Opens the tray popover when the menu bar icon is clicked. */
+function toggleTray(): void {
+  if (!trayWindow || trayWindow.isDestroyed()) createTrayWindow();
+  if (trayWindow?.isVisible()) {
+    trayWindow.hide();
+    return;
+  }
+  positionTray();
   trayWindow?.show();
   trayWindow?.focus();
+}
+
+/**
+ * Offers a routine. The popover appears without taking focus from whatever the person is doing, and a
+ * notification says what was offered. Nothing runs until the person answers.
+ */
+function showOffer(offer: PendingRunView): void {
+  if (!trayWindow || trayWindow.isDestroyed()) createTrayWindow();
+  positionTray();
+  trayWindow?.showInactive();
+  if (Notification.isSupported()) {
+    const notification = new Notification({
+      title: 'companyOS Twin',
+      body: `You opened ${offer.app}. Run "${offer.automationName}"? You approve every run.`,
+    });
+    notification.on('click', () => {
+      positionTray();
+      trayWindow?.show();
+      trayWindow?.focus();
+    });
+    notification.show();
+  }
 }
 
 function rebuildTrayMenu(): void {
@@ -298,8 +342,10 @@ async function boot(): Promise<void> {
     runtime = await TwinRuntime.create({
       userData,
       approve: approveStep,
-      idleSeconds: () => powerMonitor.getSystemIdleTime(),
+      // The test platform has no real input device, so idle time is pinned to zero for it.
+      idleSeconds: () => (process.env.COMPANYOS_TEST_FAKE_PLATFORM ? 0 : powerMonitor.getSystemIdleTime()),
       onChange: () => undefined,
+      onOffer: showOffer,
     });
   } catch (error) {
     // Any failure at startup, including a damaged key file, ends visibly. A silent process with no window is worse.

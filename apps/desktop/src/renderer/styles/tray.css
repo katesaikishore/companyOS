@@ -259,3 +259,27 @@ ol {
   min-height: 44px;
   font-size: 14px;
 }
+
+/* An offer to run a routine. Quiet until it is answered. */
+.tray-offer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+.tray-offer-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tray-offer-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}

@@ -1,4 +1,4 @@
-import type { AutomationView, TwinStatus } from '@companyos/twin-core';
+import type { AutomationView, PendingRunView, TwinStatus } from '@companyos/twin-core';
 import { h, mount, type Child } from './dom.js';
 import { button, logo } from './components/ui.js';
 import { clock, startOfDay } from './format.js';
@@ -66,6 +66,14 @@ function render(): void {
       h(
         'div',
         { class: 'tray-body' },
+        status.pendingRuns.length > 0
+          ? h(
+              'section',
+              { class: 'tray-section', 'aria-labelledby': 'tray-offer-title' },
+              h('h2', { class: 'tray-eyebrow', id: 'tray-offer-title' }, 'Ready when you are'),
+              ...status.pendingRuns.map(offerCard),
+            )
+          : undefined,
         h(
           'section',
           { class: 'tray-section', 'aria-labelledby': 'tray-ran-title' },
@@ -99,6 +107,32 @@ function render(): void {
           }, 'btn-link'),
         ),
       ),
+    ),
+  );
+}
+
+function offerCard(offer: PendingRunView): HTMLElement {
+  return h(
+    'div',
+    { class: 'tray-offer', 'data-testid': 'tray-offer', 'data-offer-id': offer.id },
+    h(
+      'div',
+      { class: 'tray-offer-text' },
+      h('span', { class: 'tray-run-name' }, offer.automationName),
+      h('span', { class: 'tray-run-meta small' }, `You opened ${offer.app}. Each step that sends or writes still asks you.`),
+    ),
+    h(
+      'div',
+      { class: 'tray-offer-actions' },
+      button('Run with approval', {
+        testid: 'tray-run-pending',
+        onClick: () => void call(`tray-run:${offer.id}`, twin => twin.answerPendingRun(offer.id, true)),
+      }, 'btn-small'),
+      button('Not now', {
+        variant: 'ghost',
+        testid: 'tray-decline-pending',
+        onClick: () => void call(`tray-decline:${offer.id}`, twin => twin.answerPendingRun(offer.id, false)),
+      }, 'btn-small'),
     ),
   );
 }

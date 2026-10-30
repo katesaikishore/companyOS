@@ -1,5 +1,6 @@
 import { AutomationSchema, compileRoutine, effectsOf, type Automation } from './automation';
-import { isExcludedApp } from './classify';
+import { isExcludedApp, normalizeAppName } from './classify';
+import { openingApps } from './triggers';
 import { DEFAULT_MINING, mineRoutines, type Routine } from './mine';
 import { normalizeSignal } from './redact';
 import {
@@ -108,6 +109,18 @@ export class TwinAgent {
     return this.analyze()
       .routines.filter(routine => !accepted.has(routine.id) && !dismissed.has(routine.id))
       .map(routine => ({ routine, preview: compileRoutine(routine) }));
+  }
+
+  /**
+   * Routines that may be offered when this app comes into focus. Only routines the person set to level 3 or
+   * above are eligible, so an offer always follows a deliberate decision. Stopped automations offer nothing.
+   */
+  triggerCandidates(app: string): AutomationView[] {
+    if (!this.config.automationsEnabled) return [];
+    const normalized = normalizeAppName(app);
+    return this.automations().filter(
+      view => view.state.level >= 3 && openingApps(view.automation).includes(normalized),
+    );
   }
 
   /** "Not a routine". The routine is not suggested again. */

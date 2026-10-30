@@ -17,6 +17,7 @@ export const IPC = {
   dryRun: 'twin:dry-run',
   supervisedRun: 'twin:supervised-run',
   revertLast: 'twin:revert-last',
+  answerPendingRun: 'twin:answer-pending-run',
   exportData: 'twin:export-data',
   deleteAll: 'twin:delete-all',
   openMainWindow: 'twin:open-main-window',

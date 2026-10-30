@@ -51,6 +51,17 @@ export interface StatsView {
   observedDays: number;
 }
 
+/** An offer to run a routine, waiting for the person's answer. */
+export interface PendingRunView {
+  id: string;
+  automationId: string;
+  automationName: string;
+  /** The app that came into focus and opened the routine. */
+  app: string;
+  createdAt: number;
+  expiresAt: number;
+}
+
 export interface TwinStatus {
   capture: { state: 'capturing' | 'paused' | 'idle' | 'locked' | 'unsupported'; detail: string };
   config: TwinConfig;
@@ -66,6 +77,8 @@ export interface TwinStatus {
   storageBytes: number;
   stats: StatsView;
   downloads: DownloadState[];
+  /** Offers waiting for an answer. Expired offers are removed. */
+  pendingRuns: PendingRunView[];
 }
 
 /** Everything a page may ask of the main process. Each call is validated there. */
@@ -89,6 +102,8 @@ export interface TwinBridge {
   dryRun(automationId: string): Promise<RunResult>;
   supervisedRun(automationId: string): Promise<RunResult>;
   revertLast(automationId: string): Promise<AutomationView>;
+  /** Answers an offer. `run: true` starts a supervised run, where each external step still asks. */
+  answerPendingRun(id: string, run: boolean): Promise<void>;
 
   exportData(): Promise<string>;
   deleteAll(): Promise<void>;

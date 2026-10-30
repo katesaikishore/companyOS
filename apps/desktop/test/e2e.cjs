@@ -19,12 +19,27 @@ mkdirSync(SHOTS, { recursive: true });
 const log = (...args) => console.log('[e2e]', ...args);
 
 async function launch(userDataDir) {
-  return electron.launch({
+  const app = await electron.launch({
     executablePath: require('/home/user/companyOS/node_modules/electron'),
     args: [APP, '--no-sandbox', '--password-store=basic', `--user-data-dir=${userDataDir}`],
-    env: { ...process.env, COMPANYOS_TEST_BASIC_STORE: '1' },
+    env: { ...process.env, COMPANYOS_TEST_BASIC_STORE: '1', COMPANYOS_TEST_FAKE_PLATFORM: path.join(userDataDir, 'front-app.txt') },
     timeout: 60_000,
   });
+  return app;
+}
+
+/**
+ * Polls the page's status until the check passes. Playwright's waitForFunction does not wait on an async predicate:
+ * it treats the returned Promise as truthy and returns at once, so every wait on the status goes through here.
+ */
+async function waitForStatus(page, check, { timeout = 15_000, label = 'status' } = {}) {
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    const status = await page.evaluate(() => window.twin.status());
+    if (check(status)) return status;
+    if (Date.now() > deadline) throw new Error(`Timed out waiting for ${label}`);
+    await new Promise(resolve => setTimeout(resolve, 150));
+  }
 }
 
 /** Writes ten working days of synthetic activity through a second engine instance on the same data folder. */
@@ -47,6 +62,10 @@ async function seedActivity(app) {
       agent.ingest({ kind: 'focus', ts: at(ago, 10), app: 'Google Chrome', url: 'https://docs.example.com/doc/1ab2cd3ef4567890/edit?token=SECRET123456' });
       agent.ingest({ kind: 'idle_start', ts: at(ago, 10, 10) });
       agent.ingest({ kind: 'idle_end', ts: at(ago, 13) });
+      agent.ingest({ kind: 'focus', ts: at(ago, 13, 5), app: 'Microsoft Excel' });
+      agent.ingest({ kind: 'focus', ts: at(ago, 13, 25), app: 'Microsoft Word' });
+      agent.ingest({ kind: 'focus', ts: at(ago, 13, 45), app: 'Visual Studio Code' });
+      agent.ingest({ kind: 'idle_start', ts: at(ago, 14) });
     }
     return agent.suggestions().length;
   }, { core: CORE, keys: KEYS });
@@ -157,7 +176,7 @@ async function main() {
     await page.waitForSelector('[data-testid="suggestion-card"]');
     await shot(page, '06-suggestions-light');
     await page.click('[data-testid="suggestion-accept"]');
-    await page.waitForFunction(async () => (await window.twin.status()).automations.length === 1, null, { timeout: 15_000 });
+    await waitForStatus(page, status => status.automations.length === 1, { label: 'draft automation' });
     log('accepted routine is a draft automation');
 
     // 8. Automation detail: dry run shows previews, and a supervised run is refused below level 3.
@@ -190,16 +209,57 @@ async function main() {
     assert.ok(traySource, 'tray page loaded');
     await traySource.waitForSelector('[data-testid="tray-root"]');
     await traySource.click('[data-testid="tray-stop-all"]');
-    await page.waitForFunction(async () => {
-      const status = await window.twin.status();
-      return status.config.automationsEnabled === false;
-    }, null, { timeout: 10_000 });
+    await waitForStatus(page, status => status.config.automationsEnabled === false, { timeout: 10_000, label: 'tray stop-all' });
     log('tray stop-all switches automations off');
     await page.click('[data-testid="nav-settings"]');
-    await page.waitForFunction(async () => (await window.twin.status()).config.automationsEnabled === false, null, { timeout: 10_000 });
+    // The page reads status on a timer, so wait until the switch shows the stopped state before flipping it.
+    await page.waitForFunction(() => document.querySelector('[data-testid="settings-automations-toggle"]')?.checked === false, null, { timeout: 10_000 });
     await page.click('[data-testid="settings-automations-toggle"]');
-    await page.waitForFunction(async () => (await window.twin.status()).config.automationsEnabled === true, null, { timeout: 10_000 });
+    await waitForStatus(page, status => status.config.automationsEnabled === true, { timeout: 10_000, label: 'automations on' });
     log('automations switch round-trips');
+
+    // 10b. The twin offers a local routine when its first app opens. Nothing runs until the person approves.
+    const offered = await page.evaluate(async () => {
+      const status = await window.twin.status();
+      const suggestion = status.suggestions.find(item => item.drafted.some(step => step.app === 'microsoft word'));
+      if (!suggestion) return undefined;
+      const view = await window.twin.acceptRoutine(suggestion.routineId);
+      await window.twin.setLevel(view.automation.id, 3);
+      return view.automation.id;
+    });
+    assert.ok(offered, 'the document routine was detected and accepted');
+    const frontFile = path.join(userDataDir, 'front-app.txt');
+    const { writeFileSync } = require('node:fs');
+    writeFileSync(frontFile, 'Slack');
+    await new Promise(resolve => setTimeout(resolve, 1200));
+    writeFileSync(frontFile, 'Microsoft Excel');
+    const offerStatus = await waitForStatus(page, status => status.pendingRuns.length === 1, { label: 'offer for Excel' });
+    const offer = offerStatus.pendingRuns[0];
+    assert.equal(offer.automationId, offered);
+    assert.equal(offer.app, 'microsoft excel');
+    log('opening Excel offered the routine:', offer.automationName);
+
+    const trayPage = app.windows().find(candidate => candidate.url().includes('/tray.html'));
+    assert.ok(trayPage, 'tray page exists');
+    await trayPage.waitForSelector('[data-testid="tray-offer"]', { timeout: 10_000 });
+    assert.match(await trayPage.textContent('[data-testid="tray-offer"]'), /Each step that sends or writes still asks you/);
+    assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(win => win.webContents.getURL().includes('/tray.html')).isVisible()), true, 'the tray shows the offer');
+    await shot(trayPage, '10-tray-offer');
+
+    // Approving starts one supervised run. Its own app switches do not trigger another offer.
+    await trayPage.click('[data-testid="tray-run-pending"]');
+    await waitForStatus(page, status => status.pendingRuns.length === 0 && status.automations.some(view => view.state.runs.some(run => run.status === 'completed' && run.mode === 'supervised')), { timeout: 30_000, label: 'supervised run to finish' });
+    assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(win => win.webContents.getURL().includes('/tray.html')).isVisible()), false, 'the tray closes after the answer');
+    log('approved offer ran the routine to completion');
+
+    // After the run, the same routine is not offered again straight away.
+    writeFileSync(frontFile, 'Slack');
+    await new Promise(resolve => setTimeout(resolve, 1200));
+    writeFileSync(frontFile, 'Microsoft Excel');
+    await new Promise(resolve => setTimeout(resolve, 4000));
+    assert.equal((await page.evaluate(async () => (await window.twin.status()).pendingRuns.length)), 0, 'no repeat offer after a run');
+    log('no repeat offer during the cooldown');
+
 
     // 11. Layout at the minimum window size, every main route, no horizontal overflow.
     await app.evaluate(({ BrowserWindow }) => {

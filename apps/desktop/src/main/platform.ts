@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { readFileSync, writeFileSync } from 'node:fs';
 
 /**
  * Per-OS access to the frontmost application and to focusing one. This is the only place that
@@ -132,7 +133,32 @@ export interface PlatformChoice {
 }
 
 /** Picks the adapter for this machine, or explains why app capture is unavailable. Never throws. */
+/**
+ * Test-only. COMPANYOS_TEST_FAKE_PLATFORM=<file> makes the front app whatever the file says, and a focus
+ * writes the app name to it. The end-to-end tests use it to drive real capture, offers and runs on a
+ * machine with no display tools. Never set it for real use.
+ */
+function fakePlatform(file: string): Platform {
+  return {
+    name: 'test-platform',
+    pollMs: 300,
+    async frontmost() {
+      try {
+        return readFileSync(file, 'utf8').trim() || undefined;
+      } catch {
+        return undefined;
+      }
+    },
+    async focus(app) {
+      writeFileSync(file, app);
+      return true;
+    },
+  };
+}
+
 export async function choosePlatform(): Promise<PlatformChoice> {
+  const fake = process.env.COMPANYOS_TEST_FAKE_PLATFORM;
+  if (fake) return { platform: fakePlatform(fake), detail: 'Test platform' };
   if (process.platform === 'darwin') {
     return { platform: macOS, detail: 'macOS: the first capture may ask for Automation permission.' };
   }
