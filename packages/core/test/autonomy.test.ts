@@ -103,3 +103,25 @@ describe('failure history', () => {
     expect(() => promote(demoted, NOW, config)).toThrow(/failed/);
   });
 });
+
+describe('gate checklist', () => {
+  it('lists every condition, and the reasons are exactly the unmet ones', () => {
+    const state = { ...initialState('a', ['read_only']), runs: Array.from({ length: 3 }, () => run()) };
+    const check = promotionCheck(state, NOW, config);
+    expect(check.requirements.filter(requirement => !requirement.met).map(requirement => requirement.reason)).toEqual(check.reasons);
+    expect(check.requirements.every(requirement => requirement.met)).toBe(false);
+  });
+
+  it('shows the current count against each target', () => {
+    const state = { ...initialState('a', ['read_only']), runs: Array.from({ length: 3 }, () => run()) };
+    const supervised = promotionCheck(state, NOW, config).requirements.find(requirement => requirement.label === 'Supervised runs at level 3');
+    expect(supervised).toMatchObject({ value: '3 / 10', met: false, progress: 0.3 });
+    expect(promotionCheck(state, NOW, config).reasons).toContain('Needs 7 more supervised runs.');
+  });
+
+  it('is met everywhere when the automation is eligible', () => {
+    const check = promotionCheck(readyState(), NOW, config);
+    expect(check.requirements.every(requirement => requirement.met)).toBe(true);
+    expect(check.requirements.find(requirement => requirement.label.startsWith('Pass rate'))).toMatchObject({ value: '100.0% / 99%', met: true });
+  });
+});

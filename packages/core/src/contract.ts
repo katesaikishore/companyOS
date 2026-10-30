@@ -1,4 +1,5 @@
 import type { AutomationView } from './agent';
+import type { GateRequirement } from './autonomy';
 import type { EffectClass, TwinConfig, AutonomyLevel } from './types';
 import type { DownloadState, HardwareProfile, InstalledModel, NetworkEntry, SetupPlan } from './models/types';
 import type { RunResult } from './runner';
@@ -83,6 +84,35 @@ export interface AgentDelegationResult {
   taskTree?: string;
 }
 
+/** How one app's switches fall across the three groups. The badge on each row reads this. */
+export type AppReadinessStatus = 'automatable' | 'partly' | 'approval' | 'not_yet';
+
+/** A routine an app appears in. Its sequence is app names, so it stays on this device. */
+export interface AppReadinessRoutineView {
+  routineId: string;
+  /** The routine's steps as app names, in order. Apps seen at one position are joined with " or ". */
+  sequence: string;
+  /** Distinct days the routine was seen on in the analysis window. */
+  days: number;
+  /** This app's switches inside the routine over the last seven days. */
+  switches: number;
+  /** Automatable when every step is local and reversible. Approval when a step is not. */
+  kind: 'automatable' | 'approval';
+  /** Suggested, accepted as an automation, or dismissed by the person. */
+  status: 'suggested' | 'accepted' | 'dismissed';
+  automationId?: string;
+  automationName?: string;
+  level?: AutonomyLevel;
+}
+
+/** The promotion gate of the automation an app's routine became. Every value is the gate's own, not an estimate. */
+export interface AppReadinessGate {
+  automationId: string;
+  automationName: string;
+  level: AutonomyLevel;
+  requirements: GateRequirement[];
+}
+
 /** One app's repeated work over the last seven days, split by what could run on its own. Percentages are whole numbers. */
 export interface AppReadinessRow {
   app: string;
@@ -91,10 +121,15 @@ export interface AppReadinessRow {
   automatablePct: number;
   approvalPct: number;
   notYetPct: number;
+  status: AppReadinessStatus;
   /** A plain reason for the split. It never shows a model's confidence. */
   reason: string;
   /** Routines that use this app. */
   routines: number;
+  /** Those routines, most switches first. */
+  learned: AppReadinessRoutineView[];
+  /** The gate of this app's accepted automation, when one exists. */
+  gate?: AppReadinessGate;
 }
 
 export interface AppReadinessView {

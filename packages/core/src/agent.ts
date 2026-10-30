@@ -2,6 +2,8 @@ import { AutomationSchema, compileRoutine, effectsOf, type Automation } from './
 import { isExcludedApp, normalizeAppName } from './classify';
 import { openingApps } from './triggers';
 import { DEFAULT_MINING, mineRoutines, type Routine } from './mine';
+import { computeReadiness } from './readiness';
+import type { AppReadinessView } from './contract';
 import { normalizeSignal } from './redact';
 import {
   promotionCheck,
@@ -295,6 +297,21 @@ export class TwinAgent {
     } finally {
       this.running.delete(automationId);
     }
+  }
+
+  /**
+   * How much of each app's repeated work could run on its own, over the last seven days. The routines are the ones
+   * Suggestions shows, mined from the same events, so the page and the suggestions agree.
+   */
+  readiness(): AppReadinessView {
+    return computeReadiness({
+      now: this.now(),
+      events: this.recentEvents(ANALYSIS_DAYS),
+      idleGapMs: this.config.idleGapMs,
+      routines: this.analyze().routines,
+      automations: this.automations(),
+      dismissedRoutineIds: this.config.dismissedRoutineIds,
+    });
   }
 
   /** Every network call the twin has made. Stored sealed, shown to the person. */
