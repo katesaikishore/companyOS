@@ -76,33 +76,45 @@ export function classifyApp(name: string): WindowClass {
   return CATALOG[normalizeAppName(name)] ?? 'other';
 }
 
-/** Shells and script interpreters by name. Terminal apps are matched by their window class, which covers the rest. */
+/**
+ * Shells, script hosts and interpreters by name, including the Windows tools that run a script, a library or an
+ * installer. Terminal apps are matched by their window class, which covers the rest.
+ */
 const SHELL_APPS = [
   'bash',
   'bun',
   'cmd',
   'command prompt',
+  'cscript',
   'csh',
   'dash',
   'deno',
   'fish',
   'ksh',
+  'mshta',
+  'msiexec',
   'node',
   'osascript',
   'perl',
   'php',
   'powershell',
   'pwsh',
+  'py',
+  'pythonw',
+  'regsvr32',
   'ruby',
+  'rundll32',
   'sh',
   'tcsh',
+  'windows powershell',
+  'wscript',
   'wsl',
   'zsh',
 ];
 
 /**
- * True for a shell, a script interpreter or a terminal app. A file handed to one of them, or keys sent to one, can run
- * commands, so none of them may be the target of an open or a key press.
+ * True for a shell, a script interpreter or host, or a terminal app. A file handed to one of them, or keys sent to one,
+ * can run commands, so none of them may be the target of an open or a key press.
  */
 export function isShellApp(name: string): boolean {
   const normalized = normalizeAppName(name);

@@ -49,6 +49,14 @@ export interface Suggestion {
 }
 
 /**
+ * The state with its effects worked out again from the steps. A stored list is never trusted: one saved before a step
+ * was classified as an external effect would understate what the automation does, and the promotion gate reads it.
+ */
+function withEffects(state: AutonomyState, automation: Automation): AutonomyState {
+  return { ...state, effects: effectsOf(automation) };
+}
+
+/**
  * The twin's facade. Everything the desktop app does goes through here, so the privacy rules,
  * the policy and the autonomy gates cannot be skipped by a caller.
  */
@@ -378,9 +386,8 @@ export class TwinAgent {
   }
 
   private view(automation: Automation): AutomationView {
-    const state =
-      this.readStates().find(candidate => candidate.automationId === automation.id) ??
-      initialState(automation.id, effectsOf(automation));
+    const stored = this.readStates().find(candidate => candidate.automationId === automation.id);
+    const state = stored ? withEffects(stored, automation) : initialState(automation.id, effectsOf(automation));
     return { automation, state, promotion: promotionCheck(state, this.now(), this.autonomyConfig()) };
   }
 
@@ -401,7 +408,7 @@ export class TwinAgent {
   private requireState(automationId: string): AutonomyState {
     const state = this.readStates().find(candidate => candidate.automationId === automationId);
     if (!state) throw new Error('Unknown automation.');
-    return state;
+    return withEffects(state, this.requireAutomation(automationId));
   }
 
   private writeAutomation(automation: Automation): void {

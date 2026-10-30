@@ -258,7 +258,7 @@ export class TwinRuntime {
 
     // Level 4 only runs without a prompt after the owner enabled it. The core re-checks the live policy
     // before every step. Counting it in the same cooldown prevents repeats from the run's own app switches.
-    const unattendedSafe = pick.state.effects.every(effect => effect === 'read_only' || effect === 'local_reversible');
+    const unattendedSafe = effectsOf(pick.automation).every(effect => effect === 'read_only' || effect === 'local_reversible');
     if (pick.state.level === 4 && config.allowUnattended && unattendedSafe) {
       this.gate.recordOffer(pick.automation.id);
       void this.runUnattended(pick.automation.id);

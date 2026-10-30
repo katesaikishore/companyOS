@@ -105,3 +105,30 @@ describe('the older rules still apply to the new steps', () => {
     expect(evaluateStep({ op: 'focus_app', app: 'slack' }, ctx({ level: 4, unattended: true })).decision).toBe('deny');
   });
 });
+
+describe('file names that hide a program', () => {
+  // Windows drops a trailing dot or space, and a colon after the drive letter starts an alternate data stream.
+  it.each([
+    ['a trailing dot', 'C:\\Users\\me\\Downloads\\setup.exe.'],
+    ['a trailing space', 'C:\\Users\\me\\Downloads\\setup.exe '],
+    ['an alternate data stream', 'C:\\Users\\me\\Downloads\\setup.exe:stream'],
+  ])('refuses a file with %s, even when a person would approve it', (_label, path) => {
+    expect(evaluateStep({ ...file, path }, ctx())).toMatchObject({ decision: 'deny' });
+  });
+});
+
+describe('Windows script hosts and launchers as targets', () => {
+  const HOSTS = ['wscript', 'cscript', 'mshta', 'rundll32', 'regsvr32', 'msiexec', 'Windows PowerShell', 'pythonw', 'py'];
+
+  it.each(HOSTS)('refuses %s as the app for a file', app => {
+    expect(evaluateStep({ ...file, app }, ctx())).toMatchObject({ decision: 'deny' });
+  });
+
+  it.each(HOSTS)('refuses %s as the app for a key press', app => {
+    expect(evaluateStep({ ...chord, app }, ctx())).toMatchObject({ decision: 'deny' });
+  });
+
+  it('still allows focusing a script host, which sends no keys', () => {
+    expect(evaluateStep({ op: 'focus_app', app: 'wscript' }, ctx()).decision).toBe('allow');
+  });
+});
