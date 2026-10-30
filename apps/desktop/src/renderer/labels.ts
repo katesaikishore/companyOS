@@ -37,14 +37,64 @@ export function fitLabel(fit: Fit): string {
   }
 }
 
+/** The parameter a reference such as "$p1" names, or undefined for a literal value. */
+function paramRef(value: string, params: readonly Param[]): Param | undefined {
+  return params.find(param => `$${param.name}` === value);
+}
+
 export function paramFor(step: Step, params: readonly Param[]): Param | undefined {
-  return params.find(param => `$${param.name}` === step.app);
+  return paramRef(step.app, params);
 }
 
 /** The app a step focuses, or the options when the app is a parameter that varies between runs. */
 export function stepAppLabel(step: Step, params: readonly Param[]): string {
   const param = paramFor(step, params);
   return param ? param.options.join(' or ') : step.app;
+}
+
+/** The host of an address. The path and any query stay out of the label, as they stay out of the store. */
+export function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
+}
+
+/** The file name of a path, without its folders. Both separators are handled, so a Windows path reads the same way. */
+export function fileNameOf(path: string): string {
+  return path.split(/[\\/]/).pop() || path;
+}
+
+/** The options a parameter can take, shown in a short form. */
+function variesLabel(param: Param, show: (value: string) => string = value => value): string {
+  return `varies: ${param.options.map(show).join(' or ')}`;
+}
+
+/** The first line of a workflow row: what the step acts on, in plain words. An act names its real target. */
+export function stepTitle(step: Step, params: readonly Param[]): string {
+  switch (step.op) {
+    case 'focus_app':
+      return paramFor(step, params) ? 'App chosen for this run' : step.app;
+    case 'check_focus':
+      return 'Expected app is in front';
+    case 'open_url':
+      return paramRef(step.url, params) ? 'Link chosen for this run' : `Open ${hostOf(step.url)}`;
+    case 'open_file':
+      return `Open ${fileNameOf(step.path)}`;
+    case 'press_shortcut':
+      return `Press ${step.shortcut}`;
+  }
+}
+
+/** The second line of a workflow row, or undefined when the first line says all there is to say. */
+export function stepDetail(step: Step, params: readonly Param[]): string | undefined {
+  const appParam = paramFor(step, params);
+  if (step.op === 'focus_app') return appParam ? variesLabel(appParam) : undefined;
+  const app = appParam ? variesLabel(appParam) : step.app;
+  if (step.op !== 'open_url') return app;
+  const urlParam = paramRef(step.url, params);
+  return urlParam ? `${app} · ${variesLabel(urlParam, hostOf)}` : app;
 }
 
 export function appsSummary(view: AutomationView): string {

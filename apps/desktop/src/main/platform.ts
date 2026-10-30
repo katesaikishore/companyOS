@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { openableFilePath, parseWebAddress, type Executor, type FileStat } from '@companyos/twin-core';
 
 /**
  * Per-OS access to the frontmost application and to focusing one. This is the only place that
@@ -13,8 +14,32 @@ export interface Platform {
   readonly name: string;
   frontmost(): Promise<string | undefined>;
   focus(app: string): Promise<boolean>;
+  /** Opens a checked http or https address in the named browser. Absent where the adapter cannot do it. */
+  openUrl?(app: string, url: string): Promise<boolean>;
+  /** Opens one checked file in the named application. Absent where the adapter cannot do it. */
+  openFile?(app: string, path: string): Promise<boolean>;
   /** Milliseconds between polls. Windows is slower because each PowerShell call is expensive. */
   readonly pollMs: number;
+}
+
+/** Runs a fixed OS tool with arguments and reports success. Its output and any error text are not kept. */
+async function launch(file: string, args: readonly string[]): Promise<boolean> {
+  try {
+    await run(file, args);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Follows any link at the path and reports the real path and whether it is a regular file, or undefined when unreadable. */
+function statFile(path: string): FileStat | undefined {
+  try {
+    const realPath = realpathSync(path);
+    return { realPath, isFile: statSync(realPath).isFile() };
+  } catch {
+    return undefined;
+  }
 }
 
 function run(file: string, args: readonly string[], env?: NodeJS.ProcessEnv): Promise<string> {
@@ -54,6 +79,15 @@ const macOS: Platform = {
       return false;
     }
   },
+  // `open -a` names the application, so the link or file opens in that app and brings it forward.
+  async openUrl(app, url) {
+    const address = parseWebAddress(url)?.href;
+    return address ? launch('open', ['-a', app, address]) : false;
+  },
+  async openFile(app, path) {
+    const file = openableFilePath(path, statFile);
+    return file ? launch('open', ['-a', app, file]) : false;
+  },
 };
 
 const WIN_FRONTMOST = `
@@ -73,11 +107,28 @@ $shell = New-Object -ComObject WScript.Shell
 if ($shell.AppActivate($process.Id)) { 'ok' } else { exit 3 }
 `;
 
+/** Starts the named program with one quoted argument, an address or a file. Errors stop the script. */
+const WIN_OPEN = `
+$ErrorActionPreference = 'Stop'
+Start-Process -FilePath $env:TWIN_APP -ArgumentList ('"' + $env:TWIN_TARGET + '"')
+'ok'
+`;
+
 function encode(script: string): string {
   return Buffer.from(script, 'utf16le').toString('base64');
 }
 
 const POWERSHELL = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand'];
+
+/** The target goes through the environment, never the script text, so a name or path cannot change the command. */
+async function openWindows(app: string, target: string): Promise<boolean> {
+  const env = { ...process.env, TWIN_APP: app, TWIN_TARGET: target };
+  try {
+    return (await run('powershell.exe', [...POWERSHELL, encode(WIN_OPEN)], env)) === 'ok';
+  } catch {
+    return false;
+  }
+}
 
 const windows: Platform = {
   name: 'windows',
@@ -93,6 +144,14 @@ const windows: Platform = {
     } catch {
       return false; // Exit code 2 means the app is not running. Errors carry the command text, so they are not surfaced.
     }
+  },
+  async openUrl(app, url) {
+    const address = parseWebAddress(url)?.href;
+    return address ? openWindows(app, address) : false;
+  },
+  async openFile(app, path) {
+    const file = openableFilePath(path, statFile);
+    return file ? openWindows(app, file) : false;
   },
 };
 
@@ -125,6 +184,19 @@ async function hasXdotool(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * The runner's executor for one platform. An optional step is offered only where the adapter has it, so the runner
+ * blocks the rest before anyone is asked. Pressing shortcuts has no adapter on any OS yet, so it is always blocked.
+ */
+export function executorFor(platform: Platform): Executor {
+  return {
+    focusApp: app => platform.focus(app),
+    frontmostApp: () => platform.frontmost(),
+    ...(platform.openUrl ? { openUrl: (app: string, url: string) => platform.openUrl?.(app, url) ?? Promise.resolve(false) } : {}),
+    ...(platform.openFile ? { openFile: (app: string, path: string) => platform.openFile?.(app, path) ?? Promise.resolve(false) } : {}),
+  };
 }
 
 export interface PlatformChoice {

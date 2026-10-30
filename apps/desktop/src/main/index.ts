@@ -21,6 +21,7 @@ import { pathToFileURL } from 'node:url';
 import {
   AutonomyLevelSchema,
   TwinConfigSchema,
+  describeStep,
   type Automation,
   type Decision,
   type PendingRunView,
@@ -199,7 +200,7 @@ function registerIpc(): void {
 
 /** Asks the person before each step the policy marks as needing confirmation. */
 async function approveStep(automation: Automation, step: Step, decision: Decision): Promise<boolean> {
-  const message = step.op === 'focus_app' ? `Bring "${step.app}" to the front?` : `Check that "${step.app}" is in front?`;
+  const message = describeStep(step);
   const options: MessageBoxOptions = {
     type: 'question',
     buttons: ['Allow this step', 'Stop the run'],

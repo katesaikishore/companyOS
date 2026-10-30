@@ -31,7 +31,7 @@ import { destroyStoredSecrets, loadOrCreateDataKey } from './keys';
 import { detectHardware } from './hardware';
 import { ModelManager } from './models';
 import { runOpenMausBotTask } from './openmausbot';
-import { choosePlatform, type Platform } from './platform';
+import { choosePlatform, executorFor, type Platform } from './platform';
 
 export interface RuntimeOptions {
   userData: string;
@@ -225,7 +225,7 @@ export class TwinRuntime {
           mode: 'supervised',
           approve: (step, decision) => this.options.approve(automation, step, decision),
         },
-        { focusApp: app => platform.focus(app), frontmostApp: () => platform.frontmost() },
+        executorFor(platform),
       );
     });
   }
@@ -287,7 +287,7 @@ export class TwinRuntime {
         this.agent.run(
           automationId,
           { mode: 'unattended' },
-          { focusApp: app => platform.focus(app), frontmostApp: () => platform.frontmost() },
+          executorFor(platform),
         ),
       );
       this.options.onUnattendedRun?.(result);
@@ -349,7 +349,7 @@ export class TwinRuntime {
         const param = preview.params.find(candidate => `$${candidate.name}` === step.app);
         const app = resolveStep(step, preview.params, {}).app;
         return {
-          kind: step.op === 'focus_app' ? 'act' : 'check',
+          kind: step.op === 'check_focus' ? 'check' : 'act',
           app,
           alternatives: param ? param.options.length - 1 : 0,
           effect: effectOfOp(step.op, app),
