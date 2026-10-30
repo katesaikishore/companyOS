@@ -1,5 +1,6 @@
 import type { HardwareProfile, ModelFit, ModelSpec, SetupPlan, TwinStatus } from '@companyos/twin-core';
 import { h, type Child } from '../dom.js';
+import { twinCompanion } from '../components/companion.js';
 import { button, chip, exclusionEditor, fact, logo, progressBar, toggleRow } from '../components/ui.js';
 import { formatBytes } from '../format.js';
 import { fitLabel, modelFraction, modelState, modelStateLabel } from '../labels.js';
@@ -112,6 +113,7 @@ function stepBody(step: number, status: TwinStatus): HTMLElement {
 
 function welcome(): Child[] {
   return [
+    h('div', { class: 'companion-stage' }, twinCompanion()),
     h('p', { class: 'lede' }, 'Your twin learns from the shape of your work, not its contents.'),
     h(
       'ul',

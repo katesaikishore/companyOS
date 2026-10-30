@@ -68,6 +68,16 @@
   --logo-a: #16181a;
   --logo-b: #0e6b5c;
 
+  /* The welcome companion. */
+  --twin-body: #9bdcb3;
+  --twin-edge: #4fae7c;
+  --twin-leaf: #3f9e6a;
+  --twin-leaf-light: #c6ecd6;
+  --twin-cheek: #f4a58c;
+  --twin-glow: #8fd3ae;
+  --twin-face: #1d2321;
+  --tile-fill: #ffffff;
+
   /* The setup rail is always dark, in both themes. */
   --rail-bg: #16181a;
   --rail-ink: #f3f4f1;
@@ -127,6 +137,16 @@
     --dot-off: #6b7278;
     --logo-a: #eceeee;
     --logo-b: #5fc2a6;
+
+    /* The welcome companion. */
+    --twin-body: #4fae83;
+    --twin-edge: #9fe6c0;
+    --twin-leaf: #7fdcae;
+    --twin-leaf-light: #2c5c4c;
+    --twin-cheek: #e58f78;
+    --twin-glow: #3c8a74;
+    --twin-face: #0d1f1a;
+    --tile-fill: #22262a;
   }
 }
 
@@ -180,4 +200,14 @@
   --dot-off: #6b7278;
   --logo-a: #eceeee;
   --logo-b: #5fc2a6;
+
+  /* The welcome companion. */
+  --twin-body: #4fae83;
+  --twin-edge: #9fe6c0;
+  --twin-leaf: #7fdcae;
+  --twin-leaf-light: #2c5c4c;
+  --twin-cheek: #e58f78;
+  --twin-glow: #3c8a74;
+  --twin-face: #0d1f1a;
+  --tile-fill: #22262a;
 }
