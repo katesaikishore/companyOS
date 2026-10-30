@@ -63,6 +63,20 @@ describe('import of the MVP record logs', () => {
     store.close();
   });
 
+  it('keeps the old log and writes no database when the key cannot open its only record', () => {
+    const dir = freshDir();
+    const key = randomBytes(32);
+    // The record is complete, but with no newline it has the shape of a torn tail, so only the key tells them apart.
+    writeFileSync(join(dir, 'events.log'), sealLegacy(key, 'events', { a: 1 }), { mode: 0o600 });
+    expect(() => new EncryptedStore(dir, randomBytes(32))).toThrow(/Corrupt record in events/);
+    expect(readdirSync(dir)).toEqual(['events.log']);
+
+    const store = new EncryptedStore(dir, key);
+    expect(store.readAll('events')).toEqual([{ a: 1 }]);
+    store.close();
+    expect(existsSync(join(dir, 'events.log'))).toBe(false);
+  });
+
   it('skips a final legacy record cut short by a crash', () => {
     const dir = freshDir();
     const key = randomBytes(32);
@@ -71,6 +85,19 @@ describe('import of the MVP record logs', () => {
     const store = new EncryptedStore(dir, key);
     expect(store.readAll('events')).toEqual([{ a: 1 }]);
     store.close();
+  });
+
+  it('imports the complete records before a final record torn mid-write', () => {
+    const dir = freshDir();
+    const key = randomBytes(32);
+    const next = sealLegacy(key, 'events', { a: 2, pad: 'x'.repeat(100) });
+    writeLegacyLog(dir, 'events', key, [{ a: 1 }]);
+    // Half of the next record reached the disk before the crash, and nothing follows it.
+    appendFileSync(join(dir, 'events.log'), next.slice(0, Math.floor(next.length / 2)));
+    const store = new EncryptedStore(dir, key);
+    expect(store.readAll('events')).toEqual([{ a: 1 }]);
+    store.close();
+    expect(existsSync(join(dir, 'events.log'))).toBe(false);
   });
 
   it('retries an import that was interrupted before it was complete', () => {
@@ -94,5 +121,20 @@ describe('import of the MVP record logs', () => {
     expect(store.readAll('events')).toEqual([{ a: 1 }]);
     store.close();
     expect(existsSync(join(dir, 'events.log'))).toBe(false);
+  });
+});
+
+describe('wipe of the legacy logs', () => {
+  it('removes legacy logs and their leftovers as well as the database', () => {
+    const dir = freshDir();
+    const key = randomBytes(32);
+    const store = new EncryptedStore(dir, key);
+    store.append('events', { a: 1 });
+    // Legacy files that exist next to a live database, such as logs left by an interrupted cleanup.
+    writeLegacyLog(dir, 'events', key, [{ a: 2 }]);
+    writeLegacyLog(dir, 'settings', key, [{ v: 1 }]);
+    writeFileSync(join(dir, 'events.log.tmp'), 'leftover');
+    store.wipe();
+    expect(readdirSync(dir)).toEqual([]);
   });
 });

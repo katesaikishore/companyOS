@@ -198,7 +198,8 @@ function asStoreError(error: unknown): unknown {
 
 /**
  * Reads one legacy record log. Each line is an AES-256-GCM record sealed with the collection name as associated data.
- * A last line with no newline is a write cut short by a crash, so it is skipped.
+ * A last line with no newline is a write cut short by a crash, so it is skipped, but only after an earlier record has
+ * opened under this key. Otherwise the key is wrong (or the file is not a log), and the error keeps the log in place.
  */
 function readLegacyLog(path: string, collection: Collection, key: Buffer): unknown[] {
   if (!existsSync(path)) return [];
@@ -209,8 +210,8 @@ function readLegacyLog(path: string, collection: Collection, key: Buffer): unkno
     try {
       records.push(JSON.parse(openLegacyRecord(key, collection, line)));
     } catch (error) {
-      if (index === lines.length - 1) return;
-      throw new Error(`Corrupt record in ${collection} at line ${index + 1}.`, { cause: error });
+      const tornTail = index === lines.length - 1 && records.length > 0;
+      if (!tornTail) throw new Error(`Corrupt record in ${collection} at line ${index + 1}.`, { cause: error });
     }
   });
   return records;

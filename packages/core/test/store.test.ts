@@ -1,4 +1,13 @@
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  truncateSync,
+  writeFileSync,
+} from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,6 +24,12 @@ function freshDir(): string {
 /** Raw bytes of every file in the store folder: the database, its WAL and shared memory. */
 function rawFiles(dir: string): Buffer[] {
   return readdirSync(dir).map(name => readFileSync(join(dir, name)));
+}
+
+/** Copies the database and its WAL while the store is open, so the copy keeps the commits not yet checkpointed. */
+function copyOpenStore(from: string, to: string): void {
+  copyFileSync(join(from, 'twin.db'), join(to, 'twin.db'));
+  copyFileSync(join(from, 'twin.db-wal'), join(to, 'twin.db-wal'));
 }
 
 describe('EncryptedStore', () => {
@@ -103,17 +118,26 @@ describe('EncryptedStore', () => {
 
   it('ignores a partly written transaction left at the end of the WAL', () => {
     const dir = freshDir();
+    const intact = freshDir();
+    const torn = freshDir();
     const key = randomBytes(32);
     const store = new EncryptedStore(dir, key);
     store.append('events', { a: 1 });
-    appendFileSync(join(dir, 'twin.db-wal'), randomBytes(1000));
-    const other = new EncryptedStore(dir, key);
-    expect(other.readAll('events')).toEqual([{ a: 1 }]);
-    other.close();
-    // A later write must not be lost behind the damaged bytes.
     store.append('events', { a: 2 });
+    // Both commits are still in the WAL, so the copies are taken while the store is open.
+    copyOpenStore(dir, intact);
+    copyOpenStore(dir, torn);
     store.close();
-    expect(new EncryptedStore(dir, key).readAll('events')).toEqual([{ a: 1 }, { a: 2 }]);
+    expect(new EncryptedStore(intact, key).readAll('events')).toEqual([{ a: 1 }, { a: 2 }]);
+    // Cut the last transaction's commit frame in half, as a crash in the middle of its write would.
+    const wal = join(torn, 'twin.db-wal');
+    truncateSync(wal, statSync(wal).size - PAGE_BYTES / 2);
+    const recovered = new EncryptedStore(torn, key);
+    expect(recovered.readAll('events')).toEqual([{ a: 1 }]);
+    // A later write must not be lost behind the damaged frame.
+    recovered.append('events', { a: 3 });
+    recovered.close();
+    expect(new EncryptedStore(torn, key).readAll('events')).toEqual([{ a: 1 }, { a: 3 }]);
   });
 
   it('shares one database between two engine instances on the same folder', () => {
