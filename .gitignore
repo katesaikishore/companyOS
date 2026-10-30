@@ -6,3 +6,8 @@ coverage/
 measure-results/
 .DS_Store
 *.log
+# Signing material: never commit certificates, private keys or provisioning profiles
+*.p8
+*.p12
+*.mobileprovision
+*.cer
