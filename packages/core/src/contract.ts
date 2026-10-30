@@ -82,6 +82,10 @@ export interface AgentDelegationResult {
   threadId?: string;
   /** The harness job tree only; transcripts and screenshots are never passed to the renderer. */
   taskTree?: string;
+  /** True when companyOS wrote the summary, not OpenMausBot, because the CLI gave no reply. */
+  localFailure?: boolean;
+  /** True when the person clicked Cancel on the confirmation. The state is then "cancelled" too. */
+  cancelledByPerson?: boolean;
 }
 
 /** How one app's switches fall across the three groups. The badge on each row reads this. */
@@ -155,12 +159,13 @@ export interface HandoffView {
   /** Estimated occurrences per week, as the prompt carried it. */
   cadencePerWeek?: number;
   sentAt: number;
-  state: AgentDelegationResult['state'] | 'sending';
+  /** "sending" while the CLI runs. "unknown" when the handoff closed without a reply, so the job may already exist. */
+  state: AgentDelegationResult['state'] | 'sending' | 'unknown';
   summary: string;
   threadId?: string;
   /** The harness job tree, as sanitised JSON text. */
   taskTree?: string;
-  /** True when companyOS itself failed. The summary is then companyOS's message, not OpenMausBot's reply. */
+  /** True when companyOS wrote the summary, not OpenMausBot. The summary is then companyOS's message, not a reply. */
   localFailure: boolean;
 }
 

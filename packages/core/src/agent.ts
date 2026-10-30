@@ -18,7 +18,7 @@ import {
 import { runAutomation, type Executor, type RunMode, type RunRequest, type RunResult } from './runner';
 import { segment, type Segment } from './segment';
 import { EncryptedStore } from './store';
-import { HANDOFF_READ_LIMIT, HandoffSchema, INTERRUPTED_HANDOFF_SUMMARY } from './handoff';
+import { HANDOFF_READ_LIMIT, HandoffSchema, UNKNOWN_HANDOFF_SUMMARY } from './handoff';
 import type { HandoffView } from './contract';
 import type { InstalledModel, NetworkEntry } from './models/types';
 import {
@@ -32,7 +32,7 @@ import {
 
 const DAY_MS = 86_400_000;
 const ANALYSIS_DAYS = 30;
-/** Raw events older than this are pruned. The desktop status reports the same figure to the Overview. */
+/** Raw events and handoffs older than this are pruned. The desktop status reports the same figure to the Overview. */
 export const RETENTION_DAYS = 90;
 /** Names kept in memory for detected routines. The oldest are dropped first. */
 const MAX_ROUTINE_NAMES = 200;
@@ -61,6 +61,11 @@ export interface Suggestion {
  */
 function withEffects(state: AutonomyState, automation: Automation): AutonomyState {
   return { ...state, effects: effectsOf(automation) };
+}
+
+/** The id of a stored handoff row. A row that does not parse still has its id, so a write can find it. */
+function handoffRowId(row: unknown): unknown {
+  return typeof row === 'object' && row !== null ? (row as { id?: unknown }).id : undefined;
 }
 
 /**
@@ -327,13 +332,14 @@ export class TwinAgent {
 
   /**
    * Writes a handoff, or replaces the stored one with the same id in place. The runtime writes it as "sending" before
-   * the CLI starts, so a send is on record even if it never returns.
+   * the CLI starts, so a send is on record even if it never returns. Every other stored row is passed back as it was
+   * read, so a row this version cannot read survives the write.
    */
   recordHandoff(view: HandoffView): void {
     const record = HandoffSchema.parse(view);
-    const current = this.readHandoffs();
-    const index = current.findIndex(candidate => candidate.id === record.id);
-    const next = index === -1 ? [...current, record] : current.map((candidate, position) => (position === index ? record : candidate));
+    const rows = this.store.readAll<unknown>('handoffs');
+    const index = rows.findIndex(row => handoffRowId(row) === record.id);
+    const next = index === -1 ? [...rows, record] : rows.map((row, position) => (position === index ? record : row));
     this.store.replaceAll('handoffs', next);
   }
 
@@ -348,16 +354,17 @@ export class TwinAgent {
   }
 
   /**
-   * Closes every handoff still "sending" when the app starts. Nothing can still be waiting for its reply, so each one
-   * is recorded as a companyOS failure. Returns how many were closed.
+   * Closes every handoff still "sending" when the app starts. Nothing can still be waiting for its reply, so each one is
+   * recorded as unknown: the job may have started. Other rows are passed back as they were read. Returns how many were
+   * closed.
    */
   closeInterruptedHandoffs(): number {
-    const current = this.readHandoffs();
     let closed = 0;
-    const next = current.map(record => {
-      if (record.state !== 'sending') return record;
+    const next = this.store.readAll<unknown>('handoffs').map(row => {
+      const parsed = HandoffSchema.safeParse(row);
+      if (!parsed.success || parsed.data.state !== 'sending') return row;
       closed++;
-      return { ...record, state: 'failed' as const, summary: INTERRUPTED_HANDOFF_SUMMARY, localFailure: true };
+      return { ...parsed.data, state: 'unknown', summary: UNKNOWN_HANDOFF_SUMMARY, localFailure: true };
     });
     if (closed > 0) this.store.replaceAll('handoffs', next);
     return closed;
@@ -448,13 +455,13 @@ export class TwinAgent {
     return this.store.sizeBytes();
   }
 
-  /** Drops events older than the retention window. Returns how many were removed. */
+  /** Drops events and handoffs older than the retention window. Returns how many records were removed. */
   prune(): number {
     const cutoff = this.now() - RETENTION_DAYS * DAY_MS;
     const all = this.store.readAll<TwinEvent>('events');
     const kept = all.filter(event => event.ts >= cutoff);
     if (kept.length !== all.length) this.store.replaceAll('events', kept);
-    return all.length - kept.length;
+    return all.length - kept.length + this.pruneHandoffs(cutoff);
   }
 
   /** Everything the twin holds about the person, for the person. */
@@ -504,6 +511,20 @@ export class TwinAgent {
       const parsed = HandoffSchema.safeParse(record);
       return parsed.success ? [parsed.data] : [];
     });
+  }
+
+  /**
+   * A handoff is kept for the same window as an event, counted from the time it was sent. A stored row that no longer
+   * parses has no readable send time, so it is kept as it is. Returns how many were removed.
+   */
+  private pruneHandoffs(cutoff: number): number {
+    const rows = this.store.readAll<unknown>('handoffs');
+    const kept = rows.filter(row => {
+      const parsed = HandoffSchema.safeParse(row);
+      return !parsed.success || parsed.data.sentAt >= cutoff;
+    });
+    if (kept.length !== rows.length) this.store.replaceAll('handoffs', kept);
+    return rows.length - kept.length;
   }
 
   private requireAutomation(automationId: string): Automation {

@@ -144,6 +144,7 @@ function registerIpc(): void {
     // The same checks the send applies, made before the person is asked, so a confirmation never leads to an error.
     const problem = openMausBotCommandProblem(status.config.openMausBotCommand) ?? openMausBotTargetProblem(status.config.openMausBotTarget);
     if (problem) throw new Error(problem);
+    const command = status.config.openMausBotCommand.trim();
     const target = status.config.openMausBotTarget.trim();
     const prompt = buildOpenMausBotPrompt(selected, taskBrief);
     const confirmation: MessageBoxOptions = {
@@ -152,11 +153,11 @@ function registerIpc(): void {
       defaultId: 1,
       cancelId: 1,
       message: `Send this task to OpenMausBot (${target})?`,
-      detail: `${prompt}\n\nOpenMausBot uses its own configured models, connected apps and account credentials. companyOS autonomy settings do not control its agents. The prompt does not include activity history, screenshots, window contents or companyOS credentials.`,
+      detail: `Runs: ${command} run ${target}\n\n${prompt}\n\nOpenMausBot uses its own configured models, connected apps and account credentials. companyOS autonomy settings do not control its agents. The prompt does not include activity history, screenshots, window contents or companyOS credentials.`,
     };
     const parent = parentWindow();
     const confirmed = parent ? await dialog.showMessageBox(parent, confirmation) : await dialog.showMessageBox(confirmation);
-    if (confirmed.response !== 0) return { state: 'cancelled', summary: 'The handoff was cancelled.' };
+    if (confirmed.response !== 0) return { state: 'cancelled', summary: 'The handoff was cancelled.', cancelledByPerson: true };
     return requireRuntime().delegateRoutine(automation, taskBrief);
   });
 
@@ -176,7 +177,7 @@ function registerIpc(): void {
       defaultId: 1,
       cancelId: 1,
       message: 'The export is not encrypted',
-      detail: 'It includes every recorded app switch with timestamps, URL shapes, your settings, your OpenMausBot handoffs (task briefs, routine names, app names and replies), and any configured OpenMausBot executable and target. Keep it somewhere private, and do not put it in a synced folder.',
+      detail: 'It includes every recorded app switch with timestamps, URL shapes, your settings, your OpenMausBot handoffs (briefs, replies, job trees, thread ids), and any configured OpenMausBot executable and target. Keep it somewhere private, and do not put it in a synced folder.',
     };
     const parent = parentWindow();
     const warned = parent ? await dialog.showMessageBox(parent, warning) : await dialog.showMessageBox(warning);
@@ -200,7 +201,7 @@ function registerIpc(): void {
       defaultId: 1,
       cancelId: 1,
       message: 'Delete everything the twin knows about you?',
-      detail: 'This removes all events, automations, the network ledger and the installed models on this device. It cannot be undone.',
+      detail: 'This removes all events, automations, the network ledger, OpenMausBot handoffs (briefs, replies, job trees, thread ids) and the installed models on this device. It cannot be undone.',
     };
     const parent = parentWindow();
     const choice = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);

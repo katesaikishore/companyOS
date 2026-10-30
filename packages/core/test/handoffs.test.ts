@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { EncryptedStore, INTERRUPTED_HANDOFF_SUMMARY, TwinAgent, type HandoffView } from '../src';
+import { EncryptedStore, TwinAgent, UNKNOWN_HANDOFF_SUMMARY, type HandoffView } from '../src';
 
 const CANARY = 'handoff-canary-4417';
 const REPLY_CANARY = 'reply-canary-8820';
@@ -116,16 +116,43 @@ describe('handoffs in the encrypted store', () => {
     after.close();
   });
 
-  it('closes a handoff still sending when the app starts, and leaves finished ones as they were', () => {
+  it('closes a handoff still sending when the app starts as unknown, and leaves finished ones as they were', () => {
     const agent = openAgent(freshDir(), randomBytes(32));
     agent.recordHandoff(handoff({ id: 'cut-off', state: 'sending' }));
     agent.recordHandoff(handoff({ id: 'finished', sentAt: 2_000, state: 'completed', summary: 'Done.', threadId: 'th_2' }));
     expect(agent.closeInterruptedHandoffs()).toBe(1);
     const byId = new Map(agent.handoffs().map(item => [item.id, item]));
-    expect(byId.get('cut-off')).toMatchObject({ state: 'failed', summary: INTERRUPTED_HANDOFF_SUMMARY, localFailure: true });
+    expect(byId.get('cut-off')).toMatchObject({ state: 'unknown', summary: UNKNOWN_HANDOFF_SUMMARY, localFailure: true });
     expect(byId.get('finished')).toMatchObject({ state: 'completed', summary: 'Done.', threadId: 'th_2', localFailure: false });
     expect(agent.closeInterruptedHandoffs()).toBe(0);
     agent.close();
+  });
+
+  it('keeps a stored row this version cannot read through later writes, and does not show it', () => {
+    const dir = freshDir();
+    const key = randomBytes(32);
+    const agent = openAgent(dir, key);
+    agent.recordHandoff(handoff({ id: 'good', state: 'completed', summary: 'Done.' }));
+    agent.close();
+    const unreadable = { id: 'from-a-newer-version', state: 'not-a-state', routing: { lane: 'later' } };
+    const raw = new EncryptedStore(dir, key);
+    raw.append('handoffs', unreadable);
+    raw.close();
+
+    const reopened = openAgent(dir, key);
+    reopened.recordHandoff(handoff({ id: 'later', sentAt: 2_000, state: 'sending' }));
+    expect(reopened.closeInterruptedHandoffs()).toBe(1);
+    reopened.recordHandoff(handoff({ id: 'later', sentAt: 2_000, state: 'completed', summary: 'Done.' }));
+    expect(reopened.handoffs().map(item => item.id)).toEqual(['later', 'good']);
+    reopened.close();
+
+    const check = new EncryptedStore(dir, key);
+    expect(check.readAll('handoffs')).toEqual([
+      handoff({ id: 'good', state: 'completed', summary: 'Done.' }),
+      unreadable,
+      expect.objectContaining({ id: 'later', state: 'completed', summary: 'Done.' }),
+    ]);
+    check.close();
   });
 
   it('refuses a record that breaks the schema, and stores nothing from it', () => {

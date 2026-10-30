@@ -1,10 +1,15 @@
-import { TwinAgent, type Automation, type Executor, type TwinEvent } from '@companyos/twin-core';
+import { TwinAgent, type Automation, type Executor, type HandoffView, type TwinEvent } from '@companyos/twin-core';
 import { randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ModelManager } from '../../apps/desktop/src/main/models';
-import { buildOpenMausBotPrompt, runOpenMausBotTask } from '../../apps/desktop/src/main/openmausbot';
+import {
+  buildOpenMausBotPrompt,
+  observedAppSequence,
+  runOpenMausBotTask,
+  sendHandoff,
+} from '../../apps/desktop/src/main/openmausbot';
 import { CANARIES, type Surface } from './canaries';
 import { spawnLog } from './fake-spawn';
 import { ConsoleCapture, diskSurfaces, errorText, recordingFetch, refuseOutbound } from './surfaces';
@@ -66,6 +71,9 @@ export const PLANTED: readonly Planted[] = [
   { label: 'percent-encoded URL query in a browser', outcome: 'stored', signal: ts => ({ kind: 'focus', ts, app: 'Google Chrome', url: `https://docs.example.com/doc/5f0e7c21/view?t=${encodeURIComponent(CANARIES.encodedForms)}` }) },
 ];
 
+/** The outcome the person asks OpenMausBot for. It is a brief, not raw activity, so it is not a canary. */
+export const HANDOFF_BRIEF = 'Summarise the invoice follow-ups from this week';
+
 export interface ScenarioRun {
   /** Every output the suite inspects, taken after the whole scenario ran. */
   surfaces: Surface[];
@@ -78,6 +86,8 @@ export interface ScenarioRun {
     unexpectedOutboundCalls: number;
     chromeTemplate?: string;
     downloadStatus: string[];
+    /** The state of each handoff the store holds after the send. */
+    handoffStates: string[];
   };
 }
 
@@ -158,10 +168,25 @@ export async function runPlantedScenario(): Promise<ScenarioRun> {
     models.install('qwen3-0.6b');
     await settle(() => models.states().every(state => state.status !== 'running'));
 
-    // The OpenMausBot handoff: the preview the person sees, and the command line that is actually started.
-    const brief = 'Summarise the invoice follow-ups from this week';
-    const prompt = buildOpenMausBotPrompt(view.automation, brief);
-    await runOpenMausBotTask({ command: 'openmausbot', target: 'Lead Bot', automation: view.automation, taskBrief: brief });
+    // The OpenMausBot handoff goes through the real send path, with the CLI replaced by the fake. Its record is written
+    // to the store, so the store, the export and the console are all checked for raw activity below.
+    const prompt = buildOpenMausBotPrompt(view.automation, HANDOFF_BRIEF);
+    const handoff: HandoffView = {
+      id: 'handoff-privacy-1',
+      automationId: view.automation.id,
+      routineName: view.automation.name,
+      target: 'Lead Bot',
+      brief: HANDOFF_BRIEF,
+      apps: observedAppSequence(view.automation),
+      cadencePerWeek: view.automation.estimate?.occurrencesPerWeek,
+      sentAt: at(10, 0),
+      state: 'sending',
+      summary: '',
+      localFailure: false,
+    };
+    await sendHandoff(agent, handoff, () =>
+      runOpenMausBotTask({ command: 'openmausbot', target: 'Lead Bot', automation: view.automation, taskBrief: HANDOFF_BRIEF }),
+    );
 
     const exported = agent.exportAll() as { events: TwinEvent[]; automations: Automation[] };
     const surfaces: Surface[] = [
@@ -186,6 +211,7 @@ export async function runPlantedScenario(): Promise<ScenarioRun> {
         unexpectedOutboundCalls: outbound.filter(line => line.startsWith('UNEXPECTED')).length,
         chromeTemplate: exported.events.find(event => event.urlTemplate)?.urlTemplate,
         downloadStatus: models.states().map(state => state.status),
+        handoffStates: agent.handoffs().map(item => item.state),
       },
     };
   } finally {

@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { RETENTION_DAYS, TwinAgent, mineRoutines, normalizeSignal, segment, type Executor, type TwinEvent } from '../src';
+import { RETENTION_DAYS, TwinAgent, mineRoutines, normalizeSignal, segment, type Executor, type HandoffView, type TwinEvent } from '../src';
 import { SECRET_QUERY, at, workdays } from './fixtures';
 
 const DAY = 86_400_000;
@@ -122,6 +122,36 @@ describe('persistence and retention', () => {
     const kept = (later.exportAll() as { events: TwinEvent[] }).events;
     expect(kept.length).toBeGreaterThan(0);
     expect(kept.every(event => event.ts >= at(9, 0))).toBe(true);
+  });
+
+  it('prunes handoffs past the same window by send time, and a read still returns at most 100', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'twin-handoff-prune-'));
+    const key = randomBytes(32);
+    const sentAt = at(0, 9);
+    const agent = openAgent(dir, key, sentAt);
+    const handoffSentAt = (id: string, time: number): HandoffView => ({
+      id,
+      automationId: 'auto_0123456789ab',
+      routineName: 'Invoice follow-up',
+      target: 'Lead Bot',
+      brief: 'Summarise the follow-ups',
+      apps: ['Slack'],
+      sentAt: time,
+      state: 'completed',
+      summary: 'Done.',
+      localFailure: false,
+    });
+    for (let index = 0; index < 3; index++) agent.recordHandoff(handoffSentAt(`old-${index}`, sentAt - (RETENTION_DAYS + 10) * DAY + index));
+    for (let index = 0; index < 101; index++) agent.recordHandoff(handoffSentAt(`new-${index}`, sentAt - DAY + index));
+    agent.close();
+
+    const later = openAgent(dir, key, sentAt + 5 * DAY);
+    expect(later.prune()).toBe(3);
+    const read = later.handoffs();
+    expect(read).toHaveLength(100);
+    expect(read.every(item => item.id.startsWith('new-'))).toBe(true);
+    expect((later.exportAll() as { handoffs: HandoffView[] }).handoffs).toHaveLength(101);
+    later.close();
   });
 });
 

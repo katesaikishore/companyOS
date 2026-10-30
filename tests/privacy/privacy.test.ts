@@ -3,7 +3,7 @@ import childProcess from 'node:child_process';
 import https from 'node:https';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { findLeaks, describeLeak, type Surface } from './canaries';
-import { PLANTED, runPlantedScenario, type ScenarioRun } from './scenario';
+import { HANDOFF_BRIEF, PLANTED, runPlantedScenario, type ScenarioRun } from './scenario';
 import { refuseOutbound } from './surfaces';
 
 // The OpenMausBot handoff starts a real CLI. The suite replaces it with a recorder, so the arguments can be checked.
@@ -97,6 +97,17 @@ describe('no canary appears on any output surface', () => {
 
   it('every surface together, in every encoding the suite knows', () => {
     expectNoLeaks(run.surfaces, () => true);
+  });
+});
+
+describe('the OpenMausBot handoff keeps no raw activity', () => {
+  it('records the handoff through the send path, so the checks below read a stored handoff', () => {
+    expect(run.facts.handoffStates).toEqual(['completed']);
+    expect(run.surfaces.find(surface => surface.name === 'store:decrypted:handoffs')?.text).toContain(HANDOFF_BRIEF);
+  });
+
+  it('the handoff store, the export and the console hold no raw canary', () => {
+    expectNoLeaks(run.surfaces, name => name === 'store:decrypted:handoffs' || name === 'export' || name === 'console');
   });
 });
 

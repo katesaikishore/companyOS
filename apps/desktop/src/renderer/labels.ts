@@ -29,6 +29,8 @@ export function handoffTone(state: HandoffView['state']): 'teal' | 'warn' | 'dan
     case 'stalled':
     case 'timed-out':
       return 'danger';
+    case 'sending':
+    case 'unknown':
     default:
       return 'neutral';
   }

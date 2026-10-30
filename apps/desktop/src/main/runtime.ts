@@ -293,8 +293,8 @@ export class TwinRuntime {
 
   /**
    * Sends an approved brief to OpenMausBot. The handoff is written as "sending" before the CLI starts, so no send
-   * goes unrecorded, then updated with the reply, or with companyOS's message if the CLI could not be run. The caller
-   * asks the person first, so a cancelled confirmation never gets here and is never recorded.
+   * goes unrecorded, then updated with the reply, or with companyOS's message when the CLI could not be run or gave no
+   * reply. The caller asks the person first, so a cancelled confirmation never gets here and is never recorded.
    */
   async delegateRoutine(automationId: string, taskBrief: string): Promise<AgentDelegationResult> {
     const automation = this.agent.automations().find(view => view.automation.id === automationId)?.automation;
