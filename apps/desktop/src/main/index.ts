@@ -27,7 +27,6 @@ import {
   type Step,
 } from '@companyos/twin-core';
 import { APP_ORIGIN, IPC } from '../shared/ipc';
-import { trayImage, windowIconPath } from './icon';
 import { SecureStorageUnavailableError } from './keys';
 import { buildOpenMausBotPrompt } from './openmausbot';
 import { TwinRuntime } from './runtime';
@@ -37,6 +36,7 @@ import { startAutoUpdates } from './updater';
 protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 
 const RENDERER_DIR = join(__dirname, '..', 'renderer');
+const BRAND_DIR = join(RENDERER_DIR, 'brand');
 const STOP_ALL_SHORTCUT = 'Control+Alt+.';
 
 let runtime: TwinRuntime | undefined;
@@ -242,7 +242,7 @@ function createMainWindow(): void {
     minWidth: 960,
     minHeight: 640,
     title: 'companyOS Twin',
-    icon: windowIconPath(),
+    icon: join(BRAND_DIR, 'app-icon.png'),
     backgroundColor: '#F3F4F1',
     show: false,
     webPreferences: WEB_PREFERENCES,
@@ -364,7 +364,10 @@ function rebuildTrayMenu(): void {
 }
 
 function createTray(): void {
-  tray = new Tray(trayImage());
+  // A template image: macOS draws it in the colour that suits the menu bar, light or dark.
+  const image = nativeImage.createFromPath(join(BRAND_DIR, 'tray.png'));
+  image.setTemplateImage(true);
+  tray = new Tray(image);
   tray.setToolTip('companyOS Twin');
   tray.on('click', toggleTray);
   tray.on('right-click', () => tray?.popUpContextMenu());
@@ -372,6 +375,7 @@ function createTray(): void {
 }
 
 async function boot(): Promise<void> {
+  if (process.platform === 'darwin') app.dock?.setIcon(join(BRAND_DIR, 'app-icon.png'));
   try {
     runtime = await TwinRuntime.create({
       userData,

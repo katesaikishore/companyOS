@@ -1984,6 +1984,343 @@ a {
   color: var(--ink-2);
 }
 
+/* The welcome companion. Its motion is decorative. Reduced-motion users get the same picture at rest (see the block at the end). */
+.companion-stage {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--accent-tint);
+}
+
+.twin-art {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.twin-ring {
+  stroke: var(--twin-edge);
+  stroke-width: 4;
+}
+
+.twin-ring-a {
+  fill: var(--twin-body);
+  fill-opacity: 0.6;
+}
+
+.twin-ring-b {
+  fill: var(--twin-leaf);
+  fill-opacity: 0.42;
+}
+
+.twin-shadow {
+  fill: var(--ink);
+  opacity: 0.08;
+}
+
+.twin-eye {
+  fill: var(--twin-face);
+}
+
+.twin-glint {
+  fill: #ffffff;
+}
+
+.twin-cheek {
+  fill: var(--twin-cheek);
+  opacity: 0.7;
+}
+
+.twin-mouth {
+  fill: none;
+  stroke: var(--twin-face);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+.scan-ring {
+  fill: none;
+  stroke: var(--twin-glow);
+  stroke-width: 2;
+}
+
+.tile-face {
+  fill: var(--tile-fill);
+  stroke: var(--border-strong);
+  stroke-width: 1.5;
+}
+
+.tile-page {
+  fill: var(--card);
+  stroke: var(--muted);
+  stroke-width: 1.2;
+}
+
+.tile-line {
+  fill: var(--muted);
+}
+
+.tile-grid {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+
+.tile-bubble {
+  fill: var(--twin-leaf-light);
+}
+
+.twin-lines path {
+  fill: none;
+  stroke: var(--twin-edge);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-dasharray: 3 5;
+  opacity: 0.6;
+}
+
+.bubble-box,
+.bubble-tail {
+  fill: var(--card);
+  stroke: var(--border-strong);
+  stroke-width: 1.2;
+}
+
+.bubble-text {
+  fill: var(--ink);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* Motion. Each part has its own rhythm so the picture never looks mechanical. */
+.twin-float {
+  animation: twin-float 3.4s ease-in-out infinite;
+}
+
+.eye {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: twin-blink 4.6s ease-in-out infinite;
+}
+
+.ring-left {
+  animation: ring-drift-left 3.2s ease-in-out infinite;
+}
+
+.ring-right {
+  animation: ring-drift-right 3.2s ease-in-out infinite;
+}
+
+.scan-ring {
+  transform-box: view-box;
+  transform-origin: 180px 134px;
+  animation: scan-pulse 2.8s ease-out infinite;
+}
+
+.work-tile {
+  animation-duration: 8s;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-fill-mode: both;
+}
+
+.tile-1 {
+  animation-name: tile-cycle-1;
+}
+
+.tile-2 {
+  animation-name: tile-cycle-2;
+  animation-delay: 2.6s;
+}
+
+.tile-3 {
+  animation-name: tile-cycle-3;
+  animation-delay: 5.2s;
+}
+
+.twin-lines path {
+  animation: flow-line 1.6s linear infinite;
+}
+
+.bubble {
+  transform-box: view-box;
+  transform-origin: 98px 36px;
+  animation: bubble-in 0.6s ease-out 0.4s both;
+}
+
+.promises li {
+  animation: promise-in 0.5s ease-out both;
+}
+
+.promises li:nth-child(1) {
+  animation-delay: 0.5s;
+}
+
+.promises li:nth-child(2) {
+  animation-delay: 0.75s;
+}
+
+.promises li:nth-child(3) {
+  animation-delay: 1s;
+}
+
+@keyframes twin-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-5px);
+  }
+}
+
+@keyframes twin-blink {
+  0%,
+  88%,
+  100% {
+    transform: scaleY(1);
+  }
+  92% {
+    transform: scaleY(0.1);
+  }
+}
+
+/* The rings drift toward each other and apart, so the overlap (the lens the face sits in) widens and narrows. */
+@keyframes ring-drift-left {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(7px);
+  }
+}
+
+@keyframes ring-drift-right {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(-7px);
+  }
+}
+
+@keyframes scan-pulse {
+  0% {
+    transform: scale(0.82);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.18);
+    opacity: 0;
+  }
+}
+
+/* Each tile drifts in from its side, rests beside the twin, then is taken in toward it and fades. */
+@keyframes tile-cycle-1 {
+  0% {
+    transform: translate(-64px, -34px) scale(0.7);
+    opacity: 0;
+  }
+  14% {
+    opacity: 1;
+  }
+  38%,
+  58% {
+    transform: translate(0, 0) scale(1);
+    opacity: 1;
+  }
+  78%,
+  100% {
+    transform: translate(100px, 38px) scale(0.3);
+    opacity: 0;
+  }
+}
+
+@keyframes tile-cycle-2 {
+  0% {
+    transform: translate(64px, -34px) scale(0.7);
+    opacity: 0;
+  }
+  14% {
+    opacity: 1;
+  }
+  38%,
+  58% {
+    transform: translate(0, 0) scale(1);
+    opacity: 1;
+  }
+  78%,
+  100% {
+    transform: translate(-106px, 42px) scale(0.3);
+    opacity: 0;
+  }
+}
+
+@keyframes tile-cycle-3 {
+  0% {
+    transform: translate(64px, 34px) scale(0.7);
+    opacity: 0;
+  }
+  14% {
+    opacity: 1;
+  }
+  38%,
+  58% {
+    transform: translate(0, 0) scale(1);
+    opacity: 1;
+  }
+  78%,
+  100% {
+    transform: translate(-102px, -36px) scale(0.3);
+    opacity: 0;
+  }
+}
+
+@keyframes flow-line {
+  to {
+    stroke-dashoffset: -16;
+  }
+}
+
+@keyframes bubble-in {
+  0% {
+    opacity: 0;
+    transform: translateY(6px) scale(0.9);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes promise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .twin-art *,
+  .promises li,
+  .bubble {
+    animation: none !important;
+  }
+
+  .promises li,
+  .bubble {
+    opacity: 1;
+  }
+}
+
 .setup-two {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 248px;
