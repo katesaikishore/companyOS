@@ -15,6 +15,7 @@ import {
   evaluateStep,
   initialState,
   isSafeFilePath,
+  isShellApp,
   openableFilePath,
   parseKeyChord,
   parseWebAddress,
@@ -113,6 +114,24 @@ describe('isSafeFilePath', () => {
   ])('refuses a program or script ending in .%s, in either case', extension => {
     expect(isSafeFilePath(`/Users/me/Downloads/setup.${extension}`)).toBe(false);
     expect(isSafeFilePath(`C:\\Users\\me\\Downloads\\setup.${extension.toUpperCase()}`)).toBe(false);
+  });
+
+  // Windows drops a trailing dot or space from a name, so "setup.exe." runs as "setup.exe". A colon after the drive
+  // letter starts an alternate data stream, so "setup.exe:stream" keeps the program's name out of the extension check.
+  it.each([
+    ['a trailing dot after a program', 'C:\\Users\\me\\Downloads\\setup.exe.'],
+    ['a trailing space after a program', 'C:\\Users\\me\\Downloads\\setup.exe '],
+    ['a trailing dot and space after a program', 'C:\\Users\\me\\Downloads\\setup.exe. '],
+    ['a trailing dot after a document', '/Users/me/Documents/budget.xlsx.'],
+    ['a trailing space after a document', '/Users/me/Documents/budget.xlsx '],
+    ['an alternate data stream on a program', 'C:\\Users\\me\\Downloads\\setup.exe:stream'],
+    ['a zone marker alternate data stream on a program', 'C:\\Users\\me\\Downloads\\setup.exe:Zone.Identifier'],
+    ['a trailing colon after a program', 'C:\\Users\\me\\Downloads\\setup.exe:'],
+    ['an alternate data stream on a document', 'C:\\Users\\me\\Documents\\budget.xlsx:setup.exe'],
+    ['a colon in a Unix-style path', '/Users/me/Downloads/setup.exe:stream'],
+    ['a colon in a folder name after the drive', 'C:\\Users\\me:old\\Documents\\budget.xlsx'],
+  ])('refuses %s', (_label, value) => {
+    expect(isSafeFilePath(value)).toBe(false);
   });
 });
 
@@ -363,6 +382,64 @@ describe('shell targets', () => {
   });
 });
 
+describe('Windows script hosts and launchers as targets', () => {
+  const HOSTS = ['wscript', 'cscript', 'mshta', 'rundll32', 'regsvr32', 'msiexec', 'Windows PowerShell', 'pythonw', 'py'];
+
+  it.each(HOSTS)('counts %s as a shell', app => {
+    expect(isShellApp(app)).toBe(true);
+  });
+
+  it.each(HOSTS)('refuses %s as the app for an open file step when the step loads', app => {
+    expect(StepSchema.safeParse({ op: 'open_file', app, path: '/Users/me/Documents/budget.xlsx' }).success).toBe(false);
+  });
+
+  it.each(HOSTS)('refuses %s as the app for a press shortcut step when the step loads', app => {
+    expect(StepSchema.safeParse({ op: 'press_shortcut', app, shortcut: 'cmd+shift+k' }).success).toBe(false);
+  });
+
+  it.each(['WScript.exe', 'rundll32.exe', 'MSIEXEC.EXE', 'Windows PowerShell.exe', 'py.exe'])('refuses %s, with its program extension, too', app => {
+    expect(StepSchema.safeParse({ op: 'press_shortcut', app, shortcut: 'cmd+k' }).success).toBe(false);
+    expect(StepSchema.safeParse({ op: 'open_file', app, path: '/Users/me/a.xlsx' }).success).toBe(false);
+  });
+
+  it('refuses an approved script host that a parameter option names, before anything runs', () => {
+    const params = [{ name: 'p0', options: ['rundll32', 'microsoft excel'], default: 'microsoft excel' }];
+    expect(() => resolveStep({ op: 'press_shortcut', app: '$p0', shortcut: 'cmd+k' }, params, { p0: 'rundll32' })).toThrow(/cannot be the target/);
+  });
+});
+
+describe('trailing dots and spaces on shell names', () => {
+  // Windows drops a trailing dot or space from a name, so "wscript.exe." starts the same program as "wscript.exe".
+  it.each(['wscript.exe.', 'py.exe.', 'cmd .', 'powershell.exe', 'POWERSHELL.EXE', 'powershell.exe ', 'wscript .exe.', 'Terminal.'])(
+    'counts %s as a shell',
+    app => {
+      expect(isShellApp(app)).toBe(true);
+    },
+  );
+
+  it.each(['wscript.exe.', 'py.exe.', 'cmd .', 'powershell.exe', 'POWERSHELL.EXE'])(
+    'refuses %s as the app for an open file or a press shortcut step',
+    app => {
+      expect(StepSchema.safeParse({ op: 'open_file', app, path: '/Users/me/Documents/budget.xlsx' }).success).toBe(false);
+      expect(StepSchema.safeParse({ op: 'press_shortcut', app, shortcut: 'cmd+k' }).success).toBe(false);
+    },
+  );
+
+  it('still accepts a normal app such as Slack as the app for an open file or a press shortcut step', () => {
+    expect(isShellApp('Slack')).toBe(false);
+    expect(StepSchema.safeParse({ op: 'open_file', app: 'Slack', path: '/Users/me/Documents/budget.xlsx' }).success).toBe(true);
+    expect(StepSchema.safeParse({ op: 'press_shortcut', app: 'Slack', shortcut: 'cmd+k' }).success).toBe(true);
+  });
+
+  // The path rules already refuse a name that ends in a dot or a space. These cases keep it that way.
+  it.each(['/Users/me/Documents/budget.', '/Users/me/Documents/notes.txt.', '/Users/me/Documents/notes.txt ', '/Users/me/Documents/budget.xlsx .'])(
+    'refuses the file name in %s for an open file step',
+    path => {
+      expect(StepSchema.safeParse({ op: 'open_file', app: 'Slack', path }).success).toBe(false);
+    },
+  );
+});
+
 describe('promotion gate for the new steps', () => {
   const NOW = Date.UTC(2026, 9, 30);
   const config = { maxLevel: 4 as const, allowUnattended: true };
@@ -407,5 +484,36 @@ describe('promotion gate for the new steps', () => {
     expect(check.eligible).toBe(false);
     expect(check.reasons).toContain('Some of its effects can never run unattended.');
     expect(evaluateStep(step, unattended).decision).toBe('deny');
+  });
+
+  it('treats a stored list that says read_only for open_file as external, and never offers it level 4', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'twin-stale-effects-'));
+    try {
+      const key = randomBytes(32);
+      const automation = AutomationSchema.parse({
+        id: 'auto_stale',
+        name: 'Stale effects',
+        version: 2,
+        routineId: 'stale',
+        params: [],
+        steps: [{ op: 'open_file', app: 'microsoft excel', path: '/Users/me/Documents/budget.xlsx' }],
+      });
+      // Saved before open_file was classified as an external effect, so the stored list still says read_only.
+      const stored: AutonomyState = { ...earned(automation), effects: ['read_only'] };
+      const store = new EncryptedStore(dir, key);
+      store.replaceAll('automations', [automation]);
+      store.replaceAll('autonomy', [stored]);
+
+      const agent = new TwinAgent({ dataDir: dir, dataKey: key, now: () => NOW });
+      agent.updateConfig({ maxAutonomyLevel: 4, allowUnattended: true });
+      const [view] = agent.automations();
+      expect(view.state.effects).toEqual(['external_effect']);
+      expect(view.promotion.eligible).toBe(false);
+      expect(view.promotion.reasons).toContain('Some of its effects can never run unattended.');
+      expect(() => agent.promote(automation.id)).toThrow(/Not eligible for level 4/);
+      expect(agent.automations()[0].state.level).toBe(3);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

@@ -1,7 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <!-- Placeholder app mark: two overlapping discs on the app's accent teal. It is not a brand design.
-       scripts/make-icons.mjs draws only rect and circle elements, with #RRGGBB fills. -->
-  <rect x="40" y="40" width="432" height="432" rx="96" fill="#0E6B5C"/>
-  <circle cx="206" cy="256" r="92" fill="#FFFFFF" fill-opacity="0.95"/>
-  <circle cx="306" cy="256" r="92" fill="#FFFFFF" fill-opacity="0.55"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="116" fill="#0e6b5c"/>
+  <circle cx="216" cy="256" r="110" fill="none" stroke="#ffffff" stroke-width="26"/>
+  <circle cx="296" cy="256" r="110" fill="none" stroke="#c6ecd6" stroke-width="26"/>
 </svg>

@@ -120,14 +120,18 @@ const UNSAFE_PATH_CHARS = /[\u0000-\u001f\u007f"'`*?<>|]/;
 
 /**
  * True for one exact absolute file path: not a folder, not a program, not a wildcard, and no relative or parent
- * segments and no network share. The platform adapter checks the file on disk as well, following any link.
+ * segments, no network share and no alternate data stream. The platform adapter checks the file on disk as well,
+ * following any link.
  */
 export function isSafeFilePath(value: string): boolean {
   if (value.length === 0 || value.length > 1024 || UNSAFE_PATH_CHARS.test(value)) return false;
   if (!/^(\/|[A-Za-z]:[\\/])/.test(value) || /^[\\/]{2}/.test(value) || /[\\/]$/.test(value)) return false;
+  // The only colon allowed is the drive letter. Any other colon starts an alternate data stream on Windows.
+  if (value.replace(/^[A-Za-z]:/, '').includes(':')) return false;
   const parts = value.split(/[\\/]+/);
   const name = parts[parts.length - 1];
-  if (!name || parts.some(part => part === '.' || part === '..')) return false;
+  // Windows drops a trailing dot or space from a name, so "setup.exe." is the program "setup.exe".
+  if (!name || /[. ]$/.test(name) || parts.some(part => part === '.' || part === '..')) return false;
   return !PROGRAM_EXTENSION.test(name);
 }
 
