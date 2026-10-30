@@ -2,7 +2,7 @@
 // Run with: node --test scripts/measure/measure.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 import { cpuPercent, descendantsOf, parseCpuTime, parseProcStat, parsePsTable, parseWindowsTable, sumRss } from './sampler.mjs';
 import { BUDGETS, MIB, evaluate, summarize, toMarkdown } from './report.mjs';
 import { isInsideAppData, notesFor, parseArgs } from './measure.mjs';
@@ -180,12 +180,12 @@ test('parseArgs rejects bad values with a message that names the flag', () => {
 test('isInsideAppData refuses the real data folders on each OS and allows anything else', () => {
   const home = '/Users/test';
   assert.equal(
-    isInsideAppData(join(home, 'Library', 'Application Support', 'companyOS Twin'), { home, platform: 'darwin', env: {} }),
+    isInsideAppData(posix.join(home, 'Library', 'Application Support', 'companyOS Twin'), { home, platform: 'darwin', env: {} }),
     true,
   );
-  assert.equal(isInsideAppData(join(home, 'Library', 'Application Support'), { home, platform: 'darwin', env: {} }), true);
+  assert.equal(isInsideAppData(posix.join(home, 'Library', 'Application Support'), { home, platform: 'darwin', env: {} }), true);
   assert.equal(isInsideAppData('/var/folders/xy/companyos-measure-1', { home, platform: 'darwin', env: {} }), false);
-  assert.equal(isInsideAppData(join(home, 'Library', 'Application Support-test'), { home, platform: 'darwin', env: {} }), false);
+  assert.equal(isInsideAppData(posix.join(home, 'Library', 'Application Support-test'), { home, platform: 'darwin', env: {} }), false);
   assert.equal(
     isInsideAppData('C:\\Users\\test\\AppData\\Roaming\\companyOS Twin', {
       home: 'C:\\Users\\test',
