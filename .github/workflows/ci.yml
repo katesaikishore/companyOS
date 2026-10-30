@@ -36,6 +36,9 @@ jobs:
       - name: Unit tests (core engine)
         run: npm test
 
+      - name: Privacy leak suite (planted canaries, all three OSes)
+        run: npm run test:privacy
+
       - name: Build
         run: npm run build
 
