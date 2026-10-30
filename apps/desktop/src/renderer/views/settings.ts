@@ -2,7 +2,7 @@ import type { TwinConfig, TwinStatus } from '@companyos/twin-core';
 import { h } from '../dom.js';
 import { button, exclusionEditor, panel, panelHead, toggleRow } from '../components/ui.js';
 import { formatBytes } from '../format.js';
-import { act, bridge, confirmDeleteAll, pending, saveConfig, setNotice } from '../store.js';
+import { act, bridge, confirmDeleteAll, pending, saveConfig, setNotice, state } from '../store.js';
 import { openSetup } from './setup.js';
 
 type Theme = TwinConfig['theme'];
@@ -31,9 +31,60 @@ export function settingsView(status: TwinStatus): HTMLElement {
     appearancePanel(config.theme),
     capturePanel(config.watchBrowsers, config.excludedApps),
     automationsPanel(config),
+    openMausBotPanel(config),
     modelsPanel(status),
     setupPanel(),
     dataPanel(),
+  );
+}
+
+function openMausBotPanel(config: TwinConfig): HTMLElement {
+  const key = 'openmausbot-settings';
+  const command = h('input', {
+    class: 'input',
+    type: 'text',
+    maxlength: 512,
+    autocomplete: 'off',
+    spellcheck: false,
+    value: config.openMausBotCommand,
+    'aria-label': 'OpenMausBot CLI executable',
+    'data-testid': 'settings-openmausbot-command',
+    oninput: () => state.dirty.add(key),
+  });
+  const target = h('input', {
+    class: 'input',
+    type: 'text',
+    maxlength: 120,
+    autocomplete: 'off',
+    spellcheck: false,
+    value: config.openMausBotTarget,
+    placeholder: 'Existing lead bot or room',
+    'aria-label': 'OpenMausBot lead bot or room',
+    'data-testid': 'settings-openmausbot-target',
+    oninput: () => state.dirty.add(key),
+  });
+  return panel({ testid: 'settings-openmausbot', labelledBy: 'openmausbot-title' },
+    panelHead('OpenMausBot agents', 'Delegate a task from any accepted routine to its existing agent harness.', 'openmausbot-title'),
+    h('p', { class: 'muted small' }, 'Install the CLI with `npm install -g openmausbot` (Node.js 24+) and configure its models, lead bot or room, and connected apps in OpenMausBot. companyOS starts one job and waits for its nested agent tasks.'),
+    h('label', { class: 'field-row' },
+      h('span', { class: 'toggle-label' }, 'CLI executable'),
+      command,
+    ),
+    h('label', { class: 'field-row' },
+      h('span', { class: 'toggle-label' }, 'Lead bot or room'),
+      target,
+    ),
+    h('p', { class: 'muted small' }, 'A handoff sends the task brief, routine name, app sequence and estimated cadence after a native confirmation. The prompt excludes activity history, screenshots, window contents and companyOS credentials. OpenMausBot may use its own configured credentials and permissions, outside companyOS autonomy controls.'),
+    h('div', { class: 'actions' }, button('Save OpenMausBot settings', {
+      testid: 'settings-openmausbot-save',
+      disabled: pending(key),
+      onClick: () => {
+        state.dirty.delete(key);
+        void act(key, async () => {
+          await bridge().updateConfig({ openMausBotCommand: command.value.trim(), openMausBotTarget: target.value.trim() });
+        });
+      },
+    })),
   );
 }
 

@@ -3,6 +3,7 @@ import {
   TriggerGate,
   TwinAgent,
   TwinConfigSchema,
+  type AgentDelegationResult,
   effectOfOp,
   effectsOf,
   planSetup,
@@ -29,6 +30,7 @@ import { CaptureService } from './capture';
 import { destroyStoredSecrets, loadOrCreateDataKey } from './keys';
 import { detectHardware } from './hardware';
 import { ModelManager } from './models';
+import { runOpenMausBotTask } from './openmausbot';
 import { choosePlatform, type Platform } from './platform';
 
 export interface RuntimeOptions {
@@ -225,6 +227,18 @@ export class TwinRuntime {
         },
         { focusApp: app => platform.focus(app), frontmostApp: () => platform.frontmost() },
       );
+    });
+  }
+
+  delegateRoutine(automationId: string, taskBrief: string): Promise<AgentDelegationResult> {
+    const automation = this.agent.automations().find(view => view.automation.id === automationId)?.automation;
+    if (!automation) throw new Error('Unknown automation.');
+    const config = this.agent.configuration;
+    return runOpenMausBotTask({
+      command: config.openMausBotCommand,
+      target: config.openMausBotTarget,
+      automation,
+      taskBrief,
     });
   }
 

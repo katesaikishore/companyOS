@@ -62,6 +62,15 @@ export interface PendingRunView {
   expiresAt: number;
 }
 
+/** Sanitized result from an explicitly approved OpenMausBot handoff. */
+export interface AgentDelegationResult {
+  state: 'completed' | 'idle' | 'needs-input' | 'failed' | 'stalled' | 'timed-out' | 'cancelled';
+  summary: string;
+  threadId?: string;
+  /** The harness job tree only; transcripts and screenshots are never passed to the renderer. */
+  taskTree?: string;
+}
+
 export interface TwinStatus {
   capture: { state: 'capturing' | 'paused' | 'idle' | 'locked' | 'unsupported'; detail: string };
   config: TwinConfig;
@@ -104,6 +113,8 @@ export interface TwinBridge {
   revertLast(automationId: string): Promise<AutomationView>;
   /** Answers an offer. `run: true` starts a supervised run, where each external step still asks. */
   answerPendingRun(id: string, run: boolean): Promise<void>;
+  /** Starts a multi-agent job for an accepted routine after a native data-sharing confirmation. */
+  delegateRoutine(automationId: string, taskBrief: string): Promise<AgentDelegationResult>;
 
   exportData(): Promise<string>;
   deleteAll(): Promise<void>;

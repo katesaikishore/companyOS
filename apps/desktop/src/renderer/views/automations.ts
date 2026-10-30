@@ -1,4 +1,4 @@
-import type { AutomationView, AutonomyLevel, Param, RunRecord, RunResult, Step, TwinStatus } from '@companyos/twin-core';
+import type { AgentDelegationResult, AutomationView, AutonomyLevel, Param, RunRecord, RunResult, Step, TwinStatus } from '@companyos/twin-core';
 import { h, type Child } from '../dom.js';
 import { button, chip, emptyState, pageHeader, panel, panelHead, progressBar } from '../components/ui.js';
 import { DAY_MS, clamp01, formatRate, formatWhen, percent, plural } from '../format.js';
@@ -131,12 +131,79 @@ export function automationDetailView(status: TwinStatus, id: string): HTMLElemen
     ),
     result ? resultPanel(result) : undefined,
     autonomyPanel(view),
+    agentDelegationPanel(view, status.config.openMausBotTarget),
     h(
       'div',
       { class: 'split' },
       h('div', { class: 'stack' }, workflowPanel(view), runsPanel(view)),
       h('div', { class: 'stack' }, gatePanel(view), floorPanel()),
     ),
+  );
+}
+
+function agentDelegationPanel(view: AutomationView, target: string): HTMLElement {
+  const automation = view.automation;
+  const key = `agent-task:${automation.id}`;
+  const brief = state.agentTaskBriefs.get(automation.id) ?? '';
+  const result = state.agentTaskResults.get(automation.id);
+  const configured = Boolean(target.trim());
+  let submitButton: HTMLButtonElement | undefined;
+  const taskBrief = h('textarea', {
+    class: 'input task-brief',
+    rows: 4,
+    maxlength: 500,
+    placeholder: 'Describe the outcome you want and any constraints.',
+    'aria-label': 'Task outcome for OpenMausBot',
+    'data-testid': 'agent-task-brief',
+    value: brief,
+    oninput: (event: Event) => {
+      const value = (event.currentTarget as HTMLTextAreaElement).value;
+      state.agentTaskBriefs.set(automation.id, value);
+      if (submitButton) submitButton.disabled = !value.trim() || pending(key);
+    },
+  });
+  submitButton = button(pending(key) ? 'Waiting for OpenMausBot…' : 'Create task tree', {
+    variant: 'primary',
+    testid: 'agent-task-submit',
+    disabled: !brief.trim() || pending(key),
+    onClick: () =>
+      void call(key, async twin => {
+        state.agentTaskResults.set(automation.id, await twin.delegateRoutine(automation.id, state.agentTaskBriefs.get(automation.id) ?? ''));
+      }),
+  });
+
+  return panel({ testid: 'automation-agent-delegation', labelledBy: 'agent-delegation-title' },
+    h(
+      'div',
+      { class: 'panel-head wrap' },
+      h('h2', { class: 'panel-title', id: 'agent-delegation-title' }, 'Delegate a task tree'),
+      h('span', { class: 'panel-note' }, 'Start a multi-agent job from this routine with a clear outcome.'),
+    ),
+    h('p', { class: 'muted small' },
+      configured
+        ? `Configured OpenMausBot target: ${target}. The job receives this brief plus the routine name, app sequence and estimated cadence.`
+        : 'Connect an existing OpenMausBot lead bot or room in Settings to enable handoffs.',
+    ),
+    configured ? taskBrief : undefined,
+    h('div', { class: 'actions' },
+      configured
+        ? submitButton
+        : button('Configure OpenMausBot', { onClick: () => go('#/settings') }),
+    ),
+    result ? agentTaskResultPanel(result) : undefined,
+  );
+}
+
+function agentTaskResultPanel(result: AgentDelegationResult): HTMLElement {
+  return h('div', { class: 'agent-task-result', 'data-testid': 'agent-task-result' },
+    h('div', { class: 'run-result-head mono' }, h('strong', null, result.state), result.threadId ? ` · ${result.threadId}` : ''),
+    h('p', { class: 'small' }, result.summary),
+    result.taskTree
+      ? h('details', { class: 'agent-task-tree' },
+          h('summary', null, 'Show task hierarchy'),
+          h('pre', { class: 'code-block' }, result.taskTree),
+        )
+      : undefined,
   );
 }
 

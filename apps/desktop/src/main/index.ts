@@ -29,6 +29,7 @@ import {
 import { APP_ORIGIN, IPC } from '../shared/ipc';
 import { solidPng } from './icon';
 import { SecureStorageUnavailableError } from './keys';
+import { buildOpenMausBotPrompt } from './openmausbot';
 import { TwinRuntime } from './runtime';
 
 /** Pages are served from a private scheme. Module scripts need it, because Chromium blocks them on file://. */
@@ -114,6 +115,35 @@ function registerIpc(): void {
     await requireRuntime().answerPendingRun(offer, run);
     if (!requireRuntime().hasPendingOffers()) hideTray();
   });
+  handle(IPC.delegateRoutine, async (id, brief) => {
+    const automation = automationId(id);
+    if (typeof brief !== 'string' || brief.length > 500 || /[\u0000-\u0008\u000b-\u001f\u007f]/.test(brief)) {
+      throw new Error('Describe the task in 1–500 characters.');
+    }
+    const taskBrief = brief.trim();
+    if (!taskBrief) throw new Error('Describe the task in 1–500 characters.');
+
+    const status = requireRuntime().status();
+    const selected = status.automations.find(view => view.automation.id === automation)?.automation;
+    if (!selected) throw new Error('Unknown automation.');
+    const target = status.config.openMausBotTarget.trim();
+    if (!target || !/^[\p{L}\p{N}][\p{L}\p{N}_.@ -]*$/u.test(target)) {
+      throw new Error('Set a valid OpenMausBot lead bot or room in Settings first.');
+    }
+    const prompt = buildOpenMausBotPrompt(selected, taskBrief);
+    const confirmation: MessageBoxOptions = {
+      type: 'warning',
+      buttons: ['Send task', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      message: `Send this task to OpenMausBot (${target})?`,
+      detail: `${prompt}\n\nOpenMausBot uses its own configured models, connected apps and account credentials. companyOS autonomy settings do not control its agents. The prompt does not include activity history, screenshots, window contents or companyOS credentials.`,
+    };
+    const parent = parentWindow();
+    const confirmed = parent ? await dialog.showMessageBox(parent, confirmation) : await dialog.showMessageBox(confirmation);
+    if (confirmed.response !== 0) return { state: 'cancelled', summary: 'The handoff was cancelled.' };
+    return requireRuntime().delegateRoutine(automation, taskBrief);
+  });
 
   handle(IPC.openMainWindow, route => {
     if (route !== undefined && (typeof route !== 'string' || !/^#\/[a-z0-9/-]{0,80}$/.test(route))) {
@@ -131,7 +161,7 @@ function registerIpc(): void {
       defaultId: 1,
       cancelId: 1,
       message: 'The export is not encrypted',
-      detail: 'It lists every app switch the twin recorded, with timestamps, and any URL shapes. Keep it somewhere private, and do not put it in a synced folder.',
+      detail: 'It includes every recorded app switch with timestamps, URL shapes, your settings, and any configured OpenMausBot executable and target. Keep it somewhere private, and do not put it in a synced folder.',
     };
     const parent = parentWindow();
     const warned = parent ? await dialog.showMessageBox(parent, warning) : await dialog.showMessageBox(warning);

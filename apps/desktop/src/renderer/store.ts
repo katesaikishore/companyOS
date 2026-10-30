@@ -1,4 +1,4 @@
-import type { HardwareProfile, RunResult, SetupPlan, TwinBridge, TwinConfig, TwinStatus } from '@companyos/twin-core';
+import type { AgentDelegationResult, HardwareProfile, RunResult, SetupPlan, TwinBridge, TwinConfig, TwinStatus } from '@companyos/twin-core';
 
 export type Route =
   | { name: 'overview' }
@@ -37,6 +37,8 @@ export const state = {
   selectedSuggestion: undefined as string | undefined,
   selectedLedger: undefined as string | undefined,
   runResults: new Map<string, RunResult>(),
+  agentTaskBriefs: new Map<string, string>(),
+  agentTaskResults: new Map<string, AgentDelegationResult>(),
 };
 
 let renderer: (() => void) | undefined;
