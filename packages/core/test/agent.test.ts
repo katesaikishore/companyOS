@@ -3,18 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import {
-  CloudTraceSchema,
-  Pseudonymizer,
-  TwinAgent,
-  buildCloudTrace,
-  mineRoutines,
-  normalizeSignal,
-  segment,
-  type Executor,
-  type MessagesClient,
-  type TwinEvent,
-} from '../src';
+import { TwinAgent, mineRoutines, normalizeSignal, segment, type Executor, type TwinEvent } from '../src';
 import { SECRET_QUERY, at, workdays } from './fixtures';
 
 const DAY = 86_400_000;
@@ -107,51 +96,6 @@ describe('routine to automation', () => {
   });
 });
 
-describe('cloud naming', () => {
-  it('is off by default', async () => {
-    const { agent } = seeded(10);
-    await expect(agent.requestName(agent.suggestions()[0].routine.id)).rejects.toThrow(/off/);
-  });
-
-  it('sends only the strict trace and records it in the ledger', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'twin-cloud-'));
-    const key = randomBytes(32);
-    const now = at(10, 0);
-    const seed = openAgent(dir, key, now);
-    seed.updateConfig({ watchBrowsers: true });
-    for (const signal of workdays(10)) seed.ingest(signal);
-    const create = vi.fn(async () => ({
-      content: [{ type: 'text', text: JSON.stringify({ name: 'Weekly reconciliation', description: 'Moves numbers from a sheet to mail and chat.' }) }],
-      stop_reason: 'end_turn',
-    }));
-    const agent = openAgent(dir, key, now, { messages: { create } });
-    agent.updateConfig({ cloudEnabled: true });
-
-    const routineId = agent.suggestions().find(s => s.routine.steps.length === 4)!.routine.id;
-    const name = await agent.requestName(routineId);
-
-    expect(name?.name).toBe('Weekly reconciliation');
-    const body = JSON.stringify(create.mock.calls[0][0]);
-    for (const raw of ['excel', 'calc', 'outlook', 'slack', 'chrome', 'docs.example.com', SECRET_QUERY]) {
-      expect(body.toLowerCase()).not.toContain(raw);
-    }
-    expect(body).toContain('claude-opus-5-5');
-    expect(agent.ledger()).toHaveLength(1);
-    expect(agent.ledger()[0]).toMatchObject({ outcome: 'ok', purpose: 'name_automation' });
-  });
-});
-
-describe('trace schema', () => {
-  it('refuses a trace with an extra raw field', () => {
-    const events: TwinEvent[] = workdays(10)
-      .map((signal, i) => normalizeSignal(signal, { excludedApps: [], watchBrowsers: true, newId: () => `e${i}` }))
-      .filter((e): e is TwinEvent => e !== null);
-    const routine = mineRoutines(segment(events, 3_600_000)).find(r => r.steps.length === 4)!;
-    const trace = buildCloudTrace(routine, new Pseudonymizer(Buffer.alloc(32, 9)));
-    expect(() => CloudTraceSchema.parse({ ...trace, url: 'https://x.example' })).toThrow();
-  });
-});
-
 describe('persistence and retention', () => {
   it('reopens with the same automations and settings', () => {
     const { dir, key, now, agent } = seeded(10);
@@ -226,22 +170,84 @@ describe('review fixes', () => {
     expect(result.status).toBe('blocked');
     expect(agent.automations()[0].state.level).toBe(2);
   });
+});
 
-  it('records the fields sent even when the reply cannot be used', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'twin-ledger-'));
+describe('dismissals, the automations switch, the ledger and the overview', () => {
+  function seededAgent(days = 10) {
+    const dir = mkdtempSync(join(tmpdir(), 'twin-overview-'));
     const key = randomBytes(32);
-    const now = at(10, 0);
-    const seed = openAgent(dir, key, now);
-    seed.updateConfig({ watchBrowsers: true });
-    for (const signal of workdays(10)) seed.ingest(signal);
-    const create = vi.fn(async () => ({ content: [{ type: 'text', text: 'not json' }], stop_reason: 'end_turn' }));
-    const agent = openAgent(dir, key, now, { messages: { create } });
-    agent.updateConfig({ cloudEnabled: true });
+    const now = at(days, 0);
+    const agent = openAgent(dir, key, now);
+    agent.updateConfig({ watchBrowsers: true });
+    for (const signal of workdays(days)) agent.ingest(signal);
+    return { agent, dir, key, now };
+  }
 
-    await expect(agent.requestName(routineId(agent))).rejects.toThrow(/not a usable name/);
-    expect(create).toHaveBeenCalledTimes(1);
-    expect(agent.ledger()).toHaveLength(1);
-    expect(agent.ledger()[0].outcome).toBe('error');
-    expect(agent.ledger()[0].fieldsSent.length).toBeGreaterThan(0);
+  it('a dismissed routine is not suggested again, and survives a restart', () => {
+    const { agent, dir, key, now } = seededAgent(10);
+    const id = agent.suggestions().find(suggestion => suggestion.routine.steps.length === 4)!.routine.id;
+    agent.dismissRoutine(id);
+    expect(agent.suggestions().some(suggestion => suggestion.routine.id === id)).toBe(false);
+    expect(openAgent(dir, key, now).suggestions().some(suggestion => suggestion.routine.id === id)).toBe(false);
+  });
+
+  it('stopping automations blocks every run, but a dry run still previews', async () => {
+    const { agent } = seededAgent(10);
+    const id = agent.acceptRoutine(agent.suggestions()[0].routine.id).automation.id;
+    agent.setLevel(id, 3);
+    agent.updateConfig({ automationsEnabled: false });
+    const executor = { focusApp: vi.fn(async () => true), frontmostApp: async () => undefined };
+    await expect(agent.run(id, { mode: 'supervised', approve: async () => true }, executor)).rejects.toThrow(/stopped/);
+    expect(executor.focusApp).not.toHaveBeenCalled();
+    await expect(agent.run(id, { mode: 'dry_run' }, executor)).resolves.toMatchObject({ status: 'dry_run' });
+  });
+
+  it('records network calls, shows them newest last, and keeps them through export', () => {
+    const { agent } = seededAgent(3);
+    agent.recordNetworkCall({ ts: 1, purpose: 'model_download', modelId: 'a', host: 'huggingface.co', path: '/x', bytes: 10, sha256Verified: true, outcome: 'ok' });
+    agent.recordNetworkCall({ ts: 2, purpose: 'model_download', modelId: 'b', host: 'huggingface.co', path: '/y', bytes: 0, sha256Verified: false, outcome: 'failed' });
+    expect(agent.networkLedger().map(entry => entry.modelId)).toEqual(['a', 'b']);
+    expect((agent.exportAll() as { network: unknown[] }).network).toHaveLength(2);
+  });
+
+  it('records installed models once per id, and removes them', () => {
+    const { agent } = seededAgent(3);
+    agent.markModelInstalled({ id: 'qwen3-4b', sha256: 'a'.repeat(64), bytes: 1, installedAt: 1 });
+    agent.markModelInstalled({ id: 'qwen3-4b', sha256: 'b'.repeat(64), bytes: 2, installedAt: 2 });
+    expect(agent.configuration.installedModels).toEqual([{ id: 'qwen3-4b', sha256: 'b'.repeat(64), bytes: 2, installedAt: 2 }]);
+    agent.removeModelRecord('qwen3-4b');
+    expect(agent.configuration.installedModels).toEqual([]);
+  });
+
+  it('marks setup complete and keeps the theme', () => {
+    const { agent, dir, key, now } = seededAgent(3);
+    agent.updateConfig({ theme: 'dark' });
+    agent.completeSetup();
+    const reopened = openAgent(dir, key, now);
+    expect(reopened.configuration.setupCompleted).toBe(true);
+    expect(reopened.configuration.theme).toBe('dark');
+  });
+
+  it('counts focus switches by weekday and hour over four weeks', () => {
+    const { agent } = seededAgent(10);
+    const grid = agent.activityGrid(28);
+    expect(grid).toHaveLength(7);
+    expect(grid.every(row => row.length === 24)).toBe(true);
+    const total = grid.flat().reduce((sum, value) => sum + value, 0);
+    expect(total).toBe(agent.observed().recordedFocusEvents);
+    expect(grid[new Date(at(9, 9)).getDay() === 0 ? 6 : new Date(at(9, 9)).getDay() - 1][9]).toBeGreaterThan(0);
+  });
+
+  it('reports observed days and the store size without reading content', () => {
+    const { agent } = seededAgent(10);
+    expect(agent.observed().observedDays).toBeGreaterThanOrEqual(9);
+    expect(agent.storageBytes()).toBeGreaterThan(0);
+  });
+
+  it('gives an accepted automation a time estimate from the routine', () => {
+    const { agent } = seededAgent(10);
+    const view = agent.acceptRoutine(agent.suggestions()[0].routine.id);
+    expect(view.automation.estimate?.occurrencesPerWeek).toBeGreaterThan(0);
+    expect(view.automation.estimate?.minutesPerWeek).toBeGreaterThan(0);
   });
 });

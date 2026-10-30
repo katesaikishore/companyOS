@@ -1,21 +1,29 @@
-import Anthropic from '@anthropic-ai/sdk';
 import {
   TwinAgent,
+  TwinConfigSchema,
+  effectOfOp,
+  effectsOf,
+  planSetup,
+  resolveStep,
   type Automation,
   type AutomationView,
   type AutonomyLevel,
   type Decision,
+  type DraftStep,
   type Executor,
-  type MessagesClient,
-  type NameSuggestion,
+  type HardwareProfile,
   type RunResult,
+  type SetupPlan,
   type Step,
+  type SuggestionView,
   type TwinConfig,
+  type TwinStatus,
 } from '@companyos/twin-core';
 import { join } from 'node:path';
-import type { AppUsageView, SuggestionView, TwinStatus } from '@companyos/twin-core';
 import { CaptureService } from './capture';
-import { destroyStoredSecrets, loadApiKey, loadOrCreateDataKey, saveApiKey } from './keys';
+import { destroyStoredSecrets, loadOrCreateDataKey } from './keys';
+import { detectHardware } from './hardware';
+import { ModelManager } from './models';
 import { choosePlatform, type Platform } from './platform';
 
 export interface RuntimeOptions {
@@ -24,6 +32,9 @@ export interface RuntimeOptions {
   approve: (automation: Automation, step: Step, decision: Decision) => Promise<boolean>;
   /** Seconds since the last keyboard or mouse input. */
   idleSeconds: () => number;
+  /** Called when model downloads change, so open pages refresh. */
+  onChange: () => void;
+  fetchImpl?: typeof fetch;
 }
 
 const NO_CONTROL: Executor = {
@@ -33,50 +44,47 @@ const NO_CONTROL: Executor = {
   frontmostApp: async () => undefined,
 };
 
+const DAY_MS = 86_400_000;
+
 /**
- * Connects the twin engine to the operating system. It holds the data key and the Claude client,
- * and it is the only thing the IPC layer talks to. The renderer never receives a key or a raw event.
+ * Connects the twin engine to the operating system and to the model installer. It is the only thing the IPC
+ * layer talks to, so the page never receives a key, a raw event, or a path it did not ask for.
  */
 export class TwinRuntime {
   private readonly agent: TwinAgent;
   private readonly capture: CaptureService;
   private readonly platform: Platform | undefined;
-  private claude: Anthropic | undefined;
+  private readonly models: ModelManager;
+  private hardwareProfile: Promise<HardwareProfile> | undefined;
 
   private constructor(
     private readonly options: RuntimeOptions,
     platform: Platform | undefined,
     detail: string,
     dataKey: Buffer,
-    apiKey: string | undefined,
   ) {
     this.platform = platform;
-    this.claude = apiKey ? new Anthropic({ apiKey }) : undefined;
-    const claude: MessagesClient = {
-      messages: {
-        create: async body => {
-          if (!this.claude) throw new Error('No Claude API key is configured.');
-          // The request body is the JSON shape the core builds; the SDK's typed params accept it at runtime.
-          return (await this.claude.messages.create(body as never)) as never;
-        },
-      },
-    };
-    this.agent = new TwinAgent({ dataDir: join(options.userData, 'twin'), dataKey, claude });
+    this.agent = new TwinAgent({ dataDir: join(options.userData, 'twin'), dataKey });
     this.capture = new CaptureService({ agent: this.agent, platform, idleSeconds: options.idleSeconds }, detail);
+    this.models = new ModelManager({
+      modelsDir: join(options.userData, 'models'),
+      agent: this.agent,
+      onChange: options.onChange,
+      fetchImpl: options.fetchImpl,
+    });
   }
 
   static async create(options: RuntimeOptions): Promise<TwinRuntime> {
     const dataKey = await loadOrCreateDataKey(options.userData);
-    const apiKey = await loadApiKey(options.userData);
     const { platform, detail } = await choosePlatform();
-    return new TwinRuntime(options, platform, detail, dataKey, apiKey);
+    return new TwinRuntime(options, platform, detail, dataKey);
   }
 
-  start(): void {
-    // Retention is enforced at launch as well as daily, so an app restarted more often than once a day still prunes.
+  async start(): Promise<void> {
     this.agent.prune();
+    await this.models.reconcile();
     this.capture.start();
-    setInterval(() => this.agent.prune(), 24 * 60 * 60 * 1000).unref();
+    setInterval(() => this.agent.prune(), DAY_MS).unref();
   }
 
   stop(): void {
@@ -91,42 +99,74 @@ export class TwinRuntime {
     this.capture.setPaused(paused);
   }
 
+  hardware(): Promise<HardwareProfile> {
+    this.hardwareProfile ??= detectHardware(this.options.userData);
+    return this.hardwareProfile;
+  }
+
+  async setupPlan(): Promise<SetupPlan> {
+    return planSetup(await this.hardware());
+  }
+
+  installModel(modelId: string): void {
+    this.models.install(modelId);
+  }
+
+  cancelDownload(modelId: string): void {
+    this.models.cancel(modelId);
+  }
+
+  removeModel(modelId: string): Promise<void> {
+    return this.models.remove(modelId);
+  }
+
+  completeSetup(): void {
+    this.agent.completeSetup();
+  }
+
   status(): TwinStatus {
-    const usage: AppUsageView[] = this.agent.appUsage(7).map(entry => ({
-      app: entry.app,
-      windowClass: entry.windowClass,
-      events: entry.events,
-    }));
-    const suggestions: SuggestionView[] = this.agent.suggestions().map(({ routine, preview }) => ({
-      routineId: routine.id,
-      support: routine.support,
-      days: routine.days,
-      score: routine.score,
-      steps: routine.steps.map(step => ({
-        windowClass: step.windowClass,
-        app: step.app,
-        alternatives: step.options.length,
-      })),
-      previewName: preview.name,
-    }));
+    const suggestions = this.suggestionViews();
+    const automations = this.agent.automations();
+    const drafts = automations.filter(view => view.state.level === 2).length;
+    const minutesBack = automations
+      .filter(view => view.state.level >= 3)
+      .reduce((sum, view) => sum + (view.automation.estimate?.minutesPerWeek ?? 0), 0);
+    const observed = this.agent.observed();
     return {
       capture: this.capture.status,
       config: this.agent.configuration,
-      apiKeyConfigured: this.claude !== undefined,
-      usage,
+      usage: this.agent.appUsage(7).map(entry => ({ app: entry.app, windowClass: entry.windowClass, events: entry.events })),
       suggestions,
-      automations: this.agent.automations(),
-      ledger: this.agent.ledger(),
-      recordedFocusEvents: this.agent.appUsage(90).reduce((sum, entry) => sum + entry.events, 0),
+      automations,
+      network: this.agent.networkLedger(),
+      activity: this.agent.activityGrid(28),
+      recordedFocusEvents: observed.recordedFocusEvents,
+      storageBytes: this.agent.storageBytes(),
+      stats: {
+        routinesLearned: suggestions.length + automations.length,
+        waiting: suggestions.length + drafts,
+        runningOwn: automations.filter(view => view.state.level === 4).length,
+        minutesBackPerWeek: Math.round(minutesBack * 10) / 10,
+        observedDays: observed.observedDays,
+      },
+      downloads: this.models.states(),
     };
   }
 
   updateConfig(patch: Partial<TwinConfig>): TwinConfig {
-    return this.agent.updateConfig(patch);
+    return this.agent.updateConfig(TwinConfigSchema.partial().parse(patch));
+  }
+
+  stopAllAutomations(): void {
+    this.agent.updateConfig({ automationsEnabled: false });
   }
 
   acceptRoutine(routineId: string, name?: string): AutomationView {
     return this.agent.acceptRoutine(routineId, name);
+  }
+
+  dismissRoutine(routineId: string): void {
+    this.agent.dismissRoutine(routineId);
   }
 
   setLevel(automationId: string, level: AutonomyLevel): AutomationView {
@@ -161,18 +201,6 @@ export class TwinRuntime {
     );
   }
 
-  requestName(routineId: string): Promise<NameSuggestion | undefined> {
-    return this.agent.requestName(routineId);
-  }
-
-  async setApiKey(key: string): Promise<boolean> {
-    const trimmed = key.trim();
-    if (!/^sk-ant-[A-Za-z0-9_-]{20,}$/.test(trimmed)) throw new Error('That does not look like a Claude API key.');
-    await saveApiKey(this.options.userData, trimmed);
-    this.claude = new Anthropic({ apiKey: trimmed });
-    return true;
-  }
-
   exportData(): string {
     return JSON.stringify(this.agent.exportAll(), null, 2);
   }
@@ -182,5 +210,31 @@ export class TwinRuntime {
     this.stop();
     this.agent.wipe();
     destroyStoredSecrets(this.options.userData);
+  }
+
+  private suggestionViews(): SuggestionView[] {
+    return this.agent.suggestions().map(({ routine, preview }) => {
+      const drafted: DraftStep[] = preview.steps.map(step => {
+        const param = preview.params.find(candidate => `$${candidate.name}` === step.app);
+        const app = resolveStep(step, preview.params, {}).app;
+        return {
+          kind: step.op === 'focus_app' ? 'act' : 'check',
+          app,
+          alternatives: param ? param.options.length - 1 : 0,
+          effect: effectOfOp(step.op, app),
+        };
+      });
+      return {
+        routineId: routine.id,
+        name: preview.name,
+        support: routine.support,
+        days: routine.days,
+        score: routine.score,
+        minutesPerWeek: preview.estimate?.minutesPerWeek ?? 0,
+        drafted,
+        effects: effectsOf(preview),
+        parameters: preview.params.map(param => ({ name: param.name, options: [...param.options] })),
+      };
+    });
   }
 }

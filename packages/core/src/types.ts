@@ -73,11 +73,18 @@ export interface TwinEvent {
 export const TwinConfigSchema = z
   .object({
     excludedApps: z.array(z.string().min(1).max(100)).max(200),
-    cloudEnabled: z.boolean(),
     maxAutonomyLevel: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
     allowUnattended: z.boolean(),
     watchBrowsers: z.boolean(),
     idleGapMs: z.number().int().min(60_000).max(3_600_000),
+    theme: z.enum(['system', 'light', 'dark']),
+    setupCompleted: z.boolean(),
+    /** The "stop all automations" switch. When false, no automation runs at any level. */
+    automationsEnabled: z.boolean(),
+    installedModels: z
+      .array(z.object({ id: z.string().max(80), sha256: z.string().length(64), bytes: z.number().int().nonnegative(), installedAt: z.number() }).strict())
+      .max(20),
+    dismissedRoutineIds: z.array(z.string().max(40)).max(500),
   })
   .strict();
 export type TwinConfig = z.infer<typeof TwinConfigSchema>;
@@ -95,11 +102,15 @@ export const DEFAULT_CONFIG: TwinConfig = {
     'seahorse',
     'kwalletmanager',
   ],
-  cloudEnabled: false,
   maxAutonomyLevel: 3,
   allowUnattended: false,
   // Browser capture is off until private windows can be detected. Otherwise the twin would record them.
   watchBrowsers: false,
   // Time spent in one app is dwell, not idleness. The OS idle signal marks idleness. This gap is a fallback.
   idleGapMs: 60 * 60_000,
+  theme: 'system',
+  setupCompleted: false,
+  automationsEnabled: true,
+  installedModels: [],
+  dismissedRoutineIds: [],
 };

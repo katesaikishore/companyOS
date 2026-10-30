@@ -30,6 +30,8 @@ export const AutomationSchema = z
     routineId: z.string().min(1),
     params: z.array(ParamSchema).max(6),
     steps: z.array(StepSchema).min(1).max(12),
+    /** Estimated time the routine takes by hand. Shown as "time back"; never measured from the person. */
+    estimate: z.object({ minutesPerWeek: z.number().nonnegative(), occurrencesPerWeek: z.number().nonnegative() }).strict().optional(),
   })
   .strict();
 
@@ -69,6 +71,10 @@ export function compileRoutine(routine: Routine, name: string = defaultName(rout
     routineId: routine.id,
     params,
     steps,
+    estimate: {
+      occurrencesPerWeek: routine.occurrencesPerWeek,
+      minutesPerWeek: Number(((routine.durationMs / 60_000) * routine.occurrencesPerWeek).toFixed(1)),
+    },
   });
 }
 

@@ -1,13 +1,21 @@
-import { hkdfSync } from 'node:crypto';
-import { isExcludedApp } from './classify';
 import { AutomationSchema, compileRoutine, effectsOf, type Automation } from './automation';
-import { buildCloudTrace, nameRoutine, type LedgerEntry, type MessagesClient, type NameSuggestion } from './cloud';
+import { isExcludedApp } from './classify';
 import { DEFAULT_MINING, mineRoutines, type Routine } from './mine';
-import { Pseudonymizer, normalizeSignal } from './redact';
-import { promotionCheck, promote as promoteState, recordRun, setLevel as applyLevel, initialState, type AutonomyConfig, type AutonomyState, type RunRecord } from './autonomy';
+import { normalizeSignal } from './redact';
+import {
+  promotionCheck,
+  promote as promoteState,
+  recordRun,
+  setLevel as applyLevel,
+  initialState,
+  type AutonomyConfig,
+  type AutonomyState,
+  type RunRecord,
+} from './autonomy';
 import { runAutomation, type Executor, type RunMode, type RunRequest, type RunResult } from './runner';
 import { segment, type Segment } from './segment';
 import { EncryptedStore } from './store';
+import type { InstalledModel, NetworkEntry } from './models/types';
 import {
   DEFAULT_CONFIG,
   TwinConfigSchema,
@@ -26,8 +34,6 @@ export interface AgentOptions {
   /** 32-byte data key. The desktop app obtains it from the OS keychain. Losing it loses the twin. */
   dataKey: Buffer;
   now?: () => number;
-  /** Optional. Only used when cloud escalation is switched on. */
-  claude?: MessagesClient;
 }
 
 export interface AutomationView {
@@ -47,25 +53,20 @@ export interface Suggestion {
  */
 export class TwinAgent {
   private readonly store: EncryptedStore;
-  private readonly pseudonyms: Pseudonymizer;
   private readonly now: () => number;
-  private readonly claude: MessagesClient | undefined;
   private config: TwinConfig;
   /** One run per automation at a time. Overlapping runs would overwrite each other's state. */
   private readonly running = new Set<string>();
 
   constructor(options: AgentOptions) {
     this.store = new EncryptedStore(options.dataDir, options.dataKey);
-    const pseudonymKey = hkdfSync('sha256', options.dataKey, Buffer.alloc(0), 'companyos-twin/pseudonyms', 32);
-    this.pseudonyms = new Pseudonymizer(Buffer.from(pseudonymKey));
     this.now = options.now ?? (() => Date.now());
-    this.claude = options.claude;
     const saved = this.store.readAll<unknown>('settings').at(-1);
     this.config = saved ? TwinConfigSchema.parse(saved) : { ...DEFAULT_CONFIG };
   }
 
   get configuration(): TwinConfig {
-    return { ...this.config, excludedApps: [...this.config.excludedApps] };
+    return { ...this.config, excludedApps: [...this.config.excludedApps], installedModels: [...this.config.installedModels] };
   }
 
   updateConfig(patch: Partial<TwinConfig>): TwinConfig {
@@ -100,12 +101,19 @@ export class TwinAgent {
     return { segments, routines: mineRoutines(segments, DEFAULT_MINING) };
   }
 
-  /** Detected routines that have not been accepted yet, each with the automation it would become. */
+  /** Detected routines that are neither accepted nor dismissed, each with the automation it would become. */
   suggestions(): Suggestion[] {
     const accepted = new Set(this.readAutomations().map(automation => automation.routineId));
+    const dismissed = new Set(this.config.dismissedRoutineIds);
     return this.analyze()
-      .routines.filter(routine => !accepted.has(routine.id))
+      .routines.filter(routine => !accepted.has(routine.id) && !dismissed.has(routine.id))
       .map(routine => ({ routine, preview: compileRoutine(routine) }));
+  }
+
+  /** "Not a routine". The routine is not suggested again. */
+  dismissRoutine(routineId: string): void {
+    if (this.config.dismissedRoutineIds.includes(routineId)) return;
+    this.updateConfig({ dismissedRoutineIds: [...this.config.dismissedRoutineIds, routineId].slice(-500) });
   }
 
   /** Accepting a routine creates a draft automation at level 2. Nothing runs yet. */
@@ -155,6 +163,9 @@ export class TwinAgent {
     request: { mode: RunMode; values?: Record<string, string>; approve?: RunRequest['approve'] },
     executor: Executor,
   ): Promise<RunResult> {
+    if (request.mode !== 'dry_run' && !this.config.automationsEnabled) {
+      throw new Error('Automations are stopped. Resume them in settings first.');
+    }
     if (this.running.has(automationId)) throw new Error('This automation is already running.');
     const automation = this.requireAutomation(automationId);
     const state = this.requireState(automationId);
@@ -205,34 +216,39 @@ export class TwinAgent {
     }
   }
 
-  /**
-   * Asks the cloud model to name a routine. Off by default. Only the strict, anonymised trace is sent,
-   * and every call is written to the ledger the person can read.
-   */
-  async requestName(routineId: string): Promise<NameSuggestion | undefined> {
-    if (!this.config.cloudEnabled) throw new Error('Cloud escalation is off. Turn it on in settings first.');
-    if (!this.claude) throw new Error('No Claude API key is configured.');
-    const routine = this.analyze().routines.find(candidate => candidate.id === routineId);
-    if (!routine) throw new Error('That routine is no longer detected.');
-
-    const trace = buildCloudTrace(routine, this.pseudonyms);
-    const result = await nameRoutine(trace, this.claude, this.now());
-    this.store.append('ledger', result.entry);
-    if (!result.suggestion) throw new Error(result.reason ?? 'No name was returned.');
-    return result.suggestion;
+  /** Every network call the twin has made. Stored sealed, shown to the person. */
+  recordNetworkCall(entry: NetworkEntry): void {
+    this.store.append('ledger', entry);
   }
 
-  ledger(): LedgerEntry[] {
-    return this.store.readAll<LedgerEntry>('ledger');
+  networkLedger(): NetworkEntry[] {
+    return this.store.readAll<NetworkEntry>('ledger');
   }
 
-  /** Drops events older than the retention window. Returns how many were removed. */
-  prune(): number {
-    const cutoff = this.now() - RETENTION_DAYS * DAY_MS;
-    const all = this.store.readAll<TwinEvent>('events');
-    const kept = all.filter(event => event.ts >= cutoff);
-    if (kept.length !== all.length) this.store.replaceAll('events', kept);
-    return all.length - kept.length;
+  /** Records a model that was downloaded and verified. A model with the same id is replaced. */
+  markModelInstalled(model: InstalledModel): void {
+    const others = this.config.installedModels.filter(installed => installed.id !== model.id);
+    this.updateConfig({ installedModels: [...others, model] });
+  }
+
+  removeModelRecord(modelId: string): void {
+    this.updateConfig({ installedModels: this.config.installedModels.filter(installed => installed.id !== modelId) });
+  }
+
+  completeSetup(): void {
+    this.updateConfig({ setupCompleted: true });
+  }
+
+  /** Focus switches by weekday (0 = Monday) and hour, over the last four weeks. */
+  activityGrid(days = 28): number[][] {
+    const grid = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => 0));
+    for (const event of this.recentEvents(days)) {
+      if (event.kind !== 'focus' || !event.app) continue;
+      const date = new Date(event.ts);
+      const weekday = (date.getDay() + 6) % 7;
+      grid[weekday][date.getHours()] += 1;
+    }
+    return grid;
   }
 
   /** Focus counts per app over the last N days, for the dashboard. Names stay on this device. */
@@ -250,6 +266,27 @@ export class TwinAgent {
       .slice(0, 10);
   }
 
+  /** Days since the first recorded event, and the number of focus events kept. */
+  observed(): { observedDays: number; recordedFocusEvents: number } {
+    const events = this.store.readAll<TwinEvent>('events').filter(event => event.kind === 'focus');
+    if (events.length === 0) return { observedDays: 0, recordedFocusEvents: 0 };
+    const first = Math.min(...events.map(event => event.ts));
+    return { observedDays: Math.max(0, Math.floor((this.now() - first) / DAY_MS)), recordedFocusEvents: events.length };
+  }
+
+  storageBytes(): number {
+    return this.store.sizeBytes();
+  }
+
+  /** Drops events older than the retention window. Returns how many were removed. */
+  prune(): number {
+    const cutoff = this.now() - RETENTION_DAYS * DAY_MS;
+    const all = this.store.readAll<TwinEvent>('events');
+    const kept = all.filter(event => event.ts >= cutoff);
+    if (kept.length !== all.length) this.store.replaceAll('events', kept);
+    return all.length - kept.length;
+  }
+
   /** Everything the twin holds about the person, for the person. */
   exportAll(): object {
     return {
@@ -258,7 +295,7 @@ export class TwinAgent {
       events: this.store.readAll<TwinEvent>('events'),
       automations: this.readAutomations(),
       autonomy: this.readStates(),
-      ledger: this.ledger(),
+      network: this.networkLedger(),
     };
   }
 

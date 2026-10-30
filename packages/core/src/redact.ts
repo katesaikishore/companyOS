@@ -22,7 +22,7 @@ export function templateUrl(raw: string): string | undefined {
   return `${url.hostname.toLowerCase()}${shape}`;
 }
 
-/** Keyed, deterministic pseudonyms. Used wherever data leaves the store (cloud traces, aggregates). */
+/** Keyed, deterministic pseudonyms. Use them for any data that leaves the store, such as future aggregates. */
 export class Pseudonymizer {
   constructor(private readonly key: Buffer) {
     if (key.length < 16) throw new Error('Pseudonymisation key is too short.');

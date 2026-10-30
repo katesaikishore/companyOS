@@ -17,6 +17,7 @@
     "test": "npm run test -w @companyos/twin-core",
     "start": "npm run build && npm run start -w @companyos/desktop",
     "dist": "npm run build && npm run dist -w @companyos/desktop",
-    "dist:dir": "npm run build && npm run dist:dir -w @companyos/desktop"
+    "dist:dir": "npm run build && npm run dist:dir -w @companyos/desktop",
+    "test:e2e": "npm run test:e2e -w @companyos/desktop"
   }
 }

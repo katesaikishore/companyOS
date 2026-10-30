@@ -49,11 +49,3 @@ export function destroyStoredSecrets(userData: string): void {
   rmSync(join(userData, 'data-key.bin'), { force: true });
   rmSync(join(userData, 'api-key.bin'), { force: true });
 }
-
-export async function loadApiKey(userData: string): Promise<string | undefined> {
-  return (await readSealed(join(userData, 'api-key.bin')))?.toString('utf8');
-}
-
-export async function saveApiKey(userData: string, key: string): Promise<void> {
-  await writeSealed(join(userData, 'api-key.bin'), Buffer.from(key, 'utf8'));
-}

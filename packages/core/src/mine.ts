@@ -30,12 +30,17 @@ export interface Routine {
   /** 0..1. Rises with support and with the number of distinct days. */
   score: number;
   segmentIds: string[];
+  /** Mean time from the first to the last step of one occurrence. */
+  durationMs: number;
+  occurrencesPerWeek: number;
 }
 
 interface Step {
   windowClass: WindowClass;
   app: string;
   urlTemplate?: string;
+  startTs: number;
+  endTs: number;
 }
 
 interface Group {
@@ -44,17 +49,28 @@ interface Group {
   occurrences: Step[][];
 }
 
-/** Collapses consecutive focus events of the same window class. 'other' apps are not mined. */
+/**
+ * Collapses consecutive focus events of the same window class. 'other' apps are not mined. Each step keeps the
+ * time it started and the time the next app took focus, so routine durations can be estimated.
+ */
 function collapse(segment: Segment): Step[] {
   const steps: Step[] = [];
-  for (const event of segment.events) {
+  const events = segment.events;
+  for (let index = 0; index < events.length; index++) {
+    const event = events[index];
     if (!event.app || !event.windowClass || event.windowClass === 'other') continue;
+    const endTs = events[index + 1]?.ts ?? segment.endTs;
     const last = steps[steps.length - 1];
-    if (last && last.windowClass === event.windowClass) continue;
+    if (last && last.windowClass === event.windowClass) {
+      last.endTs = endTs;
+      continue;
+    }
     steps.push({
       windowClass: event.windowClass,
       app: event.app,
       ...(event.urlTemplate ? { urlTemplate: event.urlTemplate } : {}),
+      startTs: event.ts,
+      endTs,
     });
   }
   return steps;
@@ -83,7 +99,7 @@ function mostCommon<T>(items: readonly T[]): T | undefined {
   return best;
 }
 
-function toRoutine(key: string, group: Group): Routine {
+function toRoutine(key: string, group: Group, weeks: number): Routine {
   const length = key.split('>').length;
   const steps: RoutineStep[] = [];
   for (let position = 0; position < length; position++) {
@@ -103,6 +119,8 @@ function toRoutine(key: string, group: Group): Routine {
 
   const support = group.segments.size;
   const days = group.days.size;
+  const durations = group.occurrences.map(occurrence => occurrence[occurrence.length - 1].endTs - occurrence[0].startTs);
+  const durationMs = durations.reduce((sum, value) => sum + value, 0) / Math.max(1, durations.length);
   return {
     id: createHash('sha256').update(key).digest('hex').slice(0, 12),
     steps,
@@ -110,6 +128,8 @@ function toRoutine(key: string, group: Group): Routine {
     days,
     score: Number((Math.min(1, support / 10) * Math.min(1, days / 7)).toFixed(3)),
     segmentIds: [...group.segments],
+    durationMs: Math.round(durationMs),
+    occurrencesPerWeek: Number((support / Math.max(1, weeks)).toFixed(2)),
   };
 }
 
@@ -159,5 +179,9 @@ export function mineRoutines(segments: readonly Segment[], options: MiningOption
     if (!dominated) maximal.push(candidate);
   }
 
-  return maximal.map(([key, group]) => toRoutine(key, group)).sort((a, b) => b.score - a.score);
+  const starts = segments.map(segment => segment.startTs);
+  const ends = segments.map(segment => segment.endTs);
+  const spanMs = starts.length ? Math.max(...ends) - Math.min(...starts) : 0;
+  const weeks = Math.max(1, spanMs / (7 * 86_400_000));
+  return maximal.map(([key, group]) => toRoutine(key, group, weeks)).sort((a, b) => b.score - a.score);
 }

@@ -2,24 +2,36 @@ import {
   app,
   BrowserWindow,
   dialog,
+  globalShortcut,
   ipcMain,
   Menu,
   nativeImage,
+  net,
   powerMonitor,
+  protocol,
+  screen,
   Tray,
   type MessageBoxOptions,
   type SaveDialogOptions,
 } from 'electron';
 import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { AutonomyLevelSchema, TwinConfigSchema, type Automation, type Decision, type Step } from '@companyos/twin-core';
-import { IPC } from '../shared/ipc';
+import { APP_ORIGIN, IPC } from '../shared/ipc';
 import { solidPng } from './icon';
 import { SecureStorageUnavailableError } from './keys';
 import { TwinRuntime } from './runtime';
 
+/** Pages are served from a private scheme. Module scripts need it, because Chromium blocks them on file://. */
+protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
+
+const RENDERER_DIR = join(__dirname, '..', 'renderer');
+const STOP_ALL_SHORTCUT = 'Control+Alt+.';
+
 let runtime: TwinRuntime | undefined;
-let window: BrowserWindow | undefined;
+let mainWindow: BrowserWindow | undefined;
+let trayWindow: BrowserWindow | undefined;
 let tray: Tray | undefined;
 let paused = false;
 let quitting = false;
@@ -32,22 +44,42 @@ function requireRuntime(): TwinRuntime {
 }
 
 /** The renderer is less trusted than the main process, so every value crossing IPC is checked. */
-function automationId(value: unknown): string {
-  if (typeof value !== 'string' || value.length === 0 || value.length > 80) throw new Error('Invalid automation id.');
+function text(value: unknown, pattern: RegExp, message: string): string {
+  if (typeof value !== 'string' || !pattern.test(value)) throw new Error(message);
   return value;
 }
 
-function routineId(value: unknown): string {
-  if (typeof value !== 'string' || value.length === 0 || value.length > 80) throw new Error('Invalid routine id.');
-  return value;
-}
+const automationId = (value: unknown) => text(value, /^auto_[a-f0-9]{12}$/, 'Invalid automation id.');
+const routineId = (value: unknown) => text(value, /^[a-f0-9]{12}$/, 'Invalid routine id.');
+const modelId = (value: unknown) => text(value, /^[a-z0-9.-]{1,80}$/, 'Invalid model id.');
 
 function handle(channel: string, fn: (...args: unknown[]) => unknown): void {
   ipcMain.handle(channel, (_event, ...args) => fn(...args));
 }
 
+function parentWindow(): BrowserWindow | undefined {
+  return mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
+}
+
+function showMainWindow(route?: string): void {
+  if (!mainWindow || mainWindow.isDestroyed()) createMainWindow();
+  mainWindow?.show();
+  mainWindow?.focus();
+  if (route) mainWindow?.webContents.send(IPC.navigate, route);
+}
+
+function stopAllAutomations(): void {
+  requireRuntime().stopAllAutomations();
+}
+
 function registerIpc(): void {
   handle(IPC.status, () => requireRuntime().status());
+  handle(IPC.hardware, () => requireRuntime().hardware());
+  handle(IPC.setupPlan, () => requireRuntime().setupPlan());
+  handle(IPC.installModel, id => requireRuntime().installModel(modelId(id)));
+  handle(IPC.cancelDownload, id => requireRuntime().cancelDownload(modelId(id)));
+  handle(IPC.removeModel, id => requireRuntime().removeModel(modelId(id)));
+  handle(IPC.completeSetup, () => requireRuntime().completeSetup());
 
   handle(IPC.setPaused, value => {
     if (typeof value !== 'boolean') throw new Error('Invalid value.');
@@ -57,30 +89,28 @@ function registerIpc(): void {
   });
 
   handle(IPC.updateConfig, patch => requireRuntime().updateConfig(TwinConfigSchema.partial().parse(patch)));
+  handle(IPC.stopAllAutomations, () => stopAllAutomations());
 
   handle(IPC.acceptRoutine, (id, name) =>
     requireRuntime().acceptRoutine(routineId(id), typeof name === 'string' ? name.slice(0, 80) : undefined),
   );
-
+  handle(IPC.dismissRoutine, id => requireRuntime().dismissRoutine(routineId(id)));
   handle(IPC.setLevel, (id, level) => requireRuntime().setLevel(automationId(id), AutonomyLevelSchema.parse(level)));
-
   handle(IPC.promote, id => requireRuntime().promote(automationId(id)));
-
   handle(IPC.dryRun, id => requireRuntime().dryRun(automationId(id)));
-
   handle(IPC.supervisedRun, id => requireRuntime().supervisedRun(automationId(id)));
-
   handle(IPC.revertLast, id => requireRuntime().revertLast(automationId(id)));
 
-  handle(IPC.requestName, id => requireRuntime().requestName(routineId(id)));
-
-  handle(IPC.setApiKey, key => {
-    if (typeof key !== 'string' || key.length > 200) throw new Error('Invalid key.');
-    return requireRuntime().setApiKey(key);
+  handle(IPC.openMainWindow, route => {
+    if (route !== undefined && (typeof route !== 'string' || !/^#\/[a-z0-9/-]{0,80}$/.test(route))) {
+      throw new Error('Invalid route.');
+    }
+    hideTray();
+    showMainWindow(route);
   });
 
   handle(IPC.exportData, async () => {
-    // Shown before the save dialog: the save dialog's own message is macOS-only, so it cannot carry this warning everywhere.
+    const data = requireRuntime().exportData();
     const warning: MessageBoxOptions = {
       type: 'warning',
       buttons: ['Export anyway', 'Cancel'],
@@ -93,7 +123,6 @@ function registerIpc(): void {
     const warned = parent ? await dialog.showMessageBox(parent, warning) : await dialog.showMessageBox(warning);
     if (warned.response !== 0) return '';
 
-    const data = requireRuntime().exportData();
     const options: SaveDialogOptions = {
       title: 'Export your twin data',
       defaultPath: 'companyos-twin-export.json',
@@ -112,7 +141,7 @@ function registerIpc(): void {
       defaultId: 1,
       cancelId: 1,
       message: 'Delete everything the twin knows about you?',
-      detail: 'This removes all events, automations, the cloud ledger and the stored Claude API key on this device. It cannot be undone.',
+      detail: 'This removes all events, automations, the network ledger and the installed models on this device. It cannot be undone.',
     };
     const parent = parentWindow();
     const choice = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
@@ -122,11 +151,6 @@ function registerIpc(): void {
     app.relaunch();
     app.exit(0);
   });
-}
-
-/** Dialogs attach to the main window when it exists, so they appear over it. */
-function parentWindow(): BrowserWindow | undefined {
-  return window && !window.isDestroyed() ? window : undefined;
 }
 
 /** Asks the person before each step the policy marks as needing confirmation. */
@@ -146,39 +170,100 @@ async function approveStep(automation: Automation, step: Step, decision: Decisio
   return result.response === 0;
 }
 
-function createWindow(): void {
-  window = new BrowserWindow({
-    width: 1120,
-    height: 800,
-    title: 'companyOS Twin',
-    webPreferences: {
-      preload: join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      sandbox: true,
-      nodeIntegration: false,
-    },
-  });
-  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  window.webContents.on('will-navigate', event => event.preventDefault());
-  window.on('close', event => {
-    if (!quitting) {
-      event.preventDefault();
-      window?.hide();
-    }
-  });
-  void window.loadFile(join(__dirname, '..', 'renderer', 'index.html'));
+/** Serves files from the renderer folder only. Anything outside it, or any other host, is a 404. */
+async function serveRenderer(request: Request): Promise<Response> {
+  const url = new URL(request.url);
+  if (url.hostname !== 'twin') return new Response('Not found', { status: 404 });
+  const relative = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname.slice(1));
+  const file = resolve(RENDERER_DIR, relative);
+  if (!file.startsWith(RENDERER_DIR + sep)) return new Response('Not found', { status: 404 });
+  return net.fetch(pathToFileURL(file).toString());
 }
 
-function showWindow(): void {
-  if (!window || window.isDestroyed()) createWindow();
-  window?.show();
-  window?.focus();
+const WEB_PREFERENCES = {
+  contextIsolation: true,
+  sandbox: true,
+  nodeIntegration: false,
+  webSecurity: true,
+  preload: join(__dirname, 'preload.js'),
+};
+
+function createMainWindow(): void {
+  mainWindow = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    minWidth: 960,
+    minHeight: 640,
+    title: 'companyOS Twin',
+    backgroundColor: '#F3F4F1',
+    show: false,
+    webPreferences: WEB_PREFERENCES,
+  });
+  mainWindow.once('ready-to-show', () => mainWindow?.show());
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  mainWindow.webContents.on('will-navigate', event => event.preventDefault());
+  mainWindow.on('close', event => {
+    if (!quitting) {
+      event.preventDefault();
+      mainWindow?.hide();
+    }
+  });
+  void mainWindow.loadURL(`${APP_ORIGIN}/index.html`);
+}
+
+function createTrayWindow(): void {
+  trayWindow = new BrowserWindow({
+    width: 400,
+    height: 600,
+    show: false,
+    frame: false,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    backgroundColor: '#101214',
+    webPreferences: WEB_PREFERENCES,
+  });
+  trayWindow.on('blur', () => hideTray());
+  void trayWindow.loadURL(`${APP_ORIGIN}/tray.html`);
+}
+
+function hideTray(): void {
+  if (trayWindow && !trayWindow.isDestroyed() && trayWindow.isVisible()) trayWindow.hide();
+}
+
+/** Opens the tray popover under the menu bar icon, clamped to the screen it appears on. */
+function toggleTray(): void {
+  if (!trayWindow || trayWindow.isDestroyed()) createTrayWindow();
+  if (trayWindow?.isVisible()) {
+    trayWindow.hide();
+    return;
+  }
+  const primary = screen.getPrimaryDisplay().workArea;
+  const bounds = tray?.getBounds();
+  const anchor =
+    bounds && bounds.width > 0
+      ? bounds
+      : { x: primary.x + primary.width - 40, y: primary.y, width: 20, height: 20 };
+  const size = trayWindow?.getBounds() ?? { width: 400, height: 600 };
+  const area = screen.getDisplayNearestPoint({ x: anchor.x, y: anchor.y }).workArea;
+  const x = Math.min(
+    Math.max(anchor.x + Math.round(anchor.width / 2) - Math.round(size.width / 2), area.x + 8),
+    area.x + area.width - size.width - 8,
+  );
+  const belowAnchor = anchor.y < area.y + area.height / 2;
+  const y = belowAnchor ? anchor.y + anchor.height + 6 : anchor.y - size.height - 6;
+  trayWindow?.setPosition(x, Math.max(area.y + 8, y));
+  trayWindow?.show();
+  trayWindow?.focus();
 }
 
 function rebuildTrayMenu(): void {
   tray?.setContextMenu(
     Menu.buildFromTemplate([
-      { label: 'Open companyOS Twin', click: showWindow },
+      { label: 'Open companyOS Twin', click: () => showMainWindow() },
       {
         label: paused ? 'Resume capture' : 'Pause capture',
         click: () => {
@@ -187,6 +272,7 @@ function rebuildTrayMenu(): void {
           rebuildTrayMenu();
         },
       },
+      { label: 'Stop all automations', click: () => stopAllAutomations() },
       { type: 'separator' },
       {
         label: 'Quit',
@@ -200,9 +286,10 @@ function rebuildTrayMenu(): void {
 }
 
 function createTray(): void {
-  tray = new Tray(nativeImage.createFromBuffer(solidPng(16, [46, 125, 50])));
+  tray = new Tray(nativeImage.createFromBuffer(solidPng(16, [14, 107, 92])));
   tray.setToolTip('companyOS Twin');
-  tray.on('click', showWindow);
+  tray.on('click', toggleTray);
+  tray.on('right-click', () => tray?.popUpContextMenu());
   rebuildTrayMenu();
 }
 
@@ -212,31 +299,44 @@ async function boot(): Promise<void> {
       userData,
       approve: approveStep,
       idleSeconds: () => powerMonitor.getSystemIdleTime(),
+      onChange: () => undefined,
     });
   } catch (error) {
     // Any failure at startup, including a damaged key file, ends visibly. A silent process with no window is worse.
-    const detail = error instanceof SecureStorageUnavailableError ? error.message : 'The stored key could not be opened. Check the twin folder or reset it from another start.';
+    const detail =
+      error instanceof SecureStorageUnavailableError
+        ? error.message
+        : 'The stored key could not be opened. Check the twin folder, or reset it from another start.';
     dialog.showErrorBox('companyOS Twin cannot start', detail);
     app.quit();
     return;
   }
 
-  runtime.start();
+  await runtime.start();
   powerMonitor.on('lock-screen', () => runtime?.setLocked(true));
   powerMonitor.on('unlock-screen', () => runtime?.setLocked(false));
 
+  protocol.handle('app', serveRenderer);
   registerIpc();
-  createWindow();
+  createMainWindow();
+  createTrayWindow();
   createTray();
+
+  try {
+    globalShortcut.register(STOP_ALL_SHORTCUT, () => stopAllAutomations());
+  } catch {
+    // Another app may own the shortcut. The tray menu still stops everything.
+  }
 }
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', showWindow);
+  app.on('second-instance', () => showMainWindow());
   app.on('before-quit', () => {
     quitting = true;
     runtime?.stop();
+    globalShortcut.unregisterAll();
   });
   void app.whenReady().then(boot).catch(error => {
     dialog.showErrorBox('companyOS Twin cannot start', error instanceof Error ? error.message : 'Unknown error.');

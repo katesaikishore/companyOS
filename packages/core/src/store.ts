@@ -11,6 +11,7 @@ import {
   readSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -104,6 +105,14 @@ export class EncryptedStore {
     const body = records.map(record => `${this.seal(collection, JSON.stringify(record))}\n`).join('');
     writeFileSync(tmp, body, { mode: 0o600 });
     renameSync(tmp, path);
+  }
+
+  /** Bytes on disk across all collections. Shown to the person; the content stays sealed. */
+  sizeBytes(): number {
+    return COLLECTIONS.reduce((total, collection) => {
+      const path = this.fileFor(collection);
+      return total + (existsSync(path) ? statSync(path).size : 0);
+    }, 0);
   }
 
   wipe(): void {
