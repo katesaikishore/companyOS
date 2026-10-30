@@ -8,6 +8,10 @@ files:
   - dist/**/*
   - package.json
 asar: true
+asarUnpack:
+  # node-llama-cpp loads its native addon and llama.cpp libraries from disk, which asar cannot serve.
+  # On Electron it maps the .asar path to .asar.unpacked itself, so these files must be unpacked.
+  - "**/node_modules/@node-llama-cpp/**"
 # Unsigned local builds are fine for development. Release builds need signing identities in CI secrets:
 #   macOS:   CSC_LINK, CSC_KEY_PASSWORD, APPLE_API_KEY, APPLE_API_KEY_ID, APPLE_API_ISSUER
 #   Windows: WIN_CSC_LINK, WIN_CSC_KEY_PASSWORD (or Azure Artifact Signing)

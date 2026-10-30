@@ -22,6 +22,7 @@ import {
   type TwinConfig,
   type TwinStatus,
   type PendingRunView,
+  type RoutineNamingJob,
   normalizeAppName,
 } from '@companyos/twin-core';
 import { randomUUID } from 'node:crypto';
@@ -29,7 +30,7 @@ import { join } from 'node:path';
 import { CaptureService } from './capture';
 import { destroyStoredSecrets, loadOrCreateDataKey } from './keys';
 import { detectHardware } from './hardware';
-import { ModelManager } from './models';
+import { ModelManager, createRoutineNamer } from './models';
 import { runOpenMausBotTask } from './openmausbot';
 import { choosePlatform, type Platform } from './platform';
 
@@ -39,6 +40,8 @@ export interface RuntimeOptions {
   approve: (automation: Automation, step: Step, decision: Decision) => Promise<boolean>;
   /** Seconds since the last keyboard or mouse input. */
   idleSeconds: () => number;
+  /** True when the device runs on battery. Model work waits for AC power or idleness (plan §5.5). */
+  onBattery: () => boolean;
   /** Called when model downloads change, so open pages refresh. */
   onChange: () => void;
   /** Called when a routine is offered. The main process shows the tray and a notification. */
@@ -66,6 +69,7 @@ export class TwinRuntime {
   private readonly capture: CaptureService;
   private readonly platform: Platform | undefined;
   private readonly models: ModelManager;
+  private readonly namer: RoutineNamingJob;
   private hardwareProfile: Promise<HardwareProfile> | undefined;
   private readonly gate = new TriggerGate();
   /** Offers waiting for an answer. At most one at a time. */
@@ -91,6 +95,15 @@ export class TwinRuntime {
       onChange: options.onChange,
       fetchImpl: options.fetchImpl,
     });
+    this.namer = createRoutineNamer({
+      agent: this.agent,
+      models: this.models,
+      workerPath: join(__dirname, 'llm-worker.js'),
+      idleSeconds: options.idleSeconds,
+      onBattery: options.onBattery,
+      preferredModelId: async () => (await this.setupPlan()).chat?.spec.id,
+      onChange: options.onChange,
+    });
   }
 
   static async create(options: RuntimeOptions): Promise<TwinRuntime> {
@@ -103,11 +116,13 @@ export class TwinRuntime {
     this.agent.prune();
     await this.models.reconcile();
     this.capture.start();
+    this.namer.start();
     setInterval(() => this.agent.prune(), DAY_MS).unref();
   }
 
   stop(): void {
     this.capture.stop();
+    this.namer.stop();
   }
 
   setLocked(locked: boolean): void {

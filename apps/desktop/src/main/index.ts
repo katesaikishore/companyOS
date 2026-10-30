@@ -374,6 +374,7 @@ async function boot(): Promise<void> {
       approve: approveStep,
       // The test platform has no real input device, so idle time is pinned to zero for it.
       idleSeconds: () => (process.env.COMPANYOS_TEST_FAKE_PLATFORM ? 0 : powerMonitor.getSystemIdleTime()),
+      onBattery: () => powerMonitor.onBatteryPower,
       onChange: () => undefined,
       onOffer: showOffer,
       onUnattendedRun: result => {

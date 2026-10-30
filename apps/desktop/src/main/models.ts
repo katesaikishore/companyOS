@@ -1,15 +1,20 @@
 import {
   DownloadError,
   HUGGING_FACE_HOSTS,
+  LocalModelClient,
+  RoutineNamingJob,
   downloadModel,
   findModel,
   modelUrl,
+  modelWorkAllowed,
   verifyModelFile,
   type DownloadState,
   type ModelSpec,
   type NetworkEntry,
   type TwinAgent,
+  type WorkerChannel,
 } from '@companyos/twin-core';
+import { utilityProcess, type UtilityProcess } from 'electron';
 import { mkdir, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -40,6 +45,15 @@ export class ModelManager {
   /** Downloads currently running, queued, or finished in this session. */
   states(): DownloadState[] {
     return [...this.active.values()].map(entry => ({ ...entry.state }));
+  }
+
+  /** The models folder. Nothing outside it is ever loaded as a model. */
+  get directory(): string {
+    return this.options.modelsDir;
+  }
+
+  pathFor(spec: ModelSpec): string {
+    return join(this.options.modelsDir, spec.file);
   }
 
   /** Queues an install. Resolves once it is queued; progress arrives through states(). */
@@ -132,4 +146,65 @@ export class ModelManager {
     }
     this.options.onChange();
   }
+}
+
+/** Starts the model worker in an Electron utility process, so inference never runs on the main thread. */
+export function forkModelWorker(workerPath: string): WorkerChannel {
+  const child: UtilityProcess = utilityProcess.fork(workerPath, [], {
+    serviceName: 'companyOS model',
+    // The worker's output is dropped on purpose. It must never reach a log, because prompts are routine data.
+    stdio: ['ignore', 'ignore', 'ignore'],
+  });
+  return {
+    post: message => child.postMessage(message),
+    onMessage: listener => child.on('message', listener),
+    onExit: listener => {
+      child.once('exit', listener);
+    },
+    kill: () => {
+      child.kill();
+    },
+  };
+}
+
+export interface RoutineNamerOptions {
+  agent: TwinAgent;
+  models: ModelManager;
+  /** The compiled worker, next to this module. */
+  workerPath: string;
+  /** Seconds since the last keyboard or mouse input. */
+  idleSeconds: () => number;
+  onBattery: () => boolean;
+  /** The chat model this device was recommended, when there is one. */
+  preferredModelId: () => Promise<string | undefined>;
+  /** Called when names change, so open pages refresh. */
+  onChange: () => void;
+}
+
+/** The worker keeps the model in memory only while it is in use, then stops. */
+const WORKER_IDLE_STOP_MS = 5 * 60_000;
+
+/**
+ * Wires the engine's naming job to this device: the models folder, the utility process that runs the model, and the
+ * power and idle state. The job itself is in the engine, where it is tested with fakes.
+ */
+export function createRoutineNamer(options: RoutineNamerOptions): RoutineNamingJob {
+  const { agent, models } = options;
+  return new RoutineNamingJob({
+    routines: () => agent.suggestions().map(suggestion => suggestion.routine),
+    rename: (routineId, name) => agent.setRoutineName(routineId, name),
+    installed: () => agent.configuration.installedModels,
+    preferredModelId: options.preferredModelId,
+    modelPath: spec => models.pathFor(spec),
+    verify: spec => models.hasVerifiedFile(spec),
+    openModel: modelPath =>
+      new LocalModelClient({
+        modelPath,
+        modelsDir: models.directory,
+        start: () => forkModelWorker(options.workerPath),
+        idleStopMs: WORKER_IDLE_STOP_MS,
+      }),
+    allowed: () => modelWorkAllowed({ onBattery: options.onBattery(), idleSeconds: options.idleSeconds() }),
+    changed: options.onChange,
+  });
 }
