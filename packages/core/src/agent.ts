@@ -82,6 +82,11 @@ export class TwinAgent {
     this.config = saved ? TwinConfigSchema.parse(saved) : { ...DEFAULT_CONFIG };
   }
 
+  /** Closes the encrypted store. Windows will not delete the store's files while it is open, so tests close before cleanup. */
+  close(): void {
+    this.store.close();
+  }
+
   get configuration(): TwinConfig {
     return { ...this.config, excludedApps: [...this.config.excludedApps], installedModels: [...this.config.installedModels] };
   }

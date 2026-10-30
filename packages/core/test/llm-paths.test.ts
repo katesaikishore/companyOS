@@ -1,4 +1,5 @@
 import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -19,7 +20,8 @@ function layout() {
 describe('resolveModelPath', () => {
   it('accepts a .gguf file inside the models folder and returns its real path', async () => {
     const { modelsDir, inside } = layout();
-    await expect(resolveModelPath(modelsDir, inside)).resolves.toBe(realpathSync(inside));
+    // The check uses fs/promises realpath. On Windows the synchronous one can return a short 8.3 name for the same file.
+    await expect(resolveModelPath(modelsDir, inside)).resolves.toBe(await realpath(inside));
   });
 
   it('refuses a .gguf file outside the models folder', async () => {

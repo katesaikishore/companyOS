@@ -185,8 +185,8 @@ describe('run safety', () => {
 describe('long routine names', () => {
   it('compiles a six-step routine whose window classes make a name over 80 characters, and the agent still lists it', () => {
     const dir = mkdtempSync(join(tmpdir(), 'twin-long-name-'));
+    const agent = new TwinAgent({ dataDir: dir, dataKey: randomBytes(32), now: () => at(10, 12) });
     try {
-      const agent = new TwinAgent({ dataDir: dir, dataKey: randomBytes(32), now: () => at(10, 12) });
       // Spreadsheet and document alternate, so no two neighbours share a window class and every step is kept.
       const apps = ['Microsoft Excel', 'Microsoft Word', 'Microsoft Excel', 'Microsoft Word', 'Microsoft Excel', 'Microsoft Word'];
       for (let day = 0; day < 10; day++) {
@@ -200,6 +200,7 @@ describe('long routine names', () => {
       expect(compiled.name.endsWith('…')).toBe(true);
       expect(agent.suggestions().some(suggestion => suggestion.routine.steps.length === 6)).toBe(true);
     } finally {
+      agent.close();
       rmSync(dir, { recursive: true, force: true });
     }
   });

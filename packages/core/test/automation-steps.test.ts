@@ -488,6 +488,8 @@ describe('promotion gate for the new steps', () => {
 
   it('treats a stored list that says read_only for open_file as external, and never offers it level 4', () => {
     const dir = mkdtempSync(join(tmpdir(), 'twin-stale-effects-'));
+    let store: EncryptedStore | undefined;
+    let agent: TwinAgent | undefined;
     try {
       const key = randomBytes(32);
       const automation = AutomationSchema.parse({
@@ -500,11 +502,11 @@ describe('promotion gate for the new steps', () => {
       });
       // Saved before open_file was classified as an external effect, so the stored list still says read_only.
       const stored: AutonomyState = { ...earned(automation), effects: ['read_only'] };
-      const store = new EncryptedStore(dir, key);
+      store = new EncryptedStore(dir, key);
       store.replaceAll('automations', [automation]);
       store.replaceAll('autonomy', [stored]);
 
-      const agent = new TwinAgent({ dataDir: dir, dataKey: key, now: () => NOW });
+      agent = new TwinAgent({ dataDir: dir, dataKey: key, now: () => NOW });
       agent.updateConfig({ maxAutonomyLevel: 4, allowUnattended: true });
       const [view] = agent.automations();
       expect(view.state.effects).toEqual(['external_effect']);
@@ -513,6 +515,8 @@ describe('promotion gate for the new steps', () => {
       expect(() => agent.promote(automation.id)).toThrow(/Not eligible for level 4/);
       expect(agent.automations()[0].state.level).toBe(3);
     } finally {
+      store?.close();
+      agent?.close();
       rmSync(dir, { recursive: true, force: true });
     }
   });
