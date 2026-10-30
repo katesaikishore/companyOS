@@ -38,7 +38,7 @@ export function suggestionsView(status: TwinStatus): HTMLElement {
         h(
           'p',
           { class: 'muted small suggest-note' },
-          "Dismissed suggestions teach the twin what isn't a routine. They are not shown again.",
+          "Dismissed routines are hidden from Suggestions and not suggested again.",
         ),
       ),
       detailCard(current),
@@ -47,7 +47,6 @@ export function suggestionsView(status: TwinStatus): HTMLElement {
 }
 
 function suggestionCard(item: SuggestionView, selected: boolean): HTMLElement {
-  const lastWeek = Math.round((item.support / Math.max(item.days, 1)) * 7);
   return h(
     'button',
     {
@@ -62,7 +61,7 @@ function suggestionCard(item: SuggestionView, selected: boolean): HTMLElement {
       },
     },
     h('span', { class: 'suggest-name' }, item.name),
-    h('span', { class: 'muted small' }, `${lastWeek} times last week`),
+    h('span', { class: 'muted small' }, `${item.support} times in the last 30 days`),
     h('span', { class: 'offer mono small' }, `About ${Math.round(item.minutesPerWeek)} min / week by hand (estimate)`),
   );
 }
@@ -132,7 +131,7 @@ function detailCard(item: SuggestionView): HTMLElement {
         disabled: busy,
         onClick: () => void call(dismissKey, twin => twin.dismissRoutine(item.routineId)),
       }),
-      h('span', { class: 'muted small foot-note' }, 'Nothing runs until you raise it. You confirm every step on the first runs.'),
+      h('span', { class: 'muted small foot-note' }, 'Nothing runs until you raise it. Steps that focus mail or chat, or open a link, file or shortcut, ask you first.'),
     ),
   );
 }

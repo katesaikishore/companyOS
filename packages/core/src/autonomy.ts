@@ -112,7 +112,7 @@ function gateRequirements(
       label: 'Unattended runs switched on in settings',
       value: unattended ? 'On' : 'Off',
       met: unattended,
-      reason: 'Unattended runs are switched off in settings.',
+      reason: 'Unattended runs need the unattended switch on and the highest level set to 4 in Settings.',
     },
     {
       label: 'Every effect local and reversible',

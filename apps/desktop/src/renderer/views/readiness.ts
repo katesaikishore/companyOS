@@ -363,14 +363,16 @@ function gatePanel(row: AppReadinessRow): HTMLElement {
       emptyState('No automation for this app yet.', 'Accept a routine that uses it in Suggestions to start its gate.'),
     );
   }
+  const reached = gate.level >= 4;
   const met = gate.requirements.filter(requirement => requirement.met).length;
   return h(
     'section',
     { class: 'panel', 'aria-labelledby': 'readiness-gate-title', 'data-testid': 'readiness-gate' },
-    panelHead('Promotion gate to L4', `${met} of ${gate.requirements.length} met`, 'readiness-gate-title'),
+    panelHead('Promotion gate to L4', reached ? undefined : `${met} of ${gate.requirements.length} met`, 'readiness-gate-title'),
     h('p', { class: 'muted small' }, `${gate.automationName} · ${levelLabel(gate.level)}`),
-    gate.level >= 4 ? h('p', { class: 'muted small' }, 'This automation is already at L4.') : undefined,
-    h('ul', { class: 'readiness-gate-list' }, ...gate.requirements.map(gateRow)),
+    reached
+      ? h('p', { class: 'muted small' }, 'This automation is already at L4.')
+      : h('ul', { class: 'readiness-gate-list' }, ...gate.requirements.map(gateRow)),
     h('a', { class: 'crumb', href: `#/automations/${encodeURIComponent(gate.automationId)}` }, 'Open this automation'),
   );
 }

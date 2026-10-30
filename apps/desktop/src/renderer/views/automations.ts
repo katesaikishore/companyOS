@@ -1,12 +1,10 @@
 import type { AgentDelegationResult, AutomationView, AutonomyLevel, HandoffView, Param, RunRecord, RunResult, Step, TwinStatus } from '@companyos/twin-core';
 import { h, type Child } from '../dom.js';
 import { button, chip, emptyState, pageHeader, panel, panelHead, progressBar } from '../components/ui.js';
-import { DAY_MS, clamp01, formatWhen, handoffStateLabel, noticedPerWeek, percent, plural, summarySourceLabel } from '../format.js';
+import { formatWhen, handoffStateLabel, noticedPerWeek, percent, plural, summarySourceLabel } from '../format.js';
 import {
   GATE,
   LEVEL_NAMES,
-  effectsAreLocal,
-  gateFraction,
   levelLabel,
   levelTone,
   passRate,
@@ -304,7 +302,7 @@ function ladderLabel(cell: LadderCell): string {
     case 'eligible':
       return `${cell.code} · eligible`;
     case 'locked':
-      return `${cell.code} · not for this one`;
+      return `${cell.code} · not in this version`;
     case 'next':
       return `${cell.code} · not yet`;
   }
@@ -427,64 +425,39 @@ function runRow(id: string, run: RunRecord, newest: boolean): HTMLElement {
   );
 }
 
-interface GateCriterion {
-  label: string;
-  value: string;
-  fraction: number;
-}
-
 function gatePanel(view: AutomationView): HTMLElement {
   const { state: autonomy, promotion } = view;
-  const now = Date.now();
-  const windowStart = now - GATE.windowDays * DAY_MS;
-  const recent = autonomy.runs.filter(run => run.ts >= windowStart);
-  const supervised = autonomy.runs.filter(run => run.mode === 'supervised' && run.level === 3).length;
-  const rate = passRate(recent);
-  const undos = recent.filter(run => run.reverted).length;
-  const local = effectsAreLocal(autonomy.effects);
-
-  const criteria: GateCriterion[] = [
-    {
-      label: 'Runs you supervised',
-      value: `${supervised} / ${GATE.supervisedRuns}`,
-      fraction: gateFraction(supervised, GATE.supervisedRuns),
-    },
-    {
-      label: 'Runs in 14 days',
-      value: `${recent.length} / ${GATE.runsInWindow}`,
-      fraction: gateFraction(recent.length, GATE.runsInWindow),
-    },
-    {
-      label: 'Checks passed',
-      value: rate === undefined ? 'no checks yet' : `${percent(rate)} / ${percent(GATE.passRate)}`,
-      fraction: rate === undefined ? 0 : clamp01(rate / GATE.passRate),
-    },
-    { label: 'Your corrections or undos', value: String(undos), fraction: undos === 0 ? 1 : 0 },
-    { label: 'Effects local and reversible', value: local ? 'yes' : 'no', fraction: local ? 1 : 0 },
-  ];
-
+  const reached = autonomy.level >= 4;
   return panel({ testid: 'automation-gate', labelledBy: 'gate-title', extra: 'gate' },
     h(
       'div',
       { class: 'gate-head' },
       h('h2', { class: 'panel-title', id: 'gate-title' }, `Promotion gate · to L4`),
-      h('span', { class: 'panel-note' }, `All five must hold over the last ${GATE.windowDays} days.`),
-    ),
-    ...criteria.map(criterion =>
       h(
-        'div',
-        { class: 'gate-row' },
-        h('div', { class: 'gate-line' }, h('span', null, criterion.label), h('span', { class: 'mono small teal' }, criterion.value)),
-        progressBar(criterion.fraction),
+        'span',
+        { class: 'panel-note' },
+        reached
+          ? 'This automation is already at L4.'
+          : `All ${promotion.requirements.length} conditions must hold. Runs, checks and undos count the last ${GATE.windowDays} days; supervised runs count all history.`,
       ),
     ),
+    ...(reached
+      ? []
+      : promotion.requirements.map(requirement =>
+          h(
+            'div',
+            { class: 'gate-row' },
+            h('div', { class: 'gate-line' }, h('span', null, requirement.label), h('span', { class: 'mono small teal' }, requirement.value)),
+            progressBar(requirement.progress ?? (requirement.met ? 1 : 0)),
+          ),
+        )),
     button('Let it run on its own', {
       variant: 'teal',
       testid: 'automation-promote',
       disabled: autonomy.level >= 4 || !promotion.eligible || pending(`promote:${autonomy.automationId}`),
       onClick: () => void call(`promote:${autonomy.automationId}`, twin => twin.promote(autonomy.automationId)),
     }, 'btn-block'),
-    promotion.eligible
+    promotion.eligible || reached
       ? undefined
       : h(
           'ul',
@@ -497,14 +470,14 @@ function gatePanel(view: AutomationView): HTMLElement {
 
 function floorPanel(): HTMLElement {
   return panel({ testid: 'automation-floor', labelledBy: 'floor-title', extra: 'panel-warn' },
-    h('h2', { class: 'floor-title', id: 'floor-title' }, 'Always asks, at any level'),
+    h('h2', { class: 'floor-title', id: 'floor-title' }, 'Asks first when supervised'),
     h(
       'ul',
       { class: 'floor-list' },
-      ...['Money and payments', 'Messages to new recipients', 'Deleting anything', 'Credentials and permissions', 'Installs and accepting terms'].map(
+      ...['Steps that focus mail or chat', 'Steps that open a link, file or shortcut'].map(
         item => h('li', null, item),
       ),
     ),
-    h('p', { class: 'small floor-foot' }, 'Checked by a local policy engine before every step.'),
+    h('p', { class: 'small floor-foot' }, 'Unattended runs never run these steps: they are refused, not asked. A local policy engine checks every step.'),
   );
 }

@@ -42,8 +42,8 @@ export function ledgerView(status: TwinStatus): HTMLElement {
       'section',
       { class: 'tiles', 'aria-label': 'Ledger summary' },
       tile('Allowed hosts', 'huggingface.co, *.hf.co and the update feed', 'Model downloads and update checks only'),
-      tile('Personal data in these calls', 'None', 'Nothing about you leaves in these calls'),
-      tile('Calls', String(entries.length), 'Every call, newest first'),
+      tile('Personal data in these calls', 'None', 'No twin data is sent. Hosts still see your IP address.'),
+      tile('Calls', String(entries.length), 'Newest first. Update file downloads are not listed.'),
     ),
     selected
       ? h(

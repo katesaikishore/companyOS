@@ -506,7 +506,7 @@ function devicePanel(status: TwinStatus, callsThisWeek: number): HTMLElement {
       deviceFact('Key held by', 'This device · OS keychain'),
       deviceFact('Raw events kept', plural(status.retentionDays, 'day')),
       deviceFact('Model and update calls this week', h('a', { href: '#/ledger' }, String(callsThisWeek))),
-      deviceFact('Sent outside this device', 'Only handoffs you approve, to OpenMausBot', true),
+      deviceFact('Sent outside this device', 'Approved handoffs to OpenMausBot. Model and update requests carry no activity.', true),
     ),
     h('a', { class: 'ov-device-link', href: '#/settings' }, 'Manage privacy and data →'),
   );

@@ -126,7 +126,7 @@ function capturePanel(watchBrowsers: boolean, excluded: readonly string[], bridg
     h(
       'p',
       { class: 'muted small' },
-      'The twin forgets anything recorded from an excluded app, and never records it again.',
+      'The twin forgets anything it recorded from an excluded app and never records it again. Handoffs you already sent still name the app until they expire or you delete everything.',
     ),
     exclusionEditor('exclusions:settings', excluded, 'settings-exclusions', next =>
       void saveConfig('exclusions:settings', { excludedApps: next }),
