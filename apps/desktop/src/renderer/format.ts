@@ -62,3 +62,33 @@ export function formatWhen(ts: number, now: number = Date.now()): string {
 export function formatRate(perWeek: number): string {
   return perWeek < 1 ? perWeek.toFixed(1) : String(Math.round(perWeek));
 }
+
+/** An app name in title case, such as "Microsoft Word". Names are stored and compared in lower case, so only the display changes. */
+export function titleCase(name: string): string {
+  return name.replace(/(^|[\s-])(\S)/g, (_, lead: string, letter: string) => lead + letter.toUpperCase());
+}
+
+/** App names joined as a routine shows them: " → " between steps and " or " between options. Only the names change case. */
+export function titleCaseSequence(sequence: string): string {
+  // The split keeps each join, so the odd parts are joins and the even parts are names.
+  return sequence
+    .split(/( → | or )/)
+    .map((part, index) => (index % 2 === 0 ? titleCase(part) : part))
+    .join('');
+}
+
+/** How often something was noticed. It reads "about once a week" when the rate rounds to one. */
+export function noticedPerWeek(perWeek: number): string {
+  const rate = formatRate(perWeek);
+  return Number(rate) === 1 ? 'Noticed about once a week.' : `Noticed ${rate} times a week.`;
+}
+
+/** The source of a summary: OpenMausBot's reply, or companyOS's own message when companyOS itself failed. */
+export function summarySourceLabel(localFailure: boolean): string {
+  return localFailure ? 'From companyOS' : 'From OpenMausBot';
+}
+
+/** A handoff state in words. Each state reads as itself, except unknown, which reads as a neutral status. */
+export function handoffStateLabel(state: string): string {
+  return state === 'unknown' ? 'Status unknown' : state;
+}

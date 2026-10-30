@@ -1,7 +1,7 @@
-import type { AutomationView, AutonomyLevel, HandoffView, Param, RunRecord, RunResult, Step, TwinStatus } from '@companyos/twin-core';
+import type { AgentDelegationResult, AutomationView, AutonomyLevel, HandoffView, Param, RunRecord, RunResult, Step, TwinStatus } from '@companyos/twin-core';
 import { h, type Child } from '../dom.js';
 import { button, chip, emptyState, pageHeader, panel, panelHead, progressBar } from '../components/ui.js';
-import { DAY_MS, clamp01, formatRate, formatWhen, percent, plural } from '../format.js';
+import { DAY_MS, clamp01, formatRate, formatWhen, handoffStateLabel, percent, plural, summarySourceLabel } from '../format.js';
 import {
   GATE,
   LEVEL_NAMES,
@@ -165,7 +165,9 @@ function agentDelegationPanel(view: AutomationView, target: string, handoff: Han
       if (submitButton) submitButton.disabled = !value.trim() || busy;
     },
   });
-  submitButton = button(busy ? 'Waiting for OpenMausBot…' : 'Create task tree', {
+  // Until the send is on record, the button waits for the answer to the native confirmation. After that, it waits for the job.
+  const waitingLabel = handoff?.state === 'sending' ? 'Waiting for OpenMausBot…' : 'Waiting for your confirmation…';
+  submitButton = button(busy ? waitingLabel : 'Create task tree', {
     variant: 'primary',
     testid: 'agent-task-submit',
     disabled: !brief.trim() || busy,
@@ -173,7 +175,7 @@ function agentDelegationPanel(view: AutomationView, target: string, handoff: Han
       void call(key, async twin => {
         const sent = await twin.delegateRoutine(automation.id, state.agentTaskBriefs.get(automation.id) ?? '');
         // A cancelled confirmation is not recorded, so the page says so here instead of showing a handoff.
-        if (sent.state === 'cancelled') setNotice(sent.summary, 'info');
+        if (cancelledByPerson(sent)) setNotice(sent.summary, 'info');
       }),
   });
 
@@ -208,19 +210,28 @@ function agentDelegationPanel(view: AutomationView, target: string, handoff: Han
   );
 }
 
-/** The newest handoff for the routine: its state, thread, reply and job tree, as the twin kept them. */
+/** True only when the person refused the native confirmation. A job that ends as cancelled is a handoff the twin recorded. */
+function cancelledByPerson(result: Pick<AgentDelegationResult, 'state'> & { cancelledByPerson?: boolean }): boolean {
+  return result.state === 'cancelled' && result.cancelledByPerson === true;
+}
+
+/**
+ * The newest handoff for the routine: its state, thread, reply and job tree, as the twin kept them. The reply is labelled
+ * by its source, so the person can tell OpenMausBot's words from companyOS's own message.
+ */
 function agentTaskResultPanel(handoff: HandoffView): HTMLElement {
   return h('div', { class: 'agent-task-result', 'data-testid': 'agent-task-result' },
     h('div', { class: 'run-result-head mono' },
-      h('strong', null, handoff.state),
+      h('strong', null, handoffStateLabel(handoff.state)),
       handoff.threadId ? ` · ${handoff.threadId}` : '',
       ` · sent ${formatWhen(handoff.sentAt)}`,
     ),
-    h('p', { class: 'small' },
-      handoff.state === 'sending'
-        ? 'Waiting for OpenMausBot to reply.'
-        : handoff.summary || 'No reply text was returned.',
-    ),
+    handoff.state === 'sending'
+      ? h('p', { class: 'small' }, 'Waiting for OpenMausBot to reply.')
+      : h('div', null,
+          h('span', { class: 'muted small', 'data-testid': 'agent-task-source' }, summarySourceLabel(handoff.localFailure)),
+          h('p', { class: 'small' }, handoff.summary || 'No reply text was returned.'),
+        ),
     handoff.taskTree
       ? h('details', { class: 'agent-task-tree' },
           h('summary', null, 'Show task hierarchy'),

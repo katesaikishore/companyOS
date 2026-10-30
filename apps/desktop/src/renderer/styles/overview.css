@@ -732,11 +732,11 @@
 }
 
 .ov-axis-middle {
-  grid-column: 7 / span 5;
+  grid-column: 7 / span 4;
 }
 
 .ov-axis-end {
-  grid-column: 12;
+  grid-column: 11 / span 2;
   text-align: right;
 }
 
@@ -810,6 +810,18 @@
   font-family: 'Geist Mono', ui-monospace, monospace;
   text-align: right;
   overflow-wrap: anywhere;
+}
+
+/* A long value stacks under its label, so it keeps the card's width. */
+.ov-fact.is-wide {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 4px;
+}
+
+.ov-fact.is-wide dd {
+  text-align: left;
 }
 
 .ov-device-link {

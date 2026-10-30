@@ -1,7 +1,7 @@
 import type { HandoffView, TwinStatus } from '@companyos/twin-core';
 import { h, type Child } from '../dom.js';
 import { button, chip, emptyState, pageHeader } from '../components/ui.js';
-import { formatRate, formatWhen } from '../format.js';
+import { formatWhen, handoffStateLabel, noticedPerWeek, summarySourceLabel } from '../format.js';
 import { handoffTone } from '../labels.js';
 import { go, requestRender, state } from '../store.js';
 
@@ -87,7 +87,7 @@ export function harnessView(status: TwinStatus): HTMLElement {
       'div',
       { class: 'harness-layout' },
       leadColumn(target, groupByRoutine(handoffs), selected?.id),
-      selected ? conversation(selected, target) : emptyConversation(target),
+      selected ? conversation(selected) : emptyConversation(target),
     ),
     h(
       'p',
@@ -108,7 +108,7 @@ function groupByRoutine(handoffs: readonly HandoffView[]): RoutineGroup[] {
   return [...groups.values()];
 }
 
-/** The lead bot or room from Settings, then the handoffs grouped by routine. */
+/** The lead bot or room from Settings, labelled as the current setting, then the handoffs grouped by routine. */
 function leadColumn(target: string, groups: RoutineGroup[], selectedId: string | undefined): HTMLElement {
   return h(
     'aside',
@@ -120,6 +120,7 @@ function leadColumn(target: string, groups: RoutineGroup[], selectedId: string |
       target
         ? h('span', { class: 'harness-lead-name', 'data-testid': 'harness-target' }, target)
         : h('span', { class: 'muted small' }, 'Not set. Choose one in Settings to send handoffs.'),
+      target ? h('span', { class: 'muted small' }, 'Current setting. New handoffs go here.') : undefined,
       target ? undefined : button('Open Settings', { onClick: () => go('#/settings') }, 'btn-small'),
     ),
     groups.length === 0
@@ -154,7 +155,7 @@ function handoffRow(item: HandoffView, selected: boolean): HTMLElement {
     h(
       'span',
       { class: 'harness-row-meta' },
-      chip(item.state, handoffTone(item.state)),
+      chip(handoffStateLabel(item.state), handoffTone(item.state)),
       h('span', { class: 'mono small muted' }, formatWhen(item.sentAt)),
     ),
   );
@@ -166,16 +167,19 @@ function preview(text: string): string {
   return firstLine.length > PREVIEW_CHARS ? `${firstLine.slice(0, PREVIEW_CHARS - 1)}…` : firstLine;
 }
 
-/** The selected handoff as a conversation: what companyOS sent, what came back, and the job it started. */
-function conversation(item: HandoffView, target: string): HTMLElement {
+/**
+ * The selected handoff as a conversation: what companyOS sent, what came back, and the job it started. The title is the
+ * target this handoff was sent to, as it was stored, not the current setting.
+ */
+function conversation(item: HandoffView): HTMLElement {
   return h(
     'article',
     { class: 'harness-thread', 'data-testid': 'harness-conversation' },
     h(
       'header',
       { class: 'harness-thread-head' },
-      h('h2', { class: 'harness-thread-title' }, target || 'OpenMausBot'),
-      target ? h('span', { class: 'mono small muted' }, 'Lead bot or room') : undefined,
+      h('h2', { class: 'harness-thread-title' }, item.target || 'OpenMausBot'),
+      item.target ? h('span', { class: 'mono small muted' }, 'Lead bot or room when sent') : undefined,
     ),
     h('span', { class: 'harness-stamp mono small muted' }, formatWhen(item.sentAt)),
     companyOsMessage(item),
@@ -187,7 +191,7 @@ function conversation(item: HandoffView, target: string): HTMLElement {
 /** What companyOS sent: the routine name, the observed app sequence, the cadence and the brief. */
 function companyOsMessage(item: HandoffView): HTMLElement {
   const sequence = item.apps.length > 0 ? item.apps.join(' → ') : 'App sequence not recorded';
-  const cadence = item.cadencePerWeek === undefined ? undefined : cadenceLabel(item.cadencePerWeek);
+  const cadence = item.cadencePerWeek === undefined ? undefined : noticedPerWeek(item.cadencePerWeek);
   return h(
     'div',
     { class: 'harness-bubble harness-bubble-out', 'data-testid': 'harness-sent' },
@@ -197,22 +201,17 @@ function companyOsMessage(item: HandoffView): HTMLElement {
   );
 }
 
-/** The routine's estimated cadence, in the words the automations page uses. */
-function cadenceLabel(perWeek: number): string {
-  const rate = formatRate(perWeek);
-  return rate === '1' ? 'Noticed once a week.' : `Noticed ${rate} times a week.`;
-}
-
 /** What came back: OpenMausBot's reply, or companyOS's own message when the handoff never got a reply. */
 function replyMessage(item: HandoffView): HTMLElement {
-  const body = item.state === 'sending' ? 'Waiting for OpenMausBot to reply.' : item.summary || 'No reply text was returned.';
+  const sending = item.state === 'sending';
+  const body = sending ? 'Waiting for OpenMausBot to reply.' : item.summary || 'No reply text was returned.';
   return h(
     'div',
     {
       class: item.localFailure ? 'harness-bubble harness-bubble-in is-local' : 'harness-bubble harness-bubble-in',
       'data-testid': 'harness-reply',
     },
-    h('span', { class: 'harness-bubble-head' }, item.localFailure ? 'companyOS' : 'OpenMausBot reply'),
+    h('span', { class: 'harness-bubble-head' }, sending ? 'OpenMausBot reply' : summarySourceLabel(item.localFailure)),
     h('span', { class: 'harness-bubble-body' }, body),
   );
 }
@@ -227,7 +226,7 @@ function jobCard(item: HandoffView): HTMLElement {
       { class: 'harness-job-head' },
       h('span', { class: 'harness-job-title' }, 'Job'),
       h('span', { class: 'harness-job-thread mono small muted', 'data-testid': 'harness-thread' }, threadLabel(item)),
-      chip(item.state, handoffTone(item.state), 'harness-state'),
+      chip(handoffStateLabel(item.state), handoffTone(item.state), 'harness-state'),
     ),
     treeBody(item),
   );

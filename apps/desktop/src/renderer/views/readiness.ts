@@ -8,7 +8,7 @@ import type {
 } from '@companyos/twin-core';
 import { h, type Child } from '../dom.js';
 import { chip, emptyState, pageHeader, panelHead, progressBar, type ChipTone } from '../components/ui.js';
-import { plural } from '../format.js';
+import { plural, titleCase, titleCaseSequence } from '../format.js';
 import { levelLabel, levelTone } from '../labels.js';
 
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
@@ -28,15 +28,14 @@ export function readinessView(status: TwinStatus, app?: string): HTMLElement {
   return app === undefined ? listPage(status.readiness) : detailPage(status.readiness, app);
 }
 
-/**
- * The sentence under the banner, chosen by the overall automatable share in whole percent. The bands are design
- * thresholds, not sourced standards. The tests pin each boundary.
- */
+/** The sentence under the banner. It states the overall automatable share in whole percent, and names no band. */
 export function readinessSentence(automatablePct: number): string {
-  if (automatablePct < 20) return 'Little of your repeated app work could run on its own yet.';
-  if (automatablePct < 40) return 'About a third of your repeated app work could run on its own.';
-  if (automatablePct < 60) return 'About half of your repeated app work could run on its own.';
-  return 'Most of your repeated app work could run on its own.';
+  return `${automatablePct}% of your app switches could run on its own.`;
+}
+
+/** How many routines use an app, with the verb to match: "1 routine uses this app", "2 routines use this app". */
+export function routineUseLabel(count: number): string {
+  return `${plural(count, 'routine')} ${count === 1 ? 'uses' : 'use'} this app`;
 }
 
 function listPage(readiness: AppReadinessView): HTMLElement {
@@ -44,7 +43,7 @@ function listPage(readiness: AppReadinessView): HTMLElement {
   return h(
     'div',
     { class: 'stack readiness-page', 'data-testid': 'readiness-root' },
-    pageHeader('App readiness', "How much of each app's repeated work could run on its own · past 7 days"),
+    pageHeader('App readiness', "How much of each app's switches could run on its own · past 7 days"),
     body,
   );
 }
@@ -158,7 +157,12 @@ function appTable(rows: readonly AppReadinessRow[]): HTMLElement {
         ),
       ),
     ),
-    h('p', { class: 'readiness-note' }, 'From app names and timing, not model confidence. Mail and chat steps always ask.'),
+    h(
+      'p',
+      { class: 'readiness-note' },
+      "The twin records app names and timing. With browser capture on, it also keeps each site's host and the shape of its path, never titles, query strings or page content.",
+    ),
+    h('p', { class: 'readiness-note' }, 'Mail and chat apps always ask. Mail or chat used in a browser is not detected.'),
   );
 }
 
@@ -179,7 +183,7 @@ function appRow(row: AppReadinessRow): HTMLElement {
       h(
         'span',
         { class: 'readiness-app-text' },
-        h('span', { class: 'readiness-app-name' }, row.app),
+        h('span', { class: 'readiness-app-name' }, titleCase(row.app)),
         h('span', { class: 'readiness-app-sub' }, `${row.windowClass} · ${plural(row.switches, 'switch', 'switches')}`),
       ),
     ),
@@ -237,11 +241,11 @@ function detailPage(readiness: AppReadinessView, app: string): HTMLElement {
       'div',
       { class: 'stack readiness-page', 'data-testid': 'readiness-root' },
       crumb,
-      h('h1', { class: 'page-title readiness-app-title' }, app),
+      h('h1', { class: 'page-title readiness-app-title' }, titleCase(app)),
       h(
         'section',
         { class: 'panel', 'data-testid': 'readiness-missing' },
-        emptyState(`No switches from ${app} in the last 7 days.`, 'Go back to App readiness to see the apps that have.'),
+        emptyState(`No switches from ${titleCase(app)} in the last 7 days.`, 'Go back to App readiness to see the apps that have.'),
       ),
     );
   }
@@ -259,7 +263,7 @@ function detailPage(readiness: AppReadinessView, app: string): HTMLElement {
           'div',
           { class: 'page-head-text' },
           crumb,
-          h('h1', { class: 'page-title readiness-app-title' }, row.app),
+          h('h1', { class: 'page-title readiness-app-title' }, titleCase(row.app)),
           h('p', { class: 'page-meta mono' }, `${row.windowClass} · ${plural(row.switches, 'switch', 'switches')} in the last 7 days`),
         ),
       ),
@@ -301,7 +305,7 @@ function reasonStrip(row: AppReadinessRow): HTMLElement {
     { class: 'readiness-reason' },
     statusChip(row.status),
     h('span', { class: 'readiness-reason-text' }, row.reason),
-    h('span', { class: 'muted small readiness-reason-count' }, `${plural(row.routines, 'routine')} use this app`),
+    h('span', { class: 'muted small readiness-reason-count' }, routineUseLabel(row.routines)),
   );
 }
 
@@ -327,8 +331,12 @@ function learnedItem(item: AppReadinessRoutineView, index: number): HTMLElement 
     h(
       'span',
       { class: 'readiness-learned-copy' },
-      h('span', { class: 'readiness-learned-label' }, item.sequence),
-      h('span', { class: 'muted small' }, `Seen on ${plural(item.days, 'day')} · ${plural(item.switches, 'switch', 'switches')} in the last 7 days`),
+      h('span', { class: 'readiness-learned-label' }, titleCaseSequence(item.sequence)),
+      h(
+        'span',
+        { class: 'muted small' },
+        `Seen on ${plural(item.days, 'day')} in the last 30 · ${plural(item.switches, 'switch', 'switches')} in the last 7 days`,
+      ),
     ),
     h('span', { class: 'readiness-learned-tags' }, kindChip(item.kind), routineStatusChip(item)),
   );

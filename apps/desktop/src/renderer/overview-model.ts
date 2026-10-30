@@ -8,24 +8,26 @@ export const RHYTHM_DAYS: readonly string[] = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'
 /** The hours the rhythm grid shows, one column each. */
 export const RHYTHM_HOURS: readonly number[] = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
 
-/** The hero title. It counts the suggestions waiting for the person's review. */
+/** The hero title. It counts the suggestions waiting for the person's review. Drafts are counted by the waiting card. */
 export function readyTitle(waiting: number): string {
-  if (waiting <= 0) return 'Nothing is waiting for you.';
+  if (waiting <= 0) return 'No new routines are ready for your review.';
   if (waiting === 1) return 'One routine is ready for your review.';
   const count = waiting < COUNT_WORDS.length ? COUNT_WORDS[waiting] : String(waiting);
   return `${count} routines are ready for your review.`;
 }
 
+/** The last sentence of the hero lede. It says when a run can start, and that is all it says. */
+const RUN_RULE = 'Nothing runs unless you start it, or you have turned on unattended runs for an automation at level 4.';
+
 /**
- * The lede under the hero title. It states only the counts the engine reports, and says nothing runs until the
- * person says so.
+ * The lede under the hero title. It states only the counts the engine reports, then when a run can start.
  */
 export function heroLede(recordedFocusEvents: number, observedDays: number): string {
   if (recordedFocusEvents === 0) {
-    return 'Your twin has not recorded any app switches yet. It learns from app switches and their timing. Nothing runs until you say so.';
+    return `Your twin has not recorded any app switches yet. It learns from app switches and their timing. ${RUN_RULE}`;
   }
   const span = observedDays === 0 ? 'today' : `over ${plural(observedDays, 'day')}`;
-  return `Your twin noticed ${plural(recordedFocusEvents, 'app switch', 'app switches')} ${span}. Nothing runs until you say so.`;
+  return `Your twin noticed ${plural(recordedFocusEvents, 'app switch', 'app switches')} ${span}. ${RUN_RULE}`;
 }
 
 /**
@@ -71,9 +73,12 @@ export function routineApps(steps: readonly DraftStep[]): { app: string; alterna
   return apps;
 }
 
-/** How often a suggestion repeated, and the estimate of the hand time it takes. The estimate is labelled as one. */
+/**
+ * How often a suggestion repeated in the 30-day window, across how many days, and the estimate of the hand time it
+ * takes. The estimate is labelled as one.
+ */
 export function routineEvidence(support: number, days: number, minutesPerWeek: number): string {
-  return `${plural(support, 'time', 'times')} across ${plural(days, 'day')} · about ${Math.round(minutesPerWeek)} min / week by hand (estimate)`;
+  return `${plural(support, 'time', 'times')} in the last 30 days, across ${plural(days, 'day')} · about ${Math.round(minutesPerWeek)} min / week by hand (estimate)`;
 }
 
 /** When a routine last began, in words such as "Today 09:14" or "Tue 11:40". */

@@ -1,6 +1,6 @@
 import type { DraftStep } from '@companyos/twin-core';
 import { describe, expect, it } from 'vitest';
-import { DAY_MS } from '../src/renderer/format';
+import { DAY_MS, handoffStateLabel, noticedPerWeek, summarySourceLabel, titleCase, titleCaseSequence } from '../src/renderer/format';
 import {
   heroLede,
   hoursBack,
@@ -14,8 +14,8 @@ import {
 } from '../src/renderer/overview-model';
 
 describe('readyTitle', () => {
-  it('says nothing is waiting when there are no suggestions', () => {
-    expect(readyTitle(0)).toBe('Nothing is waiting for you.');
+  it('says no new routines are ready when there are no suggestions', () => {
+    expect(readyTitle(0)).toBe('No new routines are ready for your review.');
   });
 
   it('uses the singular for one routine', () => {
@@ -29,17 +29,21 @@ describe('readyTitle', () => {
   });
 });
 
+const RUN_RULE = 'Nothing runs unless you start it, or you have turned on unattended runs for an automation at level 4.';
+
 describe('heroLede', () => {
   it('uses the recorded switches and the days observed', () => {
-    expect(heroLede(70, 10)).toBe('Your twin noticed 70 app switches over 10 days. Nothing runs until you say so.');
+    expect(heroLede(70, 10)).toBe(`Your twin noticed 70 app switches over 10 days. ${RUN_RULE}`);
   });
 
   it('reads a first day without saying zero days', () => {
-    expect(heroLede(1, 0)).toBe('Your twin noticed 1 app switch today. Nothing runs until you say so.');
+    expect(heroLede(1, 0)).toBe(`Your twin noticed 1 app switch today. ${RUN_RULE}`);
   });
 
   it('says so when nothing has been recorded yet', () => {
-    expect(heroLede(0, 0)).toMatch(/has not recorded any app switches yet/);
+    expect(heroLede(0, 0)).toBe(
+      `Your twin has not recorded any app switches yet. It learns from app switches and their timing. ${RUN_RULE}`,
+    );
   });
 });
 
@@ -85,13 +89,70 @@ describe('lastSeenLabel', () => {
 });
 
 describe('routineEvidence and hoursBack', () => {
-  it('states the repeats, the span and the labelled hand-time estimate', () => {
-    expect(routineEvidence(6, 4, 3.6)).toBe('6 times across 4 days · about 4 min / week by hand (estimate)');
+  it('states the repeats in the 30-day window, the days, and the labelled hand-time estimate', () => {
+    expect(routineEvidence(6, 4, 3.6)).toBe('6 times in the last 30 days, across 4 days · about 4 min / week by hand (estimate)');
+  });
+
+  it('keeps the singular for one repeat on one day', () => {
+    expect(routineEvidence(1, 1, 0.4)).toBe('1 time in the last 30 days, across 1 day · about 0 min / week by hand (estimate)');
   });
 
   it('shows minutes as hours with one decimal place', () => {
     expect(hoursBack(0)).toBe('0.0');
     expect(hoursBack(90)).toBe('1.5');
+  });
+});
+
+describe('titleCase', () => {
+  it('capitalises each word of an app name', () => {
+    expect(titleCase('microsoft word')).toBe('Microsoft Word');
+    expect(titleCase('libreoffice calc')).toBe('Libreoffice Calc');
+    expect(titleCase('slack')).toBe('Slack');
+  });
+
+  it('capitalises after a hyphen, and leaves an empty name empty', () => {
+    expect(titleCase('visual-studio-code')).toBe('Visual-Studio-Code');
+    expect(titleCase('')).toBe('');
+  });
+});
+
+describe('titleCaseSequence', () => {
+  it('keeps the step and option joins and title-cases the names between them', () => {
+    expect(titleCaseSequence('microsoft excel → microsoft word or slack')).toBe('Microsoft Excel → Microsoft Word or Slack');
+  });
+
+  it('leaves the dash of an empty summary as it is', () => {
+    expect(titleCaseSequence('—')).toBe('—');
+  });
+});
+
+describe('noticedPerWeek', () => {
+  it('reads a rate that rounds to one as about once a week', () => {
+    expect(noticedPerWeek(0.96)).toBe('Noticed about once a week.');
+    expect(noticedPerWeek(1)).toBe('Noticed about once a week.');
+    expect(noticedPerWeek(1.4)).toBe('Noticed about once a week.');
+  });
+
+  it('gives any other rate in digits', () => {
+    expect(noticedPerWeek(3)).toBe('Noticed 3 times a week.');
+    expect(noticedPerWeek(0.5)).toBe('Noticed 0.5 times a week.');
+  });
+});
+
+describe('summarySourceLabel', () => {
+  it('names OpenMausBot when companyOS did not fail', () => {
+    expect(summarySourceLabel(false)).toBe('From OpenMausBot');
+  });
+
+  it('names companyOS when companyOS itself failed', () => {
+    expect(summarySourceLabel(true)).toBe('From companyOS');
+  });
+});
+
+describe('handoffStateLabel', () => {
+  it('reads a state as itself, and the unknown state as a status', () => {
+    expect(handoffStateLabel('completed')).toBe('completed');
+    expect(handoffStateLabel('unknown')).toBe('Status unknown');
   });
 });
 

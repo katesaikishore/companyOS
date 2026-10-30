@@ -1,7 +1,7 @@
 import type { AutomationView, DraftStep, SuggestionView, TwinStatus } from '@companyos/twin-core';
 import { h, type Child } from '../dom.js';
 import { button, emptyState, levelMeter } from '../components/ui.js';
-import { formatBytes, formatRate, percent, plural } from '../format.js';
+import { formatBytes, formatRate, percent, plural, titleCase, titleCaseSequence } from '../format.js';
 import { appsSummary, captureTitle, LEVEL_NAMES, levelLabel } from '../labels.js';
 import {
   heroLede,
@@ -139,7 +139,7 @@ function statsRow(status: TwinStatus): HTMLElement {
   return h(
     'section',
     { class: 'ov-stats', 'data-testid': 'overview-stats', 'aria-label': 'Summary' },
-    statCard({ label: 'Routines learned', value: String(stats.routinesLearned), note: 'Detected or accepted' }),
+    statCard({ label: 'Routines learned', value: String(stats.routinesLearned), note: 'Detected and not dismissed, or accepted' }),
     statCard({
       label: 'Waiting for you',
       value: String(stats.waiting),
@@ -190,7 +190,7 @@ function waitingPanel(suggestions: readonly SuggestionView[]): HTMLElement {
       h('span', { class: 'ov-card-note' }, 'Patterns your twin found. Accepting one creates a draft — it runs nothing.'),
     ),
     suggestions.length === 0
-      ? emptyState('Nothing to review yet.', 'The twin needs about three days of repetition to notice a routine.')
+      ? emptyState('Nothing to review yet.', 'The twin needs the same sequence on at least three different days to notice a routine.')
       : h('div', { class: 'ov-routine-list' }, ...suggestions.map(routineCard)),
   );
 }
@@ -238,7 +238,7 @@ function appChain(steps: readonly DraftStep[]): HTMLElement {
         'span',
         { class: 'ov-app' },
         h('span', { class: 'ov-app-mark', 'aria-hidden': 'true' }, step.app.charAt(0).toUpperCase()),
-        h('span', null, step.app),
+        h('span', null, titleCase(step.app)),
         step.alternatives > 0
           ? h('span', { class: 'ov-app-more', title: `${plural(step.alternatives, 'other app')} seen here` }, `+${step.alternatives}`)
           : undefined,
@@ -296,7 +296,7 @@ function routineRow(view: AutomationView): HTMLElement {
     h(
       'div',
       { class: 'ov-auto-meta' },
-      h('span', { class: 'ov-auto-apps muted small' }, appsSummary(view)),
+      h('span', { class: 'ov-auto-apps muted small' }, titleCaseSequence(appsSummary(view))),
       h('span', { class: 'mono small' }, estimate ? `${formatRate(estimate.occurrencesPerWeek)}× / wk` : '—'),
     ),
   );
@@ -318,8 +318,8 @@ function learningPanel(status: TwinStatus): HTMLElement {
     heading = 'Capture is paused';
     description = 'Resume capture when you want the twin to keep learning from app names and timing.';
   } else if (locked) {
-    heading = 'Capture will resume when you unlock';
-    description = 'Your twin pauses app capture while the screen is locked.';
+    heading = 'Capture is locked';
+    description = 'Your twin pauses app capture while the screen is locked. It resumes at unlock unless you paused it.';
   } else if (idle) {
     heading = 'Capture is idle while you are away';
     description = 'Capture resumes when you return to your desktop.';
@@ -400,7 +400,7 @@ function usagePanel(usage: TwinStatus['usage']): HTMLElement {
           h(
             'p',
             { class: 'muted small ov-usage-note' },
-            'This repetition-based learning score is not model confidence or task accuracy. At 80%, a pattern is ready for your review—not blanket app access. Sends and external writes still ask; unattended runs must pass each routine’s safety gate.',
+            'This repetition-based learning score is not model confidence or task accuracy. A pattern is offered for review once it repeats on at least three different days. 80% or more is marked Strong. Mail, chat and other external steps still ask; unattended runs must pass each routine\'s promotion gate.',
           ),
         ),
   );
@@ -411,7 +411,7 @@ function appLearningRow(app: TwinStatus['usage'][number]): HTMLElement {
   const hasPattern = app.patternCount > 0;
   const strongPattern = app.learningScore >= APP_PATTERN_REVIEW_THRESHOLD;
   const evidence = hasPattern
-    ? `${app.patternSupport} observations across ${plural(app.patternDays, 'day')} · ${plural(app.patternCount, 'pattern')}`
+    ? `${plural(app.patternSupport, 'observation')} across ${plural(app.patternDays, 'day')} · ${plural(app.patternCount, 'pattern')}`
     : 'No repeated workflow pattern yet';
   return h(
     'div',
@@ -419,7 +419,7 @@ function appLearningRow(app: TwinStatus['usage'][number]): HTMLElement {
     h(
       'div',
       { class: 'ov-usage-meta' },
-      h('span', { class: 'ov-usage-app' }, app.app),
+      h('span', { class: 'ov-usage-app' }, titleCase(app.app)),
       h('span', { class: 'mono small muted' }, plural(app.events, 'switch', 'switches')),
     ),
     h(
@@ -427,7 +427,7 @@ function appLearningRow(app: TwinStatus['usage'][number]): HTMLElement {
       {
         class: strongPattern ? 'ov-usage-bar is-strong' : 'ov-usage-bar',
         role: 'progressbar',
-        'aria-label': `${app.app}: ${score}% repetition-based learning signal. This is not model confidence or automation success rate.`,
+        'aria-label': `${titleCase(app.app)}: ${score}% repetition-based learning signal. This is not model confidence or automation success rate.`,
         'aria-valuemin': 0,
         'aria-valuemax': 100,
         'aria-valuenow': score,
@@ -456,11 +456,11 @@ function heatmapPanel(activity: number[][]): HTMLElement {
       'div',
       { class: 'ov-card-intro' },
       h('h2', { class: 'ov-card-title', id: 'rhythm-title' }, 'Your weekly rhythm'),
-      h('span', { class: 'ov-card-note' }, 'App switches by weekday and hour, past 4 weeks'),
+      h('span', { class: 'ov-card-note' }, 'App switches by weekday and hour, 08:00 to 18:59, past 4 weeks'),
     ),
     h(
       'div',
-      { class: 'ov-rhythm', role: 'img', 'aria-label': 'App switches by weekday and hour, past four weeks' },
+      { class: 'ov-rhythm', role: 'img', 'aria-label': 'App switches by weekday and hour, 08:00 to 18:59, past four weeks' },
       ...RHYTHM_DAYS.map((day, r) =>
         h(
           'div',
@@ -480,7 +480,7 @@ function heatmapPanel(activity: number[][]): HTMLElement {
         { class: 'ov-rhythm-axis mono' },
         h('span', { class: 'ov-axis-start' }, '08:00'),
         h('span', { class: 'ov-axis-middle' }, '13:00'),
-        h('span', { class: 'ov-axis-end' }, '18'),
+        h('span', { class: 'ov-axis-end' }, '18:00'),
       ),
     ),
     h(
@@ -503,15 +503,15 @@ function devicePanel(status: TwinStatus, callsThisWeek: number): HTMLElement {
       'dl',
       { class: 'ov-facts' },
       deviceFact('Twin store', `Encrypted · ${formatBytes(status.storageBytes)}`),
-      deviceFact('Key held by', 'You · OS keychain'),
+      deviceFact('Key held by', 'This device · OS keychain'),
       deviceFact('Raw events kept', plural(status.retentionDays, 'day')),
-      deviceFact('Network calls this week', h('a', { href: '#/ledger' }, String(callsThisWeek))),
-      deviceFact('Shared with employer', 'Nothing'),
+      deviceFact('Model and update calls this week', h('a', { href: '#/ledger' }, String(callsThisWeek))),
+      deviceFact('Sent outside this device', 'Only handoffs you approve, to OpenMausBot', true),
     ),
     h('a', { class: 'ov-device-link', href: '#/settings' }, 'Manage privacy and data →'),
   );
 }
 
-function deviceFact(label: string, value: Child): HTMLElement {
-  return h('div', { class: 'ov-fact' }, h('dt', null, label), h('dd', null, value));
+function deviceFact(label: string, value: Child, wide = false): HTMLElement {
+  return h('div', { class: wide ? 'ov-fact is-wide' : 'ov-fact' }, h('dt', null, label), h('dd', null, value));
 }

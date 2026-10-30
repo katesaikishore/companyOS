@@ -36,13 +36,13 @@ export function ledgerView(status: TwinStatus): HTMLElement {
     { class: 'stack', 'data-testid': 'view-ledger' },
     pageHeader(
       'Network ledger',
-      'Every network call this device made, exactly as sent. Nothing about you is sent in these calls.',
+      'Every model download and update check this device made, exactly as sent. OpenMausBot handoffs are listed on the Agent harness page.',
     ),
     h(
       'section',
       { class: 'tiles', 'aria-label': 'Ledger summary' },
       tile('Allowed hosts', 'huggingface.co, *.hf.co and the update feed', 'Model downloads and update checks only'),
-      tile('Personal data sent', 'None', 'Nothing about you leaves in these calls'),
+      tile('Personal data in these calls', 'None', 'Nothing about you leaves in these calls'),
       tile('Calls', String(entries.length), 'Every call, newest first'),
     ),
     selected
