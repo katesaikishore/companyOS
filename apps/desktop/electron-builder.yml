@@ -33,6 +33,10 @@ npmRebuild: false
 publish:
   provider: generic
   url: https://updates.companyos.invalid/twin
+asarUnpack:
+  # node-llama-cpp loads its native addon and llama.cpp libraries from disk, which asar cannot serve.
+  # On Electron it maps the .asar path to .asar.unpacked itself, so these files must be unpacked.
+  - "**/node_modules/@node-llama-cpp/**"
 mac:
   category: public.app-category.productivity
   icon: build/icon.icns

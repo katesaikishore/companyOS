@@ -8,6 +8,14 @@ import { refuseOutbound } from './surfaces';
 
 // The OpenMausBot handoff starts a real CLI. The suite replaces it with a recorder, so the arguments can be checked.
 vi.mock('cross-spawn', async () => ({ default: (await import('./fake-spawn')).fakeSpawn }));
+// The model manager imports Electron's utility process. The suite never forks a model, so a stand-in is enough.
+vi.mock('electron', () => ({
+  utilityProcess: {
+    fork: () => {
+      throw new Error('The privacy suite does not start a model worker.');
+    },
+  },
+}));
 
 let run: ScenarioRun;
 

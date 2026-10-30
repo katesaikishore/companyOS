@@ -23,6 +23,7 @@ import {
   type TwinConfig,
   type TwinStatus,
   type PendingRunView,
+  type RoutineNamingJob,
   normalizeAppName,
 } from '@companyos/twin-core';
 import { randomUUID } from 'node:crypto';
@@ -32,7 +33,7 @@ import { BROWSER_APP_NAMES, startBrowserBridge, type BrowserBridge, type Browser
 import { CaptureService } from './capture';
 import { destroyStoredSecrets, loadOrCreateDataKey } from './keys';
 import { detectHardware } from './hardware';
-import { ModelManager } from './models';
+import { ModelManager, createRoutineNamer } from './models';
 import { browserCapturePaths, installNativeHost, isBrowserCaptureSupported, removeNativeHost } from './native-host-install';
 import { runOpenMausBotTask } from './openmausbot';
 import { choosePlatform, executorFor, type Platform } from './platform';
@@ -43,6 +44,8 @@ export interface RuntimeOptions {
   approve: (automation: Automation, step: Step, decision: Decision) => Promise<boolean>;
   /** Seconds since the last keyboard or mouse input. */
   idleSeconds: () => number;
+  /** True when the device runs on battery. Model work waits for AC power or idleness (plan §5.5). */
+  onBattery: () => boolean;
   /** Called when model downloads change, so open pages refresh. */
   onChange: () => void;
   /** Called when a routine is offered. The main process shows the tray and a notification. */
@@ -77,6 +80,7 @@ export class TwinRuntime {
   private browserChanges: Promise<void> = Promise.resolve();
   /** Why browser capture could not start while its setting is on. Shown on the capture card until it works or is switched off. */
   private browserProblem: string | undefined;
+  private readonly namer: RoutineNamingJob;
   private hardwareProfile: Promise<HardwareProfile> | undefined;
   private readonly gate = new TriggerGate();
   /** Offers waiting for an answer. At most one at a time. */
@@ -108,6 +112,14 @@ export class TwinRuntime {
       onChange: options.onChange,
       fetchImpl: options.fetchImpl,
     });
+    this.namer = createRoutineNamer({
+      agent: this.agent,
+      models: this.models,
+      workerPath: join(__dirname, 'llm-worker.js'),
+      idleSeconds: options.idleSeconds,
+      onBattery: options.onBattery,
+      preferredModelId: async () => (await this.setupPlan()).chat?.spec.id,
+    });
   }
 
   static async create(options: RuntimeOptions): Promise<TwinRuntime> {
@@ -126,6 +138,7 @@ export class TwinRuntime {
         this.browserProblem = error instanceof Error ? error.message : 'Watch browsers could not start.';
       });
     }
+    this.namer.start();
     setInterval(() => this.agent.prune(), DAY_MS).unref();
   }
 
@@ -133,6 +146,7 @@ export class TwinRuntime {
     this.capture.stop();
     this.browserBridge?.stop();
     this.browserBridge = undefined;
+    this.namer.stop();
   }
 
   setLocked(locked: boolean): void {

@@ -29,6 +29,8 @@ import {
 const DAY_MS = 86_400_000;
 const ANALYSIS_DAYS = 30;
 const RETENTION_DAYS = 90;
+/** Names kept in memory for detected routines. The oldest are dropped first. */
+const MAX_ROUTINE_NAMES = 200;
 
 export interface AgentOptions {
   dataDir: string;
@@ -70,6 +72,8 @@ export class TwinAgent {
   private unattendedGeneration = 0;
   /** One run per automation at a time. Overlapping runs would overwrite each other's state. */
   private readonly running = new Set<string>();
+  /** Names from the local model for detected routines. Memory only: a restart names them again. */
+  private readonly routineNames = new Map<string, string>();
 
   constructor(options: AgentOptions) {
     this.store = new EncryptedStore(options.dataDir, options.dataKey);
@@ -122,7 +126,38 @@ export class TwinAgent {
     const dismissed = new Set(this.config.dismissedRoutineIds);
     return this.analyze()
       .routines.filter(routine => !accepted.has(routine.id) && !dismissed.has(routine.id))
-      .map(routine => ({ routine, preview: compileRoutine(routine) }));
+      .map(routine => ({ routine, preview: compileRoutine(routine, this.routineNames.get(routine.id)) }));
+  }
+
+  /**
+   * Detected routines the naming job may name: neither accepted nor dismissed, and able to compile. A routine whose
+   * rule-based name is too long to compile is skipped, so it cannot stop the routines after it from being named.
+   */
+  routinesToName(): Routine[] {
+    const accepted = new Set(this.readAutomations().map(automation => automation.routineId));
+    const dismissed = new Set(this.config.dismissedRoutineIds);
+    return this.analyze().routines.filter(routine => {
+      if (accepted.has(routine.id) || dismissed.has(routine.id)) return false;
+      try {
+        compileRoutine(routine, this.routineNames.get(routine.id));
+        return true;
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  /**
+   * Sets the name shown for a detected routine, such as one the local model wrote. Without one, the rule-based
+   * name is used. Accepting a routine keeps the name it had at that moment.
+   */
+  setRoutineName(routineId: string, name: string): void {
+    this.routineNames.delete(routineId);
+    this.routineNames.set(routineId, name);
+    if (this.routineNames.size > MAX_ROUTINE_NAMES) {
+      const oldest = this.routineNames.keys().next();
+      if (!oldest.done) this.routineNames.delete(oldest.value);
+    }
   }
 
   /**
@@ -151,7 +186,7 @@ export class TwinAgent {
     const routine = this.analyze().routines.find(candidate => candidate.id === routineId);
     if (!routine) throw new Error('That routine is no longer detected.');
 
-    const automation = compileRoutine(routine, name);
+    const automation = compileRoutine(routine, name ?? this.routineNames.get(routineId));
     this.writeAutomation(automation);
     this.writeState(initialState(automation.id, effectsOf(automation)));
     return this.view(automation);
