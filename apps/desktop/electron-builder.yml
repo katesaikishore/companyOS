@@ -47,6 +47,5 @@ linux:
   maintainer: companyOS <packages@companyos.invalid>
   description: Private, employee-owned work twin.
   target:
-    - AppImage
     - deb
     - rpm

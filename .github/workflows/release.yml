@@ -1,8 +1,9 @@
 name: release
 
 # Builds the installers when a version tag such as v0.2.0 is pushed. Each platform signs only when its certificate
-# secret exists, and otherwise builds unsigned. Nothing here publishes a release: installers are uploaded as workflow
-# artifacts. Secrets are referenced by name only and never stored in the repository (see electron-builder.yml).
+# secret exists, and otherwise builds unsigned. Nothing here publishes a release: installers and the update files that
+# electron-updater reads (latest*.yml and *.blockmap) are uploaded as workflow artifacts. Secrets are referenced by
+# name only and never stored in the repository (see electron-builder.yml).
 
 on:
   push:
@@ -103,7 +104,9 @@ jobs:
         if: runner.os == 'Linux'
         run: npm run dist -w @companyos/desktop
 
-      - name: Upload installers
+      # Per platform, electron-updater reads latest-mac.yml with the zip (and its blockmap), latest.yml with the NSIS
+      # installer (and its blockmap), or latest-linux.yml with the deb and rpm. The dmg is for a manual install only.
+      - name: Upload installers and update files
         uses: actions/upload-artifact@v4
         with:
           name: installers-${{ runner.os }}
@@ -111,7 +114,8 @@ jobs:
             apps/desktop/release/*.dmg
             apps/desktop/release/*.zip
             apps/desktop/release/*.exe
-            apps/desktop/release/*.AppImage
             apps/desktop/release/*.deb
             apps/desktop/release/*.rpm
+            apps/desktop/release/*.blockmap
+            apps/desktop/release/latest*.yml
           if-no-files-found: error

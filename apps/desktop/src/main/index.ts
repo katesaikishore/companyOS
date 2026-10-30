@@ -412,7 +412,7 @@ async function boot(): Promise<void> {
   createTrayWindow();
   createTray();
   // Does nothing unless the app is packaged and a feed URL is set (src/main/updater.ts).
-  startAutoUpdates(app.isPackaged);
+  startAutoUpdates(app.isPackaged, entry => requireRuntime().recordNetworkCall(entry));
 
   try {
     globalShortcut.register(STOP_ALL_SHORTCUT, () => stopAllAutomations());

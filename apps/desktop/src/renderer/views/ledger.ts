@@ -5,15 +5,16 @@ import { formatBytes, formatWhen } from '../format.js';
 import { requestRender, state } from '../store.js';
 
 function entryKey(entry: NetworkEntry): string {
-  return `${entry.ts}:${entry.modelId}:${entry.path}`;
+  return `${entry.ts}:${entry.modelId ?? entry.host}:${entry.path}`;
 }
 
 function purposeLabel(entry: NetworkEntry): string {
-  return entry.purpose === 'model_download' ? 'Model download' : entry.purpose;
+  return entry.purpose === 'model_download' ? 'Model download' : 'Update check';
 }
 
 /** Plain words for the outcome, verification and failure state of one call. */
 function outcomeText(entry: NetworkEntry): string {
+  if (entry.purpose === 'update_check') return entry.outcome === 'ok' ? 'feed read' : 'failed';
   const parts: string[] = [];
   if (entry.outcome === 'cancelled') parts.push('cancelled');
   else if (entry.outcome === 'failed') parts.push('failed');
@@ -23,6 +24,7 @@ function outcomeText(entry: NetworkEntry): string {
 
 function outcomeTone(entry: NetworkEntry): string {
   if (entry.outcome === 'cancelled') return 'muted';
+  if (entry.purpose === 'update_check') return entry.outcome === 'ok' ? 'teal' : 'danger';
   return entry.outcome === 'ok' && entry.sha256Verified ? 'teal' : 'danger';
 }
 
@@ -39,7 +41,7 @@ export function ledgerView(status: TwinStatus): HTMLElement {
     h(
       'section',
       { class: 'tiles', 'aria-label': 'Ledger summary' },
-      tile('Allowed hosts', 'huggingface.co and *.hf.co', 'Model downloads only'),
+      tile('Allowed hosts', 'huggingface.co, *.hf.co and the update feed', 'Model downloads and update checks only'),
       tile('Personal data sent', 'None', 'Nothing about you leaves in these calls'),
       tile('Calls', String(entries.length), 'Every call, newest first'),
     ),
@@ -52,7 +54,10 @@ export function ledgerView(status: TwinStatus): HTMLElement {
         )
       : panel(
           { testid: 'ledger-empty' },
-          emptyState('No network calls yet.', 'The twin only contacts the model host when you install a model.'),
+          emptyState(
+            'No network calls yet.',
+            'The twin contacts the model host when you install a model, and the update feed only when one is configured.',
+          ),
         ),
   );
 }
@@ -97,7 +102,11 @@ function ledgerRow(entry: NetworkEntry, selected: boolean): HTMLElement {
         h('span', { class: 'ledger-purpose' }, purposeLabel(entry)),
         h('span', { class: `ledger-outcome mono small ${outcomeTone(entry)}` }, outcomeText(entry)),
       ),
-      h('span', { class: 'ledger-meta mono small muted' }, `${entry.modelId} · ${formatWhen(entry.ts)} · ${formatBytes(entry.bytes)}`),
+      h(
+        'span',
+        { class: 'ledger-meta mono small muted' },
+        `${entry.modelId ?? entry.host} · ${formatWhen(entry.ts)} · ${formatBytes(entry.bytes)}`,
+      ),
     ),
   );
 }
@@ -116,7 +125,7 @@ function detailPanel(entry: NetworkEntry): HTMLElement {
     h(
       'dl',
       { class: 'facts' },
-      fact('Model', entry.modelId),
+      entry.purpose === 'model_download' && fact('Model', entry.modelId),
       fact('Bytes', formatBytes(entry.bytes)),
       fact('Result', outcomeText(entry)),
     ),
