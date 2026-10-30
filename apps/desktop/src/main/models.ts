@@ -39,6 +39,8 @@ interface Active {
 export class ModelManager {
   private readonly active = new Map<string, Active>();
   private queue: Promise<void> = Promise.resolve();
+  /** Set when Delete everything starts. Nothing is queued after that, because the folder is about to go. */
+  private wiping = false;
 
   constructor(private readonly options: ModelManagerOptions) {}
 
@@ -60,6 +62,7 @@ export class ModelManager {
   install(modelId: string): void {
     const spec = findModel(modelId);
     if (!spec) throw new Error('Unknown model.');
+    if (this.wiping) throw new Error('The models are being deleted.');
     const existing = this.active.get(modelId);
     if (existing && existing.state.status === 'running') return;
     if (this.options.agent.configuration.installedModels.some(installed => installed.id === modelId)) return;
@@ -73,6 +76,20 @@ export class ModelManager {
 
   cancel(modelId: string): void {
     this.active.get(modelId)?.controller.abort();
+  }
+
+  /**
+   * Cancels every download and waits until none is still writing, then removes the whole models folder. Delete
+   * everything uses this, so no partial file is written back after the folder is gone.
+   */
+  async wipe(): Promise<void> {
+    this.wiping = true;
+    for (const entry of this.active.values()) entry.controller.abort();
+    // A download still waiting its turn sees the abort when its turn comes, and returns before it touches the disk.
+    await this.queue.catch(() => undefined);
+    await rm(this.options.modelsDir, { recursive: true, force: true });
+    this.active.clear();
+    this.options.onChange();
   }
 
   /** Deletes an installed model file. Only files inside the models folder, named by the catalog, are removed. */

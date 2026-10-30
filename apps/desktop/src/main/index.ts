@@ -195,7 +195,7 @@ function registerIpc(): void {
     const parent = parentWindow();
     const choice = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
     if (choice.response !== 0) return;
-    requireRuntime().deleteAll();
+    await requireRuntime().deleteAll();
     quitting = true;
     app.relaunch();
     app.exit(0);

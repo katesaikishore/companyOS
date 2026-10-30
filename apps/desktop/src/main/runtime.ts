@@ -411,10 +411,14 @@ export class TwinRuntime {
     return JSON.stringify(this.agent.exportAll(), null, 2);
   }
 
-  /** Destroys the stored data and the key. Nothing can be recovered afterwards. */
-  deleteAll(): void {
+  /**
+   * Destroys the stored data, the key and the installed models. Downloads are cancelled before the models folder goes,
+   * so none can write back into it. Nothing can be recovered afterwards.
+   */
+  async deleteAll(): Promise<void> {
     this.stop();
     this.disableBrowserCapture();
+    await this.models.wipe();
     this.agent.wipe();
     destroyStoredSecrets(this.options.userData);
   }
