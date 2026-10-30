@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { cpuPercent, descendantsOf, parseCpuTime, parseProcStat, parsePsTable, parseWindowsTable, sumRss } from './sampler.mjs';
 import { BUDGETS, MIB, evaluate, summarize, toMarkdown } from './report.mjs';
-import { isInsideAppData, parseArgs } from './measure.mjs';
+import { isInsideAppData, notesFor, parseArgs } from './measure.mjs';
 
 test('parseCpuTime reads ps clock values with and without hours and days', () => {
   assert.equal(parseCpuTime('4:52.11'), 292.11);
@@ -199,4 +199,28 @@ test('isInsideAppData refuses the real data folders on each OS and allows anythi
     true,
   );
   assert.equal(isInsideAppData('/tmp/companyos-measure-1', { home: '/home/test', platform: 'linux', env: {} }), false);
+});
+
+test('the JSON notes and the markdown both say summed RSS counts shared pages once per process and overstates memory', () => {
+  const notes = notesFor(parseArgs(['--duration', '60', '--capture', 'fake']), 0);
+  const rssNote = notes.find(note => note.startsWith('RSS is the resident memory')) ?? '';
+  assert.match(rssNote, /Summed RSS counts shared pages once per process/);
+  assert.match(rssNote, /overstates memory/);
+  // The JSON report stores these notes as they are, so the markdown below shows what the JSON says too.
+  const samples = [{ t: 5, cpuPercent: 0.5, rssMiB: 120, processes: 7 }];
+  const summary = summarize(samples);
+  const verdict = evaluate(summary, 60);
+  const markdown = toMarkdown({
+    generatedAt: '2026-10-30T00:00:00.000Z',
+    host: { platform: 'darwin', arch: 'arm64', osType: 'Darwin', osRelease: '24.6.0', cpuModel: 'Test CPU', cpuCount: 8, memoryMiB: 16384 },
+    build: { commit: 'abc1234', dirty: false, appVersion: '0.1.0', electronVersion: '45.1.0' },
+    run: { durationSeconds: 60, intervalSeconds: 5, warmupSeconds: 60, seedDays: 10, capture: 'fake' },
+    status: verdict.status,
+    checks: verdict.checks,
+    summary,
+    samples,
+    notes,
+  });
+  assert.match(markdown, /Summed RSS counts shared pages once per process/);
+  assert.match(markdown, /overstates memory/);
 });

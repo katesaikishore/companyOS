@@ -290,10 +290,11 @@ function hostInfo() {
   };
 }
 
-function notesFor(options, leftovers) {
+/** The caveats printed with every report. The JSON carries them in its notes, and the markdown renders the same list. */
+export function notesFor(options, leftovers) {
   const notes = [
     'CPU is summed over the app\'s process tree and is a share of one core, so several busy cores can exceed 100%.',
-    'RSS is the resident memory summed over the same processes, in MiB (1024 × 1024 bytes). Pages shared between processes, such as the Electron framework, are counted once per process, so the total is an upper bound.',
+    'RSS is the resident memory summed over the same processes, in MiB (1024 × 1024 bytes). Summed RSS counts shared pages once per process, such as the Electron framework, so it overstates memory: a page that several processes map is added up each time.',
     `Startup is excluded. Sampling starts ${options.warmup} s after the data folder appears, and seeding finishes inside that time.`,
     `RSS is read every ${options.interval} s, so a spike shorter than that between samples is not seen.`,
   ];
