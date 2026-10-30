@@ -1,0 +1,183 @@
+/* Design tokens. Every colour in the app is a custom property defined here, so components never hard-code a colour. */
+
+@font-face {
+  font-family: 'Geist';
+  src: url('../fonts/Geist-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('../fonts/GeistMono-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Light theme, the default. */
+:root {
+  color-scheme: light;
+  --ink: #16181a;
+  --ink-2: #3b4046;
+  --muted: #5b6168;
+  --page: #f3f4f1;
+  --sidebar: #eceee9;
+  --card: #ffffff;
+  --inset: #f6f7f4;
+  --border: #e2e4df;
+  --border-strong: #d3d6d0;
+  --divider: #eef0ec;
+  --shadow: 0 1px 2px rgba(22, 24, 26, 0.06);
+  --nav-active: #ffffff;
+  --focus: #0e6b5c;
+
+  --accent: #0e6b5c;
+  --accent-hover: #0a5246;
+  --accent-text: #0e6b5c;
+  --accent-ink: #0a5246;
+  --accent-soft: #e6f2ee;
+  --accent-soft-2: #bfdcd4;
+  --accent-heat: #5fa595;
+  --accent-tint: #f2f8f6;
+  --on-accent: #ffffff;
+
+  --neutral-soft: #eef0ec;
+  --heat-0: #eef0ec;
+  --meter-off: #dadad6;
+  --danger: #b42318;
+  --danger-solid: #b42318;
+  --on-danger: #ffffff;
+  --warn-bg: #fbf1d9;
+  --warn-ink: #8a5a00;
+  --warn-body: #4a2b00;
+  --violet-bg: #ecead8;
+  --violet-ink: #3f3591;
+
+  --btn-primary-bg: #16181a;
+  --btn-primary-ink: #ffffff;
+  --kind-act-bg: #16181a;
+  --kind-act-ink: #ffffff;
+  --code-bg: #16181a;
+  --code-ink: #f3f4f1;
+
+  --dot-on: #0e6b5c;
+  --dot-paused: #8a5a00;
+  --dot-off: #9aa0a6;
+  --logo-a: #16181a;
+  --logo-b: #0e6b5c;
+
+  /* The setup rail is always dark, in both themes. */
+  --rail-bg: #16181a;
+  --rail-ink: #f3f4f1;
+  --rail-muted: #a3a9af;
+  --rail-line: #3a3f44;
+  --rail-accent: #5fc4ae;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --ink: #eceeee;
+    --ink-2: #c9ced2;
+    --muted: #9aa1a6;
+    --page: #101214;
+    --sidebar: #161819;
+    --card: #1b1e20;
+    --inset: #22262a;
+    --border: #2a2f33;
+    --border-strong: #3a4046;
+    --divider: #24292c;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+    --nav-active: #22262a;
+    --focus: #5fc2a6;
+
+    --accent: #5fc2a6;
+    --accent-hover: #8fd9c4;
+    --accent-text: #5fc2a6;
+    --accent-ink: #bfebdd;
+    --accent-soft: #15342d;
+    --accent-soft-2: #1e4a40;
+    --accent-heat: #3c8a74;
+    --accent-tint: #112a24;
+    --on-accent: #0b2a24;
+
+    --neutral-soft: #2a2f33;
+    --heat-0: #24292c;
+    --meter-off: #2f3538;
+    --danger: #ff8a80;
+    --danger-solid: #b42318;
+    --on-danger: #ffffff;
+    --warn-bg: #3a2e12;
+    --warn-ink: #ffd27a;
+    --warn-body: #ffe3a8;
+    --violet-bg: #2b2750;
+    --violet-ink: #cfc9ff;
+
+    --btn-primary-bg: #eceeee;
+    --btn-primary-ink: #101214;
+    --kind-act-bg: #eceeee;
+    --kind-act-ink: #101214;
+    --code-bg: #0b0c0d;
+    --code-ink: #eceeee;
+
+    --dot-on: #5fc2a6;
+    --dot-paused: #ffd27a;
+    --dot-off: #6b7278;
+    --logo-a: #eceeee;
+    --logo-b: #5fc2a6;
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --ink: #eceeee;
+  --ink-2: #c9ced2;
+  --muted: #9aa1a6;
+  --page: #101214;
+  --sidebar: #161819;
+  --card: #1b1e20;
+  --inset: #22262a;
+  --border: #2a2f33;
+  --border-strong: #3a4046;
+  --divider: #24292c;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --nav-active: #22262a;
+  --focus: #5fc2a6;
+
+  --accent: #5fc2a6;
+  --accent-hover: #8fd9c4;
+  --accent-text: #5fc2a6;
+  --accent-ink: #bfebdd;
+  --accent-soft: #15342d;
+  --accent-soft-2: #1e4a40;
+  --accent-heat: #3c8a74;
+  --accent-tint: #112a24;
+  --on-accent: #0b2a24;
+
+  --neutral-soft: #2a2f33;
+  --heat-0: #24292c;
+  --meter-off: #2f3538;
+  --danger: #ff8a80;
+  --danger-solid: #b42318;
+  --on-danger: #ffffff;
+  --warn-bg: #3a2e12;
+  --warn-ink: #ffd27a;
+  --warn-body: #ffe3a8;
+  --violet-bg: #2b2750;
+  --violet-ink: #cfc9ff;
+
+  --btn-primary-bg: #eceeee;
+  --btn-primary-ink: #101214;
+  --kind-act-bg: #eceeee;
+  --kind-act-ink: #101214;
+  --code-bg: #0b0c0d;
+  --code-ink: #eceeee;
+
+  --dot-on: #5fc2a6;
+  --dot-paused: #ffd27a;
+  --dot-off: #6b7278;
+  --logo-a: #eceeee;
+  --logo-b: #5fc2a6;
+}

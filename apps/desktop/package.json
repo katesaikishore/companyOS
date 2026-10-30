@@ -1,0 +1,24 @@
+{
+  "name": "@companyos/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "companyOS Twin desktop app (Electron)",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.main.json && tsc -p tsconfig.renderer.json && node scripts/copy-assets.mjs",
+    "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
+    "start": "electron .",
+    "dist": "electron-builder --publish never",
+    "dist:dir": "electron-builder --dir --publish never",
+    "test:e2e": "node test/e2e.cjs"
+  },
+  "devDependencies": {
+    "electron": "45.1.0",
+    "electron-builder": "^26.18.0",
+    "typescript": "^5.9.3",
+    "@types/cross-spawn": "^6.0.6"
+  },
+  "dependencies": {
+    "cross-spawn": "^7.0.6"
+  }
+}

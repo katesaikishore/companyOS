@@ -1,0 +1,133 @@
+import type { AutomationView, EffectClass, Fit, Param, RunRecord, Step, TwinStatus } from '@companyos/twin-core';
+import { formatBytes, clamp01 } from './format.js';
+
+export const LEVEL_NAMES = ['Observe', 'Suggest', 'Draft', 'Run with you', 'On its own', 'External'];
+
+/** Mirrors PROMOTION_RULES in the core engine. The contract does not carry these numbers, so the gate shows them here. */
+export const GATE = { supervisedRuns: 10, windowDays: 14, runsInWindow: 25, passRate: 0.99 } as const;
+
+const LOCAL_EFFECTS: readonly EffectClass[] = ['read_only', 'local_reversible'];
+
+export function levelLabel(level: number): string {
+  return `L${level} · ${LEVEL_NAMES[level] ?? 'Unknown'}`;
+}
+
+export function levelTone(level: number): 'teal' | 'ink' | 'neutral' {
+  if (level >= 4) return 'teal';
+  if (level === 3) return 'ink';
+  return 'neutral';
+}
+
+export function effectLabel(effect: EffectClass): string {
+  return effect.replace(/_/g, ' ');
+}
+
+export function effectsAreLocal(effects: readonly EffectClass[]): boolean {
+  return effects.every(effect => LOCAL_EFFECTS.includes(effect));
+}
+
+export function fitLabel(fit: Fit): string {
+  switch (fit) {
+    case 'good':
+      return 'Fits comfortably';
+    case 'tight':
+      return 'Fits, little room';
+    case 'too_large':
+      return 'Too large for this device';
+  }
+}
+
+export function paramFor(step: Step, params: readonly Param[]): Param | undefined {
+  return params.find(param => `$${param.name}` === step.app);
+}
+
+/** The app a step focuses, or the options when the app is a parameter that varies between runs. */
+export function stepAppLabel(step: Step, params: readonly Param[]): string {
+  const param = paramFor(step, params);
+  return param ? param.options.join(' or ') : step.app;
+}
+
+export function appsSummary(view: AutomationView): string {
+  const labels: string[] = [];
+  for (const step of view.automation.steps) {
+    if (step.op !== 'focus_app') continue;
+    const label = stepAppLabel(step, view.automation.params);
+    if (labels[labels.length - 1] !== label) labels.push(label);
+  }
+  return labels.join(' → ') || '—';
+}
+
+export function passRate(runs: readonly RunRecord[]): number | undefined {
+  const passed = runs.reduce((sum, run) => sum + run.postconditionsPassed, 0);
+  const failed = runs.reduce((sum, run) => sum + run.postconditionsFailed, 0);
+  return passed + failed === 0 ? undefined : passed / (passed + failed);
+}
+
+export function runOutcomeLabel(run: RunRecord): string {
+  switch (run.status) {
+    case 'completed':
+      return run.postconditionsFailed === 0 ? 'Passed' : 'Checks failed';
+    case 'blocked':
+      return 'Blocked';
+    case 'failed':
+      return 'Failed';
+    case 'dry_run':
+      return 'Dry run';
+  }
+}
+
+/** Fraction of the promotion gate met by a value, capped at one. */
+export function gateFraction(value: number, target: number): number {
+  return clamp01(value / target);
+}
+
+const CAPTURE_TITLES: Record<TwinStatus['capture']['state'], string> = {
+  capturing: 'Observing',
+  paused: 'Paused',
+  idle: 'Idle',
+  locked: 'Locked',
+  unsupported: 'Not available',
+};
+
+export function captureTitle(state: TwinStatus['capture']['state']): string {
+  return CAPTURE_TITLES[state];
+}
+
+export type ModelState = 'not_installed' | 'downloading' | 'installed' | 'cancelled' | 'failed';
+
+/** Derived from the download record and the installed list. Only these five states are shown. */
+export function modelState(status: TwinStatus, modelId: string): ModelState {
+  const download = status.downloads.find(entry => entry.modelId === modelId);
+  if (download?.status === 'running') return 'downloading';
+  if (download?.status === 'done' || status.config.installedModels.some(model => model.id === modelId)) return 'installed';
+  if (download?.status === 'failed') return 'failed';
+  if (download?.status === 'cancelled') return 'cancelled';
+  return 'not_installed';
+}
+
+export function modelFraction(status: TwinStatus, modelId: string): number {
+  if (modelState(status, modelId) === 'installed') return 1;
+  const download = status.downloads.find(entry => entry.modelId === modelId);
+  if (!download || download.totalBytes <= 0) return 0;
+  return clamp01(download.receivedBytes / download.totalBytes);
+}
+
+export function modelStateLabel(status: TwinStatus, modelId: string): string {
+  const download = status.downloads.find(entry => entry.modelId === modelId);
+  switch (modelState(status, modelId)) {
+    case 'downloading': {
+      if (download && download.totalBytes > 0 && download.receivedBytes >= download.totalBytes) return 'Verifying';
+      const received = formatBytes(download?.receivedBytes ?? 0);
+      const total = formatBytes(download?.totalBytes ?? 0);
+      return `Downloading · ${received} of ${total}`;
+    }
+    case 'installed':
+      return 'Installed';
+    case 'failed':
+      return download?.message ? `Failed: ${download.message}` : 'Failed';
+    case 'cancelled':
+      return 'Cancelled';
+    case 'not_installed':
+      return 'Not installed';
+  }
+}

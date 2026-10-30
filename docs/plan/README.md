@@ -1,10 +1,14 @@
 # companyOS Twin: plan
 
-**Status:** Draft v0.1, 2026-10-30. Planning only; no application code yet.
+**Status:** Draft v0.1, 2026-10-30. This is the target architecture, not the shipped desktop implementation. The current MVP is Electron with a TypeScript core; see the repository [README](../../README.md).
 **Working name:** companyOS Twin.
 **Research base:** [`docs/research/`](../research/) (five tracks, each with sources, key decisions, risks and an "unverified" list).
 
-A three-architect design panel is still running. Its synthesized plan will replace this overview as v0.2 when it completes.
+**Read this first.** Two later decisions override parts of this draft, and the affected places are marked below:
+- §15a (open models only) removes every cloud-model path: D2, D13, the cloud layer in §3, §6.3, the vision tier in §7.2, cloud repair in §7.6, and spike S6.
+- D4 replaced Tauri with Electron.
+
+§16 records where the MVP differs from this target. The design panel's synthesized plan (v0.2) is not in this repository yet.
 
 ---
 
@@ -23,10 +27,10 @@ Three principles shape everything else:
 | # | Decision | Choice | Source |
 |---|---|---|---|
 | D1 | Who it serves | Individuals and companies. Each employee owns their twin. | Product owner |
-| D2 | Where AI runs | Hybrid. Local models do capture, redaction and classification. Redacted, abstracted traces go to Claude for synthesis and repair. | Product owner |
+| D2 | Where AI runs | **Superseded by §15a:** open-weight models on the device only. (Was: hybrid, with redacted, abstracted traces sent to Claude for synthesis and repair.) | Product owner; §15a |
 | D3 | Autonomy in v1 | Earned. Suggest and one-click run first; promotion to unattended runs after a success streak. | Product owner |
-| D4 | Desktop shell | Rust core, Tauri 2 UI. No Electron. | `os-capture.md` |
-| D5 | Process model | Headless Rust daemon in the user's GUI session. UI is on-demand. No Windows Service, no LaunchDaemon. | `os-capture.md` |
+| D4 | Desktop shell | Electron with a TypeScript core engine. Chosen by the product owner over Tauri. Per-OS native capture helpers are the target after the spikes. | Product owner; `os-capture.md` |
+| D5 | Process model | The twin runs in the user's GUI session, never as a Windows Service or LaunchDaemon. MVP: inside the Electron main process. Target: a separate headless agent once the spikes pass. | `os-capture.md` |
 | D6 | Capture modality | Text-first (accessibility, UI Automation, window and browser events). Screenshots and OCR are opt-in and off by default. | `os-capture.md`, `prior-art.md` |
 | D7 | Keystrokes | Never record key contents. Only counts, shortcut chords and dwell time. Secure fields are skipped. | `os-capture.md`, `privacy-legal.md` |
 | D8 | Event store | Own encrypted SQLite (SQLCipher), mapped onto OCEL 2.0. | `understanding-ml.md` |
@@ -34,7 +38,7 @@ Three principles shape everything else:
 | D10 | Execution order | API and MCP first, then OS-native, browser DOM, accessibility tree, and vision last. | `automation-autonomy.md` |
 | D11 | Safety gate | A deterministic local policy engine decides before every step. The LLM is never the final judge of its own safety. | `automation-autonomy.md` |
 | D12 | Company analytics | Only k-anonymous (k ≥ 10) differentially private aggregates, over secure aggregation. | `privacy-legal.md`, `prior-art.md` |
-| D13 | Cloud model | Claude Opus 5.5 for synthesis and repair, under zero data retention where the org qualifies. Fable 5.x is excluded because it requires 30-day retention. | `understanding-ml.md`, `privacy-legal.md` |
+| D13 | Cloud model | **Superseded by §15a:** no cloud model. (Was: Claude Opus 5.5 for synthesis and repair under zero data retention, with Fable 5.x excluded because it requires 30-day retention.) | `understanding-ml.md`, `privacy-legal.md`; §15a |
 | D14 | Product positioning | Do not compete with platform computer-use agents. Win on passive, cross-OS discovery and an employee-owned twin. | `prior-art.md` |
 
 ## 3. What "anonymous" can honestly mean
@@ -50,7 +54,7 @@ The model has three layers:
 | Layer | Who sees it | Form | Status |
 |---|---|---|---|
 | **Twin** | The owner, on their device | Encrypted SQLite, pseudonymous device and object IDs, no raw screen content | Private. Not anonymous. |
-| **Cloud calls** | Anthropic (under ZDR) | Abstracted traces only: app and action tokens, URL templates, pseudonyms, parameter types. Never values or screens. A preview is shown first. | Minimised and pseudonymous. A ledger shows the owner every outbound call. |
+| **Cloud calls** | Anthropic (under ZDR) | Abstracted traces only: app and action tokens, URL templates, pseudonyms, parameter types. Never values or screens. A preview is shown first. | Not used: §15a removes cloud calls. Kept in case that decision is revisited. |
 | **Employer** | Company admins | k ≥ 10 cohorts, differentially private, over secure aggregation. Only about workflows and apps, plus automations people publish. | Anonymous to the recipient, as far as the recipient can tell. Re-identification risk is tested. |
 
 Consequences:
@@ -61,28 +65,24 @@ Consequences:
 
 ```
  ┌──────────────────────────┐   local IPC (Unix socket / named pipe, per-install token)
- │ companyOS UI (Tauri 2)   │◄──────────────────────────────────────────────┐
+ │ companyOS UI (Electron)  │◄──────────────────────────────────────────────┐
  │ on demand, tray-based    │                                               │
  └──────────────────────────┘                                               ▼
                                               ┌────────────────────────────────────────────┐
- ┌──────────────────────────┐  native msg      │ twin-agent (Rust daemon, user GUI session) │
+ ┌──────────────────────────┐  native msg      │ twin-agent (headless, user GUI session)    │
  │ Browser extension (MV3)  │─────────────────►│  capture · redact · segment · twin ·       │
  │ Chrome · Edge · Firefox  │                  │  automation runtime · policy engine        │
  └──────────────────────────┘                  │                                            │
-                                               │  SQLCipher store   local model (OS / GGUF) │
- ┌──────────────────────────┐  AX / UIA /      └────────────────┬───────────────────────────┘
- │ OS signals               │  AT-SPI / events                  │ opt-in · redacted · allowlisted
- └──────────────────────────┘─────────────────►(twin-agent)     ▼
-                                                   ┌──────────────────────────────┐
-                                                   │ Claude API (ZDR, Batches)    │
-                                                   │ synthesis · repair · naming  │
-                                                   └──────────────────────────────┘
+                                               │  SQLCipher store   local model (open GGUF) │
+ ┌──────────────────────────┐  AX / UIA /      └────────────────────────────────────────────┘
+ │ OS signals               │  AT-SPI / events
+ └──────────────────────────┘─────────────────►(twin-agent)
  Company mode:  twin-agent ──DP aggregates, k ≥ 10, secure aggregation──► org dashboard
 ```
 
 **Processes**
-- **twin-agent.** A headless Rust daemon (tokio). It runs as a per-user LaunchAgent or login item on macOS (registered with `SMAppService`), as a per-user logon task on Windows, and as a `systemd --user` unit on Linux. It does capture, redaction, storage, understanding and automation execution. It stays alive when the UI is closed.
-- **companyOS UI.** A Tauri 2 tray app. It connects to the agent over local IPC and is created on demand.
+- **twin-agent.** A headless daemon. Its language is not decided; the MVP engine is TypeScript (D4, D5). It runs as a per-user LaunchAgent or login item on macOS (registered with `SMAppService`), as a per-user logon task on Windows, and as a `systemd --user` unit on Linux. It does capture, redaction, storage, understanding and automation execution. It stays alive when the UI is closed.
+- **companyOS UI.** An Electron tray app. It connects to the agent over local IPC and is created on demand.
 - **Browser extension.** MV3, for Chrome, Edge and Firefox. It talks to a native-messaging host installed system-wide, so it survives enterprise policy. Safari is deferred.
 
 **Why not a Windows Service or a LaunchDaemon:** Session 0 cannot see windows or input. The agent has to live in the user session.
@@ -174,7 +174,7 @@ capture ─► normalize ─► segment ─► label ─► mine ─► paramete
 
 - **Normalize.** Map events to context (app, element role and label, field name) and data (values). Pseudonymise data with a per-device salted HMAC. Mine patterns on context only.
 - **Segment.** MVP: hard cuts at idle, lock and meeting boundaries, plus embedding drift. v2: Leno's control-flow back-edge segmentation, with LLM refinement of boundaries. Evaluated on boundary F1 and adjusted Rand index.
-- **Label.** An on-device model, with output constrained by JSON schema. Preferred: the OS model (Apple Foundation Models on macOS, Phi Silica on Copilot+ PCs). Fallback on other hardware: Gemma 4 E4B or Qwen3.5-4B (Q4) through llama.cpp. Context windows are small (4K–8K on Apple), so processing is chunked per segment.
+- **Label.** An on-device model, with output constrained by JSON schema. Under §15a this is an open-weight Qwen3 model from the catalogue (0.6B to 14B, GGUF), picked to fit the device's memory and disk, run through a GGUF runtime such as llama.cpp. The OS models (Apple Foundation Models, Phi Silica) and Gemma, which the research preferred, are out under §15a. Processing is chunked per segment. Not wired up yet: labels still come from rules (§16).
 - **Mine.** Process discovery with the Rust4PM `process_mining` crate (OCEL 2.0, DFG, Alpha+++). Frequent sequences with PrefixSpan or BIDE. Frequent does not mean automatable, so candidates are scored on repeatability, parameter variance and reversibility.
 - **Parameters.** Find which values change between repetitions by aligning context with data.
 - **Twin update.** Incremental and idempotent. The twin can be rebuilt from L1.
@@ -182,10 +182,12 @@ capture ─► normalize ─► segment ─► label ─► mine ─► paramete
 ### 6.2 Storage and search
 
 - One encrypted file: SQLCipher, `sqlite-vec` (pinned version) for vectors, FTS5 for text.
-- Embeddings: EmbeddingGemma-300M, truncated to 256 dimensions, int8. About 25 MB per 100K vectors.
+- Embeddings: Nomic Embed Text v1.5 (Apache-2.0, in the catalogue). It can be truncated to 256 dimensions; at int8 that is about 25 MB per 100K vectors. EmbeddingGemma-300M, the research pick, is out under §15a.
 - Revisit LanceDB only past about 1M vectors.
 
 ### 6.3 Cloud escalation
+
+> **Superseded by §15a.** Nothing in this section runs while the open-models decision holds. It is kept for reference.
 
 Escalation is **opt-in**. Only allowlisted abstract traces leave the device. The owner sees a preview before each send, and every call is recorded in a ledger the owner can read.
 
@@ -244,7 +246,7 @@ Each step uses the highest tier available:
 2. **OS-native.** AppleScript and JXA on macOS, PowerShell and UI Automation on Windows, D-Bus on Linux.
 3. **Browser DOM**, through the extension.
 4. **Accessibility tree.**
-5. **Vision.** The Claude computer toolset (`computer_toolset_20260801`, GA on the Claude API, no beta header). A fallback only, in a sandboxed browser profile or VM with an egress allowlist, always under human confirmation at MVP.
+5. **Vision.** The Claude computer toolset (`computer_toolset_20260801`, GA on the Claude API, no beta header). Superseded by §15a: this tier needs an open-model replacement before it can be built. A fallback only, in a sandboxed browser profile or VM with an egress allowlist, always under human confirmation at MVP.
 
 Linux input injection uses libei through the `xdg-desktop-portal` RemoteDesktop portal (GNOME 46+, KDE 6), with X11 XTest as a fallback. It does not use ydotool or uinput, because those bypass consent.
 
@@ -292,7 +294,7 @@ Rule of Two: an agent step that reads untrusted content may not also hold extern
 
 ### 7.6 Self-repair
 
-When a locator breaks, the runtime tries the fallback locators, then asks the cloud model for a repair. A repair is scope-bounded: it may change locators but not the set of effects. At L4 and above, a repair needs re-approval. Silent drift is the main risk here.
+When a locator breaks, the runtime tries the fallback locators, then asks a model for a repair. Under §15a that model is local; how well a small open model repairs locators is untested. A repair is scope-bounded: it may change locators but not the set of effects. At L4 and above, a repair needs re-approval. Silent drift is the main risk here.
 
 ## 8. Company mode
 
@@ -339,8 +341,8 @@ The employee holds the autonomy levels. Admins hold a safety brake, not a steeri
 
 | Area | Choice | License and status |
 |---|---|---|
-| Core daemon | Rust, tokio | Rust |
-| UI | Tauri 2.11 | Chosen. Webview differs per OS (WKWebView, WebView2, WebKitGTK). |
+| Core engine | TypeScript (`packages/core`), Zod schemas, Node crypto | Ours |
+| Desktop shell and UI | Electron 45 (Chromium and Node). Sandboxed renderer, contextBridge, strict CSP. | MIT |
 | Screen capture (opt-in) | `xcap` | Apache-2.0 |
 | Input events | `rdev` | MIT. Fragmented forks; pin and validate. |
 | Accessibility | Platform AX and UIA bindings (`windows-rs`, `uiautomation`) | Verify versions in spike |
@@ -349,15 +351,17 @@ The employee holds the autonomy levels. Admins hold a safety brake, not a steeri
 | Local store | SQLite + SQLCipher, `sqlite-vec` (pinned), FTS5 | Verify SQLCipher terms |
 | Secrets | `keyring` 4.2.0 | Verify |
 | Policy | Cedar (`cedar-policy`) or OPA | Verify |
-| Local models | Apple Foundation Models, Phi Silica, llama.cpp with Gemma 4 E4B or Qwen3.5-4B (Q4) | Verify model licenses before shipping |
-| Embeddings | EmbeddingGemma-300M, 256-dim int8 | Verify |
-| Cloud | Claude API: Opus 5.5 (ZDR where eligible), Batches, prompt caching, structured outputs, `inference_geo` | Commercial API |
+| Local models | Qwen3 0.6B–14B (GGUF) from a fixed catalogue with pinned SHA-256 digests (§15a) | Apache-2.0 |
+| Embeddings | Nomic Embed Text v1.5 (GGUF) | Apache-2.0 |
+| Cloud | None (§15a). Was: Claude API with Opus 5.5. | — |
 | Browser | MV3 extension and native-messaging host | Chrome, Edge, Firefox |
 | Packaging | macOS: notarized `.pkg` and `.dmg`. Windows: signed MSI. Linux: `.deb`, `.rpm`. | Azure Artifact Signing or OV certificate on cloud HSM. Certificates are valid for at most 460 days from March 2026. |
 
 **Licensing rule:** no AGPL or GPL dependency may enter the shipped client. This rules out PM4Py (AGPL-3.0, research only), SPMF (GPL, research only), the OmniParser icon-detection weights (AGPL), workflow-use (AGPL), OpenRecall (AGPL) and Windrecorder. Decide on day 1 whether the client is open (MIT/Apache core with a commercial control plane, the OpenAdapt model) or closed.
 
 ### 9.1 Repository layout (proposed)
+
+The MVP uses a smaller layout: `packages/core` and `apps/desktop` (see the [README](../../README.md#layout)). The layout below is the target if the agent and capture helpers move to native code.
 
 ```
 companyos/
@@ -372,7 +376,7 @@ companyos/
     twin-ipc/                 local IPC between agent and UI
     twin-agent/               daemon binary
   apps/
-    desktop/                  Tauri UI
+    desktop/                  Electron UI
     browser-ext/              MV3 extension and native-messaging host
   services/                   company aggregation service (later)
   tests/privacy/              leak tests, redaction canaries, anonymity tests
@@ -400,7 +404,7 @@ These must pass before the MVP is committed to.
 | S3 | How good is AX coverage across the top 30 apps (Electron, Office, browsers, Slack, Teams)? | At least 70% of the top apps yield usable structure, with `AXManualAccessibility` where needed |
 | S4 | Can KWin-script and GNOME-extension prototypes report window, focus and idle? | Works on GNOME 46+ and KDE 6 |
 | S5 | Can a 4B model label segments on an 8 GB laptop without hurting battery or thermals? | Labels at target accuracy, under the CPU budget |
-| S6 | Is zero data retention available for `claude-opus-5-5` in our org? Is `inference_geo` honoured? | Written confirmation from Anthropic |
+| S6 | Is zero data retention available for `claude-opus-5-5` in our org? Is `inference_geo` honoured? | Written confirmation from Anthropic. Not needed while §15a holds. |
 | S7 | Can we generate a synthetic trace corpus and a labelled set for segmentation and mining? | Corpus covers ten routine types with known ground truth |
 
 ### Phase 1: MVP (single user, macOS and Windows)
@@ -408,15 +412,15 @@ These must pass before the MVP is committed to.
 - Text-first capture on macOS and Windows. Browser extension for Chrome and Edge.
 - Local encrypted twin. Segmentation and routine detection.
 - L1 suggest, L2 draft and L3 one-click run, using the API, OS-native and browser-DOM tiers.
-- No cloud escalation, or opt-in only behind the allowlist.
+- No cloud escalation (§15a).
 - No company mode.
 
 **Exit:** 20 pilot users. Some accepted suggestions in week one for most of them. Zero raw-content egress in the privacy tests. Budgets met.
 
-### Phase 2: Beta (Linux, cloud escalation, L4)
+### Phase 2: Beta (Linux, L4)
 
 - Linux: KDE via KWin script, GNOME via shell extension, wlroots/COSMIC where possible. `.deb` and `.rpm`.
-- Cloud escalation with ZDR and allowlist. Nightly Batches synthesis.
+- ~~Cloud escalation with ZDR and allowlist. Nightly Batches synthesis.~~ Superseded by §15a.
 - L4 autonomy for local, reversible effects after the promotion gate.
 - MCP tools. Automations exported as MCP tools or agent skills.
 
@@ -432,7 +436,7 @@ These must pass before the MVP is committed to.
 
 ### Phase 4: v2
 
-- Vision fallback through the computer toolset, in a sandbox.
+- Vision fallback in a sandbox. Was the Claude computer toolset; under §15a it needs an open model.
 - Leno's segmentation with LLM refinement.
 - libei input on Wayland.
 - L5 for external effects, with outbox and approval.
@@ -494,9 +498,9 @@ The research files list everything they could not confirm. The most important on
 - Whether PPPC can pre-grant Input Monitoring. Third-party tables say it can only be denied.
 - TCC attribution for `SMAppService` helpers. Based on forum statements from Apple DTS, not formal docs. S1 settles it.
 - UIPI behaviour for low-level hooks against elevated windows. General knowledge only.
-- Tauri WiX version (v3 or v6), and whether `tauri-plugin-updater` self-updates `.deb` and `.rpm`.
-- Apple on-device model context size (4K or 8K tokens).
-- Zero data retention for Opus 5.5 and Sonnet 5.5, which is inferred from the docs. Confirm with Anthropic (S6).
+- Tauri WiX version (v3 or v6), and whether `tauri-plugin-updater` self-updates `.deb` and `.rpm`. Moot under D4.
+- Apple on-device model context size (4K or 8K tokens). Moot under §15a.
+- Zero data retention for Opus 5.5 and Sonnet 5.5, which is inferred from the docs. Confirm with Anthropic (S6). Moot while §15a holds.
 - California AB 1331 and Maine LD 61 scope. Both are home-monitoring laws to check against remote work.
 - The k ≥ 10 threshold, retention limits and epsilon budget are design recommendations, not legal requirements.
 - Benchmark figures (Tauri vs Electron RAM, screenpipe CPU and storage, OSWorld scores) come from vendor sources and disagree with each other.
@@ -506,7 +510,43 @@ Full lists: [`os-capture.md`](../research/os-capture.md), [`prior-art.md`](../re
 
 ## 15. Next steps
 
-1. Run spikes S1–S7 (§10).
-2. Replace this overview with the design panel's synthesized plan (v0.2), once it completes.
+1. Run spikes S1–S5 and S7 (§10). S6 is not needed while §15a holds.
+2. Merge the design panel's synthesized plan (v0.2) into this document when it is available.
 3. Get legal review on §3 and §8 before any pilot.
 4. Choose open or closed client (§13, question 3). This gates the repository and license setup.
+
+## 15a. Decision: open models only (for security)
+
+Recorded after the first build. The product owner asked for open-weight models only, for now. No closed or hosted model
+receives any data. The rules that follow:
+
+- Catalogue: Apache-2.0 or MIT, not gated, pinned SHA-256 from the Hugging Face file index. Gemma and Llama are excluded
+  because their licences are custom, not OSI-approved.
+- Setup recommends a chat model from the device's measured memory and disk, plus an embedding model, and installs them
+  with checksum verification.
+- The Claude naming path is removed from the app. The network ledger replaces the cloud ledger and lists model downloads.
+- Downloads: HTTPS only, from `huggingface.co` and `*.hf.co`, with every redirect hop checked.
+
+## 16. Implementation status (MVP build)
+
+The MVP is built on branch `work-twin-app`. It follows this plan with these deliberate deviations:
+
+| Plan | MVP | Why |
+|---|---|---|
+| Rust core and Tauri UI (the research draft, before D4) | TypeScript core, Electron UI | Product owner chose Electron. One language across core and UI. |
+| Headless per-user agent | Twin engine inside the Electron main process | Simpler to ship first. The agent split waits for spike S1. |
+| Native capture (AX, UIA, AT-SPI) | Polling adapters: `osascript`, PowerShell `GetForegroundWindow`, `xdotool` | Native helpers need the spikes. Polling is measurably more expensive, especially on Windows. |
+| SQLCipher store | Record-level AES-256-GCM over an append-only log, key from OS keychain | SQLCipher needs a native build on all three OSes first. |
+| Browser extension | Not built. The engine accepts URL templates. | Separate work item. |
+| Keystroke counts | Not captured | Needs the native helper. |
+| Wayland | Reported as unavailable | Needs a compositor extension (spike S4). |
+| Automation steps: a workflow graph (`observe`, `act`, `check`, `approve`, `branch`, `agent_step`) over five execution tiers (§7.1, §7.2) | Two steps only: focus an app, and check that it is focused | Typing, clicking and sending need the execution tiers. |
+| Delegation: not in the plan | OpenMausBot handoff from an accepted routine, after a native confirmation that previews the prompt | Product owner addition. See the note below. |
+
+**OpenMausBot handoff.** This is the one path where data derived from the twin leaves companyOS: the task brief, routine name, app sequence and estimated cadence. Activity history, screenshots, window contents and companyOS credentials are not sent. OpenMausBot runs under its own permissions, models and credentials, outside the autonomy controls in §7. companyOS does not control which models OpenMausBot uses, so §15a does not cover what happens after the handoff. The handoff is not recorded in the network ledger.
+
+What the tests cover:
+- Engine (`packages/core/test`, 114 tests): redaction and privacy at ingest, store encryption and tamper detection, segmentation, routine mining, compilation, policy evaluation order, runner outcomes, the promotion gate and demotion, triggers, the model catalogue, hardware planning and verified downloads, the ledger, and an end-to-end agent run.
+- Desktop (`apps/desktop/test/e2e.cjs`, Linux in CI): launches the built app and covers setup, the model recommendation, a real verified download, cancelling an install, routine detection, suggestions, a dry run, the ledger, the tray stop switch, and the routine offer when an app opens.
+
+Not yet done: running the installed model (labels and names still use rules), automation steps beyond app focus, the browser extension, native capture, SQLCipher, signing and notarisation, real icons, a manual pass on each OS against real apps, a measurement against the CPU and memory budgets in §5.5, and company mode.
