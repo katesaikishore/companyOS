@@ -7,6 +7,7 @@ import {
   effectOfOp,
   effectsOf,
   planSetup,
+  polledFocusApp,
   resolveStep,
   type Automation,
   type AutomationView,
@@ -63,6 +64,14 @@ const NO_CONTROL: Executor = {
 const DAY_MS = 86_400_000;
 
 /**
+ * The capture poll reads the front app. While the browser bridge runs, Chrome and Edge are recorded from the bridge,
+ * which sees the tab, so the poll leaves them out. Otherwise each visit would be counted twice.
+ */
+function pollWithoutBridgedBrowsers(platform: Platform, bridgeRunning: () => boolean): Platform {
+  return { ...platform, frontmost: async () => polledFocusApp(await platform.frontmost(), bridgeRunning()) };
+}
+
+/**
  * Connects the twin engine to the operating system and to the model installer. It is the only thing the IPC
  * layer talks to, so the page never receives a key, a raw event, or a path it did not ask for.
  */
@@ -74,6 +83,8 @@ export class TwinRuntime {
   /** Listens for visits from the browser extension. Exists only while browser capture is on. */
   private browserBridge: BrowserBridge | undefined;
   private browserChanges: Promise<void> = Promise.resolve();
+  /** Why browser capture could not start while its setting is on. Shown on the capture card until it works or is switched off. */
+  private browserProblem: string | undefined;
   private hardwareProfile: Promise<HardwareProfile> | undefined;
   private readonly gate = new TriggerGate();
   /** Offers waiting for an answer. At most one at a time. */
@@ -90,7 +101,12 @@ export class TwinRuntime {
     this.platform = platform;
     this.agent = new TwinAgent({ dataDir: join(options.userData, 'twin'), dataKey });
     this.capture = new CaptureService(
-      { agent: this.agent, platform, idleSeconds: options.idleSeconds, onFocus: app => this.observeFocus(app) },
+      {
+        agent: this.agent,
+        platform: platform && pollWithoutBridgedBrowsers(platform, () => this.browserBridge !== undefined),
+        idleSeconds: options.idleSeconds,
+        onFocus: app => this.observeFocus(app),
+      },
       detail,
     );
     this.models = new ModelManager({
@@ -111,8 +127,12 @@ export class TwinRuntime {
     this.agent.prune();
     await this.models.reconcile();
     this.capture.start();
-    // A bridge that cannot start leaves the setting on with no browser URLs. The app still starts.
-    if (this.agent.configuration.watchBrowsers) await this.setBrowserCapture(true).catch(() => undefined);
+    // A bridge that cannot start leaves the setting on with no browser URLs. The app still starts, and the capture card says why.
+    if (this.agent.configuration.watchBrowsers) {
+      await this.setBrowserCapture(true).catch(error => {
+        this.browserProblem = error instanceof Error ? error.message : 'Watch browsers could not start.';
+      });
+    }
     setInterval(() => this.agent.prune(), DAY_MS).unref();
   }
 
@@ -165,7 +185,7 @@ export class TwinRuntime {
       .reduce((sum, view) => sum + (view.automation.estimate?.minutesPerWeek ?? 0), 0);
     const observed = this.agent.observed();
     return {
-      capture: this.capture.status,
+      capture: this.browserProblem ? { ...this.capture.status, detail: this.browserProblem } : this.capture.status,
       config,
       usage: this.agent.appUsage(7),
       suggestions,
@@ -198,7 +218,10 @@ export class TwinRuntime {
    */
   async updateConfig(patch: Partial<TwinConfig>): Promise<TwinConfig> {
     const parsed = TwinConfigSchema.partial().parse(patch);
-    if (parsed.watchBrowsers !== undefined) await this.setBrowserCapture(parsed.watchBrowsers);
+    if (parsed.watchBrowsers !== undefined) {
+      await this.setBrowserCapture(parsed.watchBrowsers);
+      this.browserProblem = undefined;
+    }
     return this.agent.updateConfig(parsed);
   }
 

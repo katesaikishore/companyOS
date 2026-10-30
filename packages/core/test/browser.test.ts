@@ -3,10 +3,21 @@ import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { TwinAgent, urlTemplate, type TwinEvent } from '../src';
+import { TwinAgent, polledFocusApp, urlTemplate, type TwinEvent } from '../src';
 import { at } from './fixtures';
 
 const SECRET = 'SECRET123456';
+
+/**
+ * What the capture poll and the bridge send when the person switches to Chrome and opens a page. The poll names the
+ * app the way the OS does (Linux reports google-chrome), and the poll's focus is dropped while the bridge runs.
+ */
+function switchToChrome(agent: TwinAgent, ts: number, rawUrl: string, polledName: string): void {
+  const polled = polledFocusApp(polledName, true);
+  if (polled) agent.ingest({ kind: 'focus', ts, app: polled });
+  const template = urlTemplate(rawUrl);
+  if (template) agent.ingest({ kind: 'focus', ts, app: 'Google Chrome', url: `https://${template}` });
+}
 
 function openAgent(watchBrowsers?: boolean): TwinAgent {
   const agent = new TwinAgent({ dataDir: mkdtempSync(join(tmpdir(), 'twin-browser-')), dataKey: randomBytes(32), now: () => at(0, 13) });
@@ -81,5 +92,22 @@ describe('browser visits in the engine', () => {
     visit(agent, 'Google Chrome', 'https://docs.example.com/doc/9f8e7d6');
     const chrome = agent.appUsage(7).find(usage => usage.app === 'google chrome');
     expect(chrome).toMatchObject({ windowClass: 'browser', events: 2 });
+  });
+
+  it('counts one visit once in per-app usage and in mined patterns while the bridge runs', () => {
+    const agent = openAgent(true);
+    for (let day = 0; day < 3; day++) {
+      agent.ingest({ kind: 'focus', ts: at(day, 9), app: 'Slack' });
+      switchToChrome(agent, at(day, 9, 10), 'https://docs.example.com/doc/1ab2cd3', 'google-chrome');
+      agent.ingest({ kind: 'focus', ts: at(day, 9, 30), app: 'Slack' });
+    }
+
+    const browsers = agent.appUsage(7).filter(usage => usage.windowClass === 'browser');
+    expect(browsers).toEqual([expect.objectContaining({ app: 'google chrome', events: 3 })]);
+
+    const routine = agent.analyze().routines.find(candidate => candidate.steps.some(step => step.windowClass === 'browser'));
+    expect(routine).toBeDefined();
+    expect(routine?.steps[1]).toMatchObject({ app: 'google chrome', options: ['google chrome'] });
+    expect(routine?.support).toBe(3);
   });
 });

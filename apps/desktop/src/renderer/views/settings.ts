@@ -117,7 +117,7 @@ function capturePanel(watchBrowsers: boolean, excluded: readonly string[]): HTML
     toggleRow({
       testid: 'settings-browsers',
       label: 'Watch browsers',
-      note: 'Only the app name is recorded, not the page or the window. Private windows cannot be told apart yet. Off by default.',
+      note: 'On macOS and Linux, Chrome and Edge record only the host and path shape of the active tab, never a query, a title or a private window. Other browsers, and Windows, record only the app name, and their private windows cannot be told apart. Off by default.',
       checked: watchBrowsers,
       onChange: checked => void saveConfig('browsers', { watchBrowsers: checked }),
     }),

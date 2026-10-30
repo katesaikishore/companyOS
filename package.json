@@ -14,7 +14,7 @@
   "scripts": {
     "build": "npm run build -w @companyos/twin-core && npm run build -w @companyos/desktop && node apps/browser-ext/scripts/build.mjs",
     "typecheck": "npm run build -w @companyos/twin-core && npm run typecheck --workspaces --if-present",
-    "test": "npm run test -w @companyos/twin-core",
+    "test": "npm run test -w @companyos/twin-core && node --test apps/browser-ext/test/host.test.js",
     "start": "npm run build && npm run start -w @companyos/desktop",
     "dist": "npm run build && npm run dist -w @companyos/desktop",
     "dist:dir": "npm run build && npm run dist:dir -w @companyos/desktop",

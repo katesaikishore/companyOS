@@ -137,7 +137,7 @@ function permissions(status: TwinStatus): Child[] {
         permRow(
           'Browsers',
           'off by default',
-          'Only the app name is recorded, not the page or the window. Private windows cannot be told apart yet.',
+          'On macOS and Linux, Chrome and Edge record only the host and path shape of the active tab, never a private window. Other browsers, and Windows, record only the app name, and their private windows cannot be told apart.',
           toggleRow({
             testid: 'setup-browsers',
             label: 'Watch browsers',
@@ -155,7 +155,7 @@ function permissions(status: TwinStatus): Child[] {
         h(
           'ul',
           { class: 'never-list' },
-          ...['Which keys you press', 'Password and secure fields', 'Private and incognito windows', 'Apps you exclude'].map(item =>
+          ...['Which keys you press', 'Password and secure fields', 'Private and incognito windows in Chrome and Edge', 'Apps you exclude'].map(item =>
             h('li', null, item),
           ),
         ),

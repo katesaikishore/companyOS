@@ -1,7 +1,8 @@
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server, type Socket } from 'node:net';
 import { dirname } from 'node:path';
+import { MAX_REQUEST_CHARS, parseVisitRequest, socketPathProblem, tokensMatch } from '@companyos/twin-core';
 
 /** A visit the browser extension reported: the browser and the template of its active tab, never a full URL. */
 export interface BrowserVisit {
@@ -24,17 +25,7 @@ export interface BrowserBridgeOptions {
   onVisit: (visit: BrowserVisit) => void;
 }
 
-const MAX_REQUEST_CHARS = 1024;
 const REQUEST_TIMEOUT_MS = 5000;
-/** Unix socket paths are limited to about 104 bytes on macOS. Longer paths fail with a clear error. */
-const MAX_SOCKET_PATH_BYTES = 100;
-const REQUEST_FIELDS = new Set(['browser', 'template', 'token', 'type']);
-/** A host, then up to four path segments, each a plain lowercase word or :id. Matches what urlTemplate returns. */
-const TEMPLATE_PATTERN = /^[a-z0-9_-]+(?:\.[a-z0-9_-]+)*(?:\/(?::id|[a-z]{1,12})){0,4}$/;
-
-interface Request extends BrowserVisit {
-  token: string;
-}
 
 /**
  * Accepts visits from the native messaging host over a local socket. The socket is mode 0600 inside a 0700 folder,
@@ -103,9 +94,9 @@ export class BrowserBridge {
   }
 
   private handle(line: string): { ok: boolean; error?: string } {
-    const request = parseRequest(line);
+    const request = parseVisitRequest(line);
     if (!request) return { ok: false, error: 'bad_request' };
-    if (!sameToken(request.token, this.token)) return { ok: false, error: 'unauthorized' };
+    if (!tokensMatch(request.token, this.token)) return { ok: false, error: 'unauthorized' };
     try {
       this.options.onVisit({ browser: request.browser, template: request.template });
     } catch {
@@ -120,9 +111,8 @@ export class BrowserBridge {
  * Any failure removes the token again, so no token outlives a bridge that is not running.
  */
 export async function startBrowserBridge(options: BrowserBridgeOptions): Promise<BrowserBridge> {
-  if (Buffer.byteLength(options.socketPath) > MAX_SOCKET_PATH_BYTES) {
-    throw new Error('The browser bridge socket path is too long for this system.');
-  }
+  const problem = socketPathProblem(options.socketPath);
+  if (problem) throw new Error(problem);
   const folder = dirname(options.socketPath);
   mkdirSync(folder, { recursive: true, mode: 0o700 });
   chmodSync(folder, 0o700);
@@ -140,33 +130,6 @@ export async function startBrowserBridge(options: BrowserBridgeOptions): Promise
     throw error;
   }
   return bridge;
-}
-
-/** Returns the request only when it has exactly the expected fields and valid values. Anything else is refused. */
-function parseRequest(line: string): Request | undefined {
-  if (line.length > MAX_REQUEST_CHARS) return undefined;
-  let value: unknown;
-  try {
-    value = JSON.parse(line);
-  } catch {
-    return undefined;
-  }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const fields = value as Record<string, unknown>;
-  if (Object.keys(fields).some(key => !REQUEST_FIELDS.has(key))) return undefined;
-
-  const browser = fields.browser === 'chrome' ? 'chrome' : fields.browser === 'edge' ? 'edge' : undefined;
-  const { template, token, type } = fields;
-  if (type !== 'visit' || !browser) return undefined;
-  if (typeof template !== 'string' || template.length > 300 || !TEMPLATE_PATTERN.test(template)) return undefined;
-  if (typeof token !== 'string' || token.length > 128) return undefined;
-  return { browser, template, token };
-}
-
-function sameToken(given: string, expected: string): boolean {
-  const a = Buffer.from(given);
-  const b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 function reply(value: { ok: boolean; error?: string }): string {
