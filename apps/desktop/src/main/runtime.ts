@@ -5,6 +5,7 @@ import {
   TwinAgent,
   TwinConfigSchema,
   type AgentDelegationResult,
+  type HandoffView,
   effectOfOp,
   effectsOf,
   planSetup,
@@ -36,7 +37,7 @@ import { destroyStoredSecrets, loadOrCreateDataKey } from './keys';
 import { detectHardware } from './hardware';
 import { ModelManager, createRoutineNamer } from './models';
 import { browserCapturePaths, installNativeHost, isBrowserCaptureSupported, removeNativeHost } from './native-host-install';
-import { runOpenMausBotTask } from './openmausbot';
+import { observedAppSequence, runOpenMausBotTask, sendHandoff } from './openmausbot';
 import { choosePlatform, executorFor, type Platform } from './platform';
 
 export interface RuntimeOptions {
@@ -131,6 +132,8 @@ export class TwinRuntime {
 
   async start(): Promise<void> {
     this.agent.prune();
+    // A handoff still sending from the last run was cut off with the app. Its reply can no longer arrive.
+    this.agent.closeInterruptedHandoffs();
     await this.models.reconcile();
     this.capture.start();
     // A bridge that cannot start leaves the setting on with no browser URLs. The app still starts, and the capture card says why.
@@ -210,7 +213,7 @@ export class TwinRuntime {
       storageBytes: this.agent.storageBytes(),
       retentionDays: RETENTION_DAYS,
       readiness: this.agent.readiness(),
-      handoffs: [],
+      handoffs: this.agent.handoffs(),
       stats: {
         routinesLearned: suggestions.length + automations.length,
         waiting: suggestions.length + drafts,
@@ -288,16 +291,36 @@ export class TwinRuntime {
     });
   }
 
-  delegateRoutine(automationId: string, taskBrief: string): Promise<AgentDelegationResult> {
+  /**
+   * Sends an approved brief to OpenMausBot. The handoff is written as "sending" before the CLI starts, so no send
+   * goes unrecorded, then updated with the reply, or with companyOS's message if the CLI could not be run. The caller
+   * asks the person first, so a cancelled confirmation never gets here and is never recorded.
+   */
+  async delegateRoutine(automationId: string, taskBrief: string): Promise<AgentDelegationResult> {
     const automation = this.agent.automations().find(view => view.automation.id === automationId)?.automation;
     if (!automation) throw new Error('Unknown automation.');
     const config = this.agent.configuration;
-    return runOpenMausBotTask({
-      command: config.openMausBotCommand,
+    const handoff: HandoffView = {
+      id: randomUUID(),
+      automationId,
+      routineName: automation.name,
       target: config.openMausBotTarget,
-      automation,
-      taskBrief,
-    });
+      brief: taskBrief,
+      apps: observedAppSequence(automation),
+      cadencePerWeek: automation.estimate?.occurrencesPerWeek,
+      sentAt: Date.now(),
+      state: 'sending',
+      summary: '',
+      localFailure: false,
+    };
+    return sendHandoff(this.agent, handoff, () =>
+      runOpenMausBotTask({
+        command: config.openMausBotCommand,
+        target: config.openMausBotTarget,
+        automation,
+        taskBrief,
+      }),
+    );
   }
 
   /**

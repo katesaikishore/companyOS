@@ -1,4 +1,4 @@
-import type { AgentDelegationResult, AutomationView, AutonomyLevel, Param, RunRecord, RunResult, Step, TwinStatus } from '@companyos/twin-core';
+import type { AutomationView, AutonomyLevel, HandoffView, Param, RunRecord, RunResult, Step, TwinStatus } from '@companyos/twin-core';
 import { h, type Child } from '../dom.js';
 import { button, chip, emptyState, pageHeader, panel, panelHead, progressBar } from '../components/ui.js';
 import { DAY_MS, clamp01, formatRate, formatWhen, percent, plural } from '../format.js';
@@ -14,7 +14,7 @@ import {
   stepDetail,
   stepTitle,
 } from '../labels.js';
-import { call, go, pending, state } from '../store.js';
+import { call, go, pending, setNotice, state } from '../store.js';
 
 export function automationsView(status: TwinStatus): HTMLElement {
   const header = pageHeader('Automations', 'Accepted routines. Each starts as a draft and moves up a level only when you raise it.');
@@ -132,7 +132,7 @@ export function automationDetailView(status: TwinStatus, id: string): HTMLElemen
     ),
     result ? resultPanel(result) : undefined,
     autonomyPanel(view),
-    agentDelegationPanel(view, status.config.openMausBotTarget),
+    agentDelegationPanel(view, status.config.openMausBotTarget, status.handoffs.find(item => item.automationId === automation.id)),
     h(
       'div',
       { class: 'split' },
@@ -142,12 +142,14 @@ export function automationDetailView(status: TwinStatus, id: string): HTMLElemen
   );
 }
 
-function agentDelegationPanel(view: AutomationView, target: string): HTMLElement {
+/** `handoff` is the newest handoff for this routine, read from the twin's stored handoffs, so it survives a restart. */
+function agentDelegationPanel(view: AutomationView, target: string, handoff: HandoffView | undefined): HTMLElement {
   const automation = view.automation;
   const key = `agent-task:${automation.id}`;
   const brief = state.agentTaskBriefs.get(automation.id) ?? '';
-  const result = state.agentTaskResults.get(automation.id);
   const configured = Boolean(target.trim());
+  const busy = pending(key) || handoff?.state === 'sending';
+  const handoffId = handoff?.id;
   let submitButton: HTMLButtonElement | undefined;
   const taskBrief = h('textarea', {
     class: 'input task-brief',
@@ -160,16 +162,18 @@ function agentDelegationPanel(view: AutomationView, target: string): HTMLElement
     oninput: (event: Event) => {
       const value = (event.currentTarget as HTMLTextAreaElement).value;
       state.agentTaskBriefs.set(automation.id, value);
-      if (submitButton) submitButton.disabled = !value.trim() || pending(key);
+      if (submitButton) submitButton.disabled = !value.trim() || busy;
     },
   });
-  submitButton = button(pending(key) ? 'Waiting for OpenMausBot…' : 'Create task tree', {
+  submitButton = button(busy ? 'Waiting for OpenMausBot…' : 'Create task tree', {
     variant: 'primary',
     testid: 'agent-task-submit',
-    disabled: !brief.trim() || pending(key),
+    disabled: !brief.trim() || busy,
     onClick: () =>
       void call(key, async twin => {
-        state.agentTaskResults.set(automation.id, await twin.delegateRoutine(automation.id, state.agentTaskBriefs.get(automation.id) ?? ''));
+        const sent = await twin.delegateRoutine(automation.id, state.agentTaskBriefs.get(automation.id) ?? '');
+        // A cancelled confirmation is not recorded, so the page says so here instead of showing a handoff.
+        if (sent.state === 'cancelled') setNotice(sent.summary, 'info');
       }),
   });
 
@@ -190,19 +194,37 @@ function agentDelegationPanel(view: AutomationView, target: string): HTMLElement
       configured
         ? submitButton
         : button('Configure OpenMausBot', { onClick: () => go('#/settings') }),
+      configured && handoffId
+        ? button('Open in Agent harness', {
+            testid: 'agent-task-harness',
+            onClick: () => {
+              state.selectedHandoff = handoffId;
+              go('#/harness');
+            },
+          }, 'btn-small')
+        : undefined,
     ),
-    result ? agentTaskResultPanel(result) : undefined,
+    handoff ? agentTaskResultPanel(handoff) : undefined,
   );
 }
 
-function agentTaskResultPanel(result: AgentDelegationResult): HTMLElement {
+/** The newest handoff for the routine: its state, thread, reply and job tree, as the twin kept them. */
+function agentTaskResultPanel(handoff: HandoffView): HTMLElement {
   return h('div', { class: 'agent-task-result', 'data-testid': 'agent-task-result' },
-    h('div', { class: 'run-result-head mono' }, h('strong', null, result.state), result.threadId ? ` · ${result.threadId}` : ''),
-    h('p', { class: 'small' }, result.summary),
-    result.taskTree
+    h('div', { class: 'run-result-head mono' },
+      h('strong', null, handoff.state),
+      handoff.threadId ? ` · ${handoff.threadId}` : '',
+      ` · sent ${formatWhen(handoff.sentAt)}`,
+    ),
+    h('p', { class: 'small' },
+      handoff.state === 'sending'
+        ? 'Waiting for OpenMausBot to reply.'
+        : handoff.summary || 'No reply text was returned.',
+    ),
+    handoff.taskTree
       ? h('details', { class: 'agent-task-tree' },
           h('summary', null, 'Show task hierarchy'),
-          h('pre', { class: 'code-block' }, result.taskTree),
+          h('pre', { class: 'code-block' }, handoff.taskTree),
         )
       : undefined,
   );

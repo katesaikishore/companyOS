@@ -30,7 +30,13 @@ import {
 import { APP_ORIGIN, IPC } from '../shared/ipc';
 import { SecureStorageUnavailableError } from './keys';
 import { nativeHostScript } from './native-host-install';
-import { buildOpenMausBotPrompt } from './openmausbot';
+import {
+  buildOpenMausBotPrompt,
+  checkOpenMausBotSettings,
+  MAX_TASK_BRIEF,
+  openMausBotCommandProblem,
+  openMausBotTargetProblem,
+} from './openmausbot';
 import { TwinRuntime } from './runtime';
 import { startAutoUpdates } from './updater';
 
@@ -102,7 +108,10 @@ function registerIpc(): void {
     rebuildTrayMenu();
   });
 
-  handle(IPC.updateConfig, patch => requireRuntime().updateConfig(TwinConfigSchema.partial().parse(patch)));
+  handle(IPC.updateConfig, patch => {
+    checkOpenMausBotSettings(patch);
+    return requireRuntime().updateConfig(TwinConfigSchema.partial().parse(patch));
+  });
   handle(IPC.stopAllAutomations, () => stopAllAutomations());
 
   handle(IPC.acceptRoutine, (id, name) =>
@@ -122,19 +131,20 @@ function registerIpc(): void {
   });
   handle(IPC.delegateRoutine, async (id, brief) => {
     const automation = automationId(id);
-    if (typeof brief !== 'string' || brief.length > 500 || /[\u0000-\u0008\u000b-\u001f\u007f]/.test(brief)) {
-      throw new Error('Describe the task in 1–500 characters.');
+    const briefError = `Describe the task in 1–${MAX_TASK_BRIEF} characters.`;
+    if (typeof brief !== 'string' || brief.length > MAX_TASK_BRIEF || /[\u0000-\u0008\u000b-\u001f\u007f]/.test(brief)) {
+      throw new Error(briefError);
     }
     const taskBrief = brief.trim();
-    if (!taskBrief) throw new Error('Describe the task in 1–500 characters.');
+    if (!taskBrief) throw new Error(briefError);
 
     const status = requireRuntime().status();
     const selected = status.automations.find(view => view.automation.id === automation)?.automation;
     if (!selected) throw new Error('Unknown automation.');
+    // The same checks the send applies, made before the person is asked, so a confirmation never leads to an error.
+    const problem = openMausBotCommandProblem(status.config.openMausBotCommand) ?? openMausBotTargetProblem(status.config.openMausBotTarget);
+    if (problem) throw new Error(problem);
     const target = status.config.openMausBotTarget.trim();
-    if (!target || !/^[\p{L}\p{N}][\p{L}\p{N}_.@ -]*$/u.test(target)) {
-      throw new Error('Set a valid OpenMausBot lead bot or room in Settings first.');
-    }
     const prompt = buildOpenMausBotPrompt(selected, taskBrief);
     const confirmation: MessageBoxOptions = {
       type: 'warning',
@@ -166,7 +176,7 @@ function registerIpc(): void {
       defaultId: 1,
       cancelId: 1,
       message: 'The export is not encrypted',
-      detail: 'It includes every recorded app switch with timestamps, URL shapes, your settings, and any configured OpenMausBot executable and target. Keep it somewhere private, and do not put it in a synced folder.',
+      detail: 'It includes every recorded app switch with timestamps, URL shapes, your settings, your OpenMausBot handoffs (task briefs, routine names, app names and replies), and any configured OpenMausBot executable and target. Keep it somewhere private, and do not put it in a synced folder.',
     };
     const parent = parentWindow();
     const warned = parent ? await dialog.showMessageBox(parent, warning) : await dialog.showMessageBox(warning);
