@@ -338,6 +338,27 @@ export class TwinRuntime {
     this.pending = this.pending.filter(offer => offer.expiresAt > now);
   }
 
+  /**
+   * Test-only, called by the performance harness. Writes a few days of app switches and idle gaps, as the end-to-end
+   * tests do, so a measured run has routines to mine. Only app names are written. No titles, URLs or content.
+   */
+  seedMeasurementActivity(days: number): void {
+    const now = new Date();
+    const at = (ago: number, hour: number, minute = 0) =>
+      new Date(now.getFullYear(), now.getMonth(), now.getDate() - ago, hour, minute).getTime();
+    for (let ago = days; ago >= 1; ago--) {
+      this.agent.ingest({ kind: 'focus', ts: at(ago, 9), app: 'Microsoft Excel' });
+      this.agent.ingest({ kind: 'focus', ts: at(ago, 9, 20), app: 'Microsoft Outlook' });
+      this.agent.ingest({ kind: 'focus', ts: at(ago, 9, 30), app: 'Slack' });
+      this.agent.ingest({ kind: 'idle_start', ts: at(ago, 10, 10) });
+      this.agent.ingest({ kind: 'idle_end', ts: at(ago, 13) });
+      this.agent.ingest({ kind: 'focus', ts: at(ago, 13, 5), app: 'Microsoft Excel' });
+      this.agent.ingest({ kind: 'focus', ts: at(ago, 13, 25), app: 'Microsoft Word' });
+      this.agent.ingest({ kind: 'idle_start', ts: at(ago, 14) });
+    }
+    this.agent.completeSetup();
+  }
+
   exportData(): string {
     return JSON.stringify(this.agent.exportAll(), null, 2);
   }
