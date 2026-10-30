@@ -10,6 +10,8 @@ interface NavItem {
   href: string;
   testid: string;
   count?: number;
+  /** Shown instead of the count, for a figure such as a percentage. */
+  badge?: string;
   active: boolean;
 }
 
@@ -30,6 +32,14 @@ export function shell(status: TwinStatus, route: Route, content: Child): HTMLEle
       count: status.automations.length,
       active: route.name === 'automations' || route.name === 'automation',
     },
+    {
+      label: 'App readiness',
+      href: '#/readiness',
+      testid: 'nav-readiness',
+      badge: `${status.readiness.automatablePct}%`,
+      active: route.name === 'readiness',
+    },
+    { label: 'Agent harness', href: '#/harness', testid: 'nav-harness', active: route.name === 'harness' },
     {
       label: 'Network ledger',
       href: '#/ledger',
@@ -99,7 +109,11 @@ function navLink(item: NavItem): HTMLElement {
       'data-testid': item.testid,
     },
     h('span', null, item.label),
-    item.count !== undefined ? h('span', { class: 'nav-count mono' }, String(item.count)) : undefined,
+    item.badge !== undefined
+      ? h('span', { class: 'nav-count mono' }, item.badge)
+      : item.count !== undefined
+        ? h('span', { class: 'nav-count mono' }, String(item.count))
+        : undefined,
   );
 }
 

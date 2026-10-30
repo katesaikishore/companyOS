@@ -81,6 +81,44 @@ export interface AgentDelegationResult {
   taskTree?: string;
 }
 
+/** One app's repeated work over the last seven days, split by what could run on its own. Percentages are whole numbers. */
+export interface AppReadinessRow {
+  app: string;
+  windowClass: string;
+  switches: number;
+  automatablePct: number;
+  approvalPct: number;
+  notYetPct: number;
+  /** A plain reason for the split. It never shows a model's confidence. */
+  reason: string;
+  /** Routines that use this app. */
+  routines: number;
+}
+
+export interface AppReadinessView {
+  switches: number;
+  apps: number;
+  automatablePct: number;
+  approvalPct: number;
+  notYetPct: number;
+  rows: AppReadinessRow[];
+}
+
+/** A routine handed to OpenMausBot. It is kept on this device, so its result survives a restart. */
+export interface HandoffView {
+  id: string;
+  automationId: string;
+  routineName: string;
+  target: string;
+  brief: string;
+  sentAt: number;
+  state: AgentDelegationResult['state'] | 'sending';
+  summary: string;
+  threadId?: string;
+  /** The harness job tree, as sanitised JSON text. */
+  taskTree?: string;
+}
+
 export interface TwinStatus {
   capture: { state: 'capturing' | 'paused' | 'idle' | 'locked' | 'unsupported'; detail: string };
   /** Whether browser capture can run on this system. The browser bridge is available on macOS and Linux only. */
@@ -100,6 +138,10 @@ export interface TwinStatus {
   downloads: DownloadState[];
   /** Offers waiting for an answer. Expired offers are removed. */
   pendingRuns: PendingRunView[];
+  /** How much of each app's repeated work could run on its own, over the last seven days. */
+  readiness: AppReadinessView;
+  /** Handoffs sent to OpenMausBot, newest first. */
+  handoffs: HandoffView[];
 }
 
 /** Everything a page may ask of the main process. Each call is validated there. */

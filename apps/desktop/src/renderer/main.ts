@@ -4,7 +4,9 @@ import { shell } from './components/shell.js';
 import { openCommandPalette } from './commands.js';
 import { modelFraction, modelStateLabel } from './labels.js';
 import { automationDetailView, automationsView } from './views/automations.js';
+import { harnessView } from './views/harness.js';
 import { ledgerView } from './views/ledger.js';
+import { readinessView } from './views/readiness.js';
 import { overviewView } from './views/overview.js';
 import { settingsView } from './views/settings.js';
 import { setupView } from './views/setup.js';
@@ -119,6 +121,10 @@ function viewFor(status: TwinStatus, route: Route): HTMLElement {
       return automationDetailView(status, route.id);
     case 'ledger':
       return ledgerView(status);
+    case 'readiness':
+      return readinessView(status);
+    case 'harness':
+      return harnessView(status);
     case 'settings':
       return settingsView(status);
     default:

@@ -6,6 +6,8 @@ export type Route =
   | { name: 'automations' }
   | { name: 'automation'; id: string }
   | { name: 'ledger' }
+  | { name: 'readiness' }
+  | { name: 'harness' }
   | { name: 'settings' };
 
 export interface Notice {
@@ -139,6 +141,10 @@ export function routeFromHash(hash: string): Route {
       return parts[1] ? { name: 'automation', id: safeDecode(parts[1]) } : { name: 'automations' };
     case 'ledger':
       return { name: 'ledger' };
+    case 'readiness':
+      return { name: 'readiness' };
+    case 'harness':
+      return { name: 'harness' };
     case 'settings':
       return { name: 'settings' };
     default:

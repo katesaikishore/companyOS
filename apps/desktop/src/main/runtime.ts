@@ -36,6 +36,7 @@ import { detectHardware } from './hardware';
 import { ModelManager, createRoutineNamer } from './models';
 import { browserCapturePaths, installNativeHost, isBrowserCaptureSupported, removeNativeHost } from './native-host-install';
 import { runOpenMausBotTask } from './openmausbot';
+import { emptyReadiness } from '@companyos/twin-core';
 import { choosePlatform, executorFor, type Platform } from './platform';
 
 export interface RuntimeOptions {
@@ -207,6 +208,8 @@ export class TwinRuntime {
       activity: this.agent.activityGrid(28),
       recordedFocusEvents: observed.recordedFocusEvents,
       storageBytes: this.agent.storageBytes(),
+      readiness: emptyReadiness(),
+      handoffs: [],
       stats: {
         routinesLearned: suggestions.length + automations.length,
         waiting: suggestions.length + drafts,
