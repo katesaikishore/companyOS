@@ -60,6 +60,7 @@ function harness(options: HarnessOptions = {}) {
   const opened: string[] = [];
   const verified: string[] = [];
   const counters = { changes: 0 };
+  const events: string[] = [];
   const state = { allowed: options.allowed ?? true, routines: minedRoutines() };
   const model = fakeModel(options.answer ?? (() => ({ name: 'Monthly invoice check' })));
   if (options.warmFails) {
@@ -69,7 +70,10 @@ function harness(options: HarnessOptions = {}) {
   }
   const job = new RoutineNamingJob({
     routines: options.routines ?? (() => state.routines),
-    rename: (id, name) => renames.push({ id, name }),
+    rename: (id, name) => {
+      renames.push({ id, name });
+      events.push('rename');
+    },
     installed: () => (options.installed === false ? [] : [installed('qwen3-4b')]),
     preferredModelId: async () => 'qwen3-4b',
     modelPath: spec => `/models/${spec.file}`,
@@ -84,9 +88,10 @@ function harness(options: HarnessOptions = {}) {
     allowed: () => state.allowed,
     changed: () => {
       counters.changes++;
+      events.push('changed');
     },
   });
-  return { job, model, renames, opened, verified, state, counters };
+  return { job, model, renames, opened, verified, state, counters, events };
 }
 
 describe('RoutineNamingJob', () => {
@@ -102,6 +107,13 @@ describe('RoutineNamingJob', () => {
     expect(h.model.warms).toBe(1);
     expect(h.opened).toEqual(['/models/Qwen3-4B-Q4_K_M.gguf']);
     expect(h.counters.changes).toBe(1);
+  });
+
+  it('calls the change callback once for a rename, after the name is kept', async () => {
+    const h = harness({ routines: () => minedRoutines().slice(0, 1) });
+    await h.job.pass();
+    expect(h.renames).toHaveLength(1);
+    expect(h.events).toEqual(['rename', 'changed']);
   });
 
   it('does nothing without an installed chat model', async () => {

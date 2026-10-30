@@ -177,7 +177,7 @@ export interface RoutineNamerOptions {
   onBattery: () => boolean;
   /** The chat model this device was recommended, when there is one. */
   preferredModelId: () => Promise<string | undefined>;
-  /** Called when names change, so open pages refresh. */
+  /** Called once after a pass that names a routine, so open pages refresh. */
   onChange: () => void;
 }
 
@@ -192,10 +192,7 @@ export function createRoutineNamer(options: RoutineNamerOptions): RoutineNamingJ
   const { agent, models } = options;
   return new RoutineNamingJob({
     routines: () => agent.routinesToName(),
-    rename: (routineId, name) => {
-      agent.setRoutineName(routineId, name);
-      options.onChange();
-    },
+    rename: (routineId, name) => agent.setRoutineName(routineId, name),
     installed: () => agent.configuration.installedModels,
     preferredModelId: options.preferredModelId,
     modelPath: spec => models.pathFor(spec),
@@ -208,6 +205,7 @@ export function createRoutineNamer(options: RoutineNamerOptions): RoutineNamingJ
         idleStopMs: WORKER_IDLE_STOP_MS,
       }),
     allowed: () => modelWorkAllowed({ onBattery: options.onBattery(), idleSeconds: options.idleSeconds() }),
+    // Called once after a pass that kept a name. A rename does not call it a second time.
     changed: options.onChange,
   });
 }

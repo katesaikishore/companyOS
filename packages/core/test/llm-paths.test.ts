@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { resolveModelPath } from '../src';
 
@@ -43,9 +43,18 @@ describe('resolveModelPath', () => {
 
   it('refuses a path that climbs out of the folder with ".."', async () => {
     const { modelsDir } = layout();
-    await expect(resolveModelPath(modelsDir, join(modelsDir, '..', 'elsewhere.gguf'))).rejects.toThrow(
-      'The model is outside the models folder.',
-    );
+    // A raw string on purpose. path.join would resolve '..' before the function ever sees it.
+    const climbing = `${modelsDir}${sep}..${sep}elsewhere.gguf`;
+    expect(climbing).toContain(`${sep}..${sep}`);
+    await expect(resolveModelPath(modelsDir, climbing)).rejects.toThrow('The model is outside the models folder.');
+  });
+
+  it('names no path when the model file cannot be read', async () => {
+    const { modelsDir } = layout();
+    const missing = join(modelsDir, 'Missing-model.gguf');
+    const error = await resolveModelPath(modelsDir, missing).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe('The model could not be read.');
   });
 
   it('refuses a relative model path', async () => {
