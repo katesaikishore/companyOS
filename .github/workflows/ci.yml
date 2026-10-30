@@ -1,0 +1,56 @@
+name: ci
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      # Unsigned CI builds. Release signing uses secrets in a separate, tag-triggered job.
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install (also downloads the Electron binary)
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests (core engine)
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Package (unpacked, unsigned)
+        run: npm run dist:dir
+
+      - name: Install Playwright for the smoke test
+        if: runner.os == 'Linux'
+        run: npm install --no-save playwright
+
+      - name: Smoke test under a virtual display
+        if: runner.os == 'Linux'
+        env:
+          NODE_PATH: ${{ github.workspace }}/node_modules
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          xvfb-run -a node apps/desktop/test/smoke.cjs

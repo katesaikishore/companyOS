@@ -1,0 +1,33 @@
+appId: com.companyos.twin
+productName: companyOS Twin
+copyright: Copyright © companyOS
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist/**/*
+  - package.json
+asar: true
+# Unsigned local builds are fine for development. Release builds need signing identities in CI secrets:
+#   macOS:   CSC_LINK, CSC_KEY_PASSWORD, APPLE_API_KEY, APPLE_API_KEY_ID, APPLE_API_ISSUER
+#   Windows: WIN_CSC_LINK, WIN_CSC_KEY_PASSWORD (or Azure Artifact Signing)
+mac:
+  category: public.app-category.productivity
+  target:
+    - dmg
+    - zip
+  hardenedRuntime: true
+  extendInfo:
+    # macOS shows this text when the twin first asks to see the frontmost app through System Events.
+    NSAppleEventsUsageDescription: companyOS Twin asks macOS which app is in front, so it can understand your routines on this device.
+win:
+  target:
+    - nsis
+linux:
+  category: Utility
+  maintainer: companyOS <packages@companyos.invalid>
+  description: Private, employee-owned work twin.
+  target:
+    - AppImage
+    - deb
+    - rpm

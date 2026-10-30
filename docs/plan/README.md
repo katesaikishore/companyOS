@@ -25,8 +25,8 @@ Three principles shape everything else:
 | D1 | Who it serves | Individuals and companies. Each employee owns their twin. | Product owner |
 | D2 | Where AI runs | Hybrid. Local models do capture, redaction and classification. Redacted, abstracted traces go to Claude for synthesis and repair. | Product owner |
 | D3 | Autonomy in v1 | Earned. Suggest and one-click run first; promotion to unattended runs after a success streak. | Product owner |
-| D4 | Desktop shell | Rust core, Tauri 2 UI. No Electron. | `os-capture.md` |
-| D5 | Process model | Headless Rust daemon in the user's GUI session. UI is on-demand. No Windows Service, no LaunchDaemon. | `os-capture.md` |
+| D4 | Desktop shell | Electron with a TypeScript core engine. Chosen by the product owner over Tauri. Per-OS native capture helpers are the target after the spikes. | Product owner; `os-capture.md` |
+| D5 | Process model | The twin runs in the user's GUI session, never as a Windows Service or LaunchDaemon. MVP: inside the Electron main process. Target: a separate headless agent once the spikes pass. | `os-capture.md` |
 | D6 | Capture modality | Text-first (accessibility, UI Automation, window and browser events). Screenshots and OCR are opt-in and off by default. | `os-capture.md`, `prior-art.md` |
 | D7 | Keystrokes | Never record key contents. Only counts, shortcut chords and dwell time. Secure fields are skipped. | `os-capture.md`, `privacy-legal.md` |
 | D8 | Event store | Own encrypted SQLite (SQLCipher), mapped onto OCEL 2.0. | `understanding-ml.md` |
@@ -339,8 +339,8 @@ The employee holds the autonomy levels. Admins hold a safety brake, not a steeri
 
 | Area | Choice | License and status |
 |---|---|---|
-| Core daemon | Rust, tokio | Rust |
-| UI | Tauri 2.11 | Chosen. Webview differs per OS (WKWebView, WebView2, WebKitGTK). |
+| Core engine | TypeScript (`packages/core`), Zod schemas, Node crypto | Ours |
+| Desktop shell and UI | Electron 45 (Chromium and Node). Sandboxed renderer, contextBridge, strict CSP. | MIT |
 | Screen capture (opt-in) | `xcap` | Apache-2.0 |
 | Input events | `rdev` | MIT. Fragmented forks; pin and validate. |
 | Accessibility | Platform AX and UIA bindings (`windows-rs`, `uiautomation`) | Verify versions in spike |
@@ -510,3 +510,21 @@ Full lists: [`os-capture.md`](../research/os-capture.md), [`prior-art.md`](../re
 2. Replace this overview with the design panel's synthesized plan (v0.2), once it completes.
 3. Get legal review on §3 and §8 before any pilot.
 4. Choose open or closed client (§13, question 3). This gates the repository and license setup.
+
+## 16. Implementation status (MVP build)
+
+The MVP is built on branch `work-twin-app`. It follows this plan with these deliberate deviations:
+
+| Plan | MVP | Why |
+|---|---|---|
+| Rust core and Tauri UI | TypeScript core, Electron UI | Product owner chose Electron. One language across core and UI. |
+| Headless per-user agent | Twin engine inside the Electron main process | Simpler to ship first. The agent split waits for spike S1. |
+| Native capture (AX, UIA, AT-SPI) | Polling adapters: `osascript`, PowerShell `GetForegroundWindow`, `xdotool` | Native helpers need the spikes. Polling is measurably more expensive, especially on Windows. |
+| SQLCipher store | Record-level AES-256-GCM over an append-only log, key from OS keychain | SQLCipher needs a native build on all three OSes first. |
+| Browser extension | Not built. The engine accepts URL templates. | Separate work item. |
+| Keystroke counts | Not captured | Needs the native helper. |
+| Wayland | Reported as unavailable | Needs a compositor extension (spike S4). |
+
+What the engine tests cover (`packages/core/test`, 61 tests): redaction and privacy at ingest, store encryption and tamper detection, segmentation, routine mining, compilation, policy evaluation order, runner outcomes, the promotion gate and demotion, the cloud trace schema, the ledger, and an end-to-end agent run. The desktop smoke test checks that the page renders and the bridge answers.
+
+Not yet done: signing and notarisation, real icons, a manual pass on each OS against real apps, and company mode.
