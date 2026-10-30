@@ -39,8 +39,8 @@ describe('open_url', () => {
 });
 
 describe('open_file', () => {
-  it('asks for this exact file on every supervised run', () => {
-    expect(evaluateStep(file, ctx())).toMatchObject({ decision: 'ask', effect: 'read_only' });
+  it('asks for this exact file on every supervised run, as an external effect', () => {
+    expect(evaluateStep(file, ctx())).toMatchObject({ decision: 'ask', effect: 'external_effect' });
     expect(evaluateStep(file, ctx({ level: 4 })).decision).toBe('ask');
   });
 
@@ -62,6 +62,28 @@ describe('press_shortcut', () => {
 
   it('refuses a chord that is not in canonical form', () => {
     expect(evaluateStep({ ...chord, shortcut: 'shift+cmd+k' }, ctx()).decision).toBe('deny');
+  });
+});
+
+describe('shell targets', () => {
+  // A file or a key press sent to one of these can run commands, so it is refused even when a person would approve it.
+  it.each(['powershell', 'pwsh', 'cmd', 'bash', 'zsh', 'sh', 'terminal', 'osascript', 'python', 'node', 'Windows Terminal'])(
+    'refuses %s as the app for a file',
+    app => {
+      expect(evaluateStep({ ...file, app }, ctx())).toMatchObject({ decision: 'deny' });
+    },
+  );
+
+  it.each(['powershell', 'pwsh', 'cmd', 'bash', 'zsh', 'sh', 'terminal', 'osascript', 'python', 'node', 'Windows Terminal'])(
+    'refuses %s as the app for a key press',
+    app => {
+      expect(evaluateStep({ ...chord, app }, ctx())).toMatchObject({ decision: 'deny' });
+    },
+  );
+
+  it('still allows focusing a shell, which sends no keys', () => {
+    expect(evaluateStep({ op: 'focus_app', app: 'terminal' }, ctx()).decision).toBe('allow');
+    expect(evaluateStep({ op: 'check_focus', app: 'terminal' }, ctx()).decision).toBe('allow');
   });
 });
 

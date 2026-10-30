@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
-import { isSafeFilePath, parseWebAddress, type Executor } from '@companyos/twin-core';
+import { openableFilePath, parseWebAddress, type Executor, type FileStat } from '@companyos/twin-core';
 
 /**
  * Per-OS access to the frontmost application and to focusing one. This is the only place that
@@ -32,15 +32,11 @@ async function launch(file: string, args: readonly string[]): Promise<boolean> {
   }
 }
 
-/**
- * The real path of a regular file that may be opened, or undefined. A link is followed first, so a link to a program
- * is refused like the program itself. A folder is refused too.
- */
-function openableFile(path: string): string | undefined {
-  if (!isSafeFilePath(path)) return undefined;
+/** Follows any link at the path and reports the real path and whether it is a regular file, or undefined when unreadable. */
+function statFile(path: string): FileStat | undefined {
   try {
-    const real = realpathSync(path);
-    return isSafeFilePath(real) && statSync(real).isFile() ? real : undefined;
+    const realPath = realpathSync(path);
+    return { realPath, isFile: statSync(realPath).isFile() };
   } catch {
     return undefined;
   }
@@ -89,7 +85,7 @@ const macOS: Platform = {
     return address ? launch('open', ['-a', app, address]) : false;
   },
   async openFile(app, path) {
-    const file = openableFile(path);
+    const file = openableFilePath(path, statFile);
     return file ? launch('open', ['-a', app, file]) : false;
   },
 };
@@ -154,7 +150,7 @@ const windows: Platform = {
     return address ? openWindows(app, address) : false;
   },
   async openFile(app, path) {
-    const file = openableFile(path);
+    const file = openableFilePath(path, statFile);
     return file ? openWindows(app, file) : false;
   },
 };

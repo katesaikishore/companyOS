@@ -1,9 +1,11 @@
 import { z } from 'zod';
-import { effectOfOp } from './classify';
+import { effectOfOp, isShellApp } from './classify';
 import type { Routine } from './mine';
 import type { EffectClass } from './types';
 
 const PARAM_REF = /^\$(p\d+)$/;
+/** The longest automation name the schema accepts. Routine names are built from window classes, so they can exceed it. */
+const NAME_MAX = 80;
 
 export const ParamSchema = z
   .object({
@@ -22,6 +24,12 @@ const AppRef = z
   .min(1)
   .max(200)
   .refine(value => PARAM_REF.test(value) || PLAIN_APP_NAME.test(value), 'Use a plain application name.');
+
+/** The application that receives a file or a key press. A shell or interpreter can run what it is given, so it is refused. */
+const TargetAppRef = AppRef.refine(
+  value => PARAM_REF.test(value) || !isShellApp(value),
+  'Choose an application, not a shell or script runner.',
+);
 
 /** An http or https address, or a `$pN` parameter whose approved option is one. */
 const UrlRef = z
@@ -56,14 +64,14 @@ export const StepSchema = z.discriminatedUnion('op', [
   z.object({ op: z.literal('focus_app'), app: z.string().min(1).max(200) }).strict(),
   z.object({ op: z.literal('check_focus'), app: z.string().min(1).max(200) }).strict(),
   z.object({ op: z.literal('open_url'), app: AppRef, url: UrlRef }).strict(),
-  z.object({ op: z.literal('open_file'), app: AppRef, path: FilePath }).strict(),
-  z.object({ op: z.literal('press_shortcut'), app: AppRef, shortcut: KeyChord }).strict(),
+  z.object({ op: z.literal('open_file'), app: TargetAppRef, path: FilePath }).strict(),
+  z.object({ op: z.literal('press_shortcut'), app: TargetAppRef, shortcut: KeyChord }).strict(),
 ]);
 
 export const AutomationSchema = z
   .object({
     id: z.string().min(1).max(80),
-    name: z.string().min(1).max(80),
+    name: z.string().min(1).max(NAME_MAX),
     /** Version 1 automations hold focus and check steps only. Later steps are added without changing that shape. */
     version: z.number().int().positive(),
     routineId: z.string().min(1),
@@ -90,6 +98,9 @@ const HOST_NAME = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/;
 export function parseWebAddress(value: string): URL | undefined {
   if (value.length > 2048 || /[\s\u0000-\u001f\u007f]/.test(value)) return undefined;
   if (value.includes('?') || value.includes('#')) return undefined;
+  // Checked on the text. WHATWG parsing drops a default port such as :443, so the parsed URL cannot show it.
+  const authority = value.replace(/^[a-z][a-z0-9+.-]*:[/\\]*/i, '').split(/[/\\]/)[0] ?? '';
+  if (authority.includes(':')) return undefined;
   let url: URL;
   try {
     url = new URL(value);
@@ -101,10 +112,11 @@ export function parseWebAddress(value: string): URL | undefined {
   return HOST_NAME.test(url.hostname) ? url : undefined;
 }
 
-/** Files that run as programs or scripts when the system opens them. Opening a file never runs one. */
-const PROGRAM_EXTENSION = /\.(app|bat|cmd|com|command|desktop|dll|dmg|exe|hta|jar|js|jse|lnk|msi|msix|msp|pif|pkg|ps1|psm1|reg|scr|sh|url|vbe|vbs|wsf|wsh)$/i;
-/** Control characters, quotes and wildcards. None of them belongs in one exact path. */
-const UNSAFE_PATH_CHARS = /[\u0000-\u001f\u007f"*?<>|]/;
+/** Files that run as programs, scripts or installers when the system opens them. Opening a file never runs one. */
+const PROGRAM_EXTENSION =
+  /\.(app|applescript|application|bat|cmd|com|command|cpl|desktop|dll|dmg|exe|hta|jar|js|jse|lnk|mpkg|msc|msi|msix|msp|ocx|pif|pkg|ps1|psm1|reg|scf|scpt|scptd|scr|sh|url|vbe|vbs|webloc|workflow|wsf|wsh)$/i;
+/** Control characters, quotes, backticks and wildcards. None of them belongs in one exact path. */
+const UNSAFE_PATH_CHARS = /[\u0000-\u001f\u007f"'`*?<>|]/;
 
 /**
  * True for one exact absolute file path: not a folder, not a program, not a wildcard, and no relative or parent
@@ -117,6 +129,23 @@ export function isSafeFilePath(value: string): boolean {
   const name = parts[parts.length - 1];
   if (!name || parts.some(part => part === '.' || part === '..')) return false;
   return !PROGRAM_EXTENSION.test(name);
+}
+
+/** What the disk says about a path: the real path after following any link, and whether that is a regular file. */
+export interface FileStat {
+  realPath: string;
+  isFile: boolean;
+}
+
+/**
+ * The real path of one regular file that may be opened, or undefined. The name rules run first. Then the disk decides,
+ * through the stat callback, which follows any link: a link to a program is refused like the program, and a folder
+ * with no extension is refused too. The caller supplies the callback, so this stays free of file access.
+ */
+export function openableFilePath(path: string, stat: (path: string) => FileStat | undefined): string | undefined {
+  if (!isSafeFilePath(path)) return undefined;
+  const found = stat(path);
+  return found?.isFile && isSafeFilePath(found.realPath) ? found.realPath : undefined;
 }
 
 const CHORD_MODIFIERS = ['cmd', 'ctrl', 'alt', 'shift'] as const;
@@ -153,7 +182,7 @@ export function compileRoutine(routine: Routine, name: string = defaultName(rout
   });
   return AutomationSchema.parse({
     id: `auto_${routine.id}`,
-    name,
+    name: fitName(name),
     version: 1,
     routineId: routine.id,
     params,
@@ -167,6 +196,11 @@ export function compileRoutine(routine: Routine, name: string = defaultName(rout
 
 function defaultName(routine: Routine): string {
   return `Routine: ${routine.steps.map(step => step.windowClass).join(' → ')}`;
+}
+
+/** A name the schema accepts. A longer one is cut and ends with an ellipsis, so a long routine still compiles. */
+function fitName(name: string): string {
+  return name.length <= NAME_MAX ? name : `${name.slice(0, NAME_MAX - 1)}…`;
 }
 
 /** Resolves a "$pN" reference against the bound values, which must be observed options. */
@@ -199,16 +233,23 @@ export function resolveStep(step: Step, params: readonly Param[], values: Readon
     }
     case 'open_file':
       if (!isSafeFilePath(step.path)) throw new Error('That file path is not allowed.');
-      return { op: 'open_file', app: plainAppName(app), path: step.path };
+      return { op: 'open_file', app: targetAppName(app), path: step.path };
     case 'press_shortcut':
       if (parseKeyChord(step.shortcut) !== step.shortcut) throw new Error('That key chord is not allowed.');
-      return { op: 'press_shortcut', app: plainAppName(app), shortcut: step.shortcut };
+      return { op: 'press_shortcut', app: targetAppName(app), shortcut: step.shortcut };
   }
 }
 
 function plainAppName(app: string): string {
   if (!PLAIN_APP_NAME.test(app)) throw new Error('That application name is not allowed.');
   return app;
+}
+
+/** The plain name of an application that receives a file or a key press. A shell or interpreter is refused. */
+function targetAppName(app: string): string {
+  const name = plainAppName(app);
+  if (isShellApp(name)) throw new Error('That application cannot be the target of a file or a key press.');
+  return name;
 }
 
 /**

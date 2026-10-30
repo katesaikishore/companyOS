@@ -1,4 +1,4 @@
-import { classifyApp, effectOfOp, isExcludedApp } from './classify';
+import { classifyApp, effectOfOp, isExcludedApp, isShellApp } from './classify';
 import { isSafeFilePath, parseKeyChord, parseWebAddress, type Step } from './automation';
 import { FLOOR_EFFECTS, type AutonomyLevel, type EffectClass } from './types';
 
@@ -51,6 +51,8 @@ export function evaluateStep(step: Step, context: PolicyContext): Decision {
   return { decision: 'allow', reason: 'Within the autonomy level.', effect };
 }
 
+const shellReason = 'A shell, a script runner or a terminal cannot be the app for a file or a key press.';
+
 /** Why a step's own content is not allowed, or undefined when it is. */
 function malformedReason(step: Step): string | undefined {
   switch (step.op) {
@@ -58,9 +60,11 @@ function malformedReason(step: Step): string | undefined {
       if (!parseWebAddress(step.url)) return 'Only http and https addresses with no login, query or fragment can open.';
       return classifyApp(step.app) === 'browser' ? undefined : 'Links open only in a web browser.';
     case 'open_file':
-      return isSafeFilePath(step.path) ? undefined : 'Only one exact file path can open: absolute, not a folder, not a program.';
+      if (!isSafeFilePath(step.path)) return 'Only one exact file path can open: absolute, not a folder, not a program.';
+      return isShellApp(step.app) ? shellReason : undefined;
     case 'press_shortcut':
-      return parseKeyChord(step.shortcut) === step.shortcut ? undefined : 'Only a key chord with a modifier and one key can be pressed.';
+      if (parseKeyChord(step.shortcut) !== step.shortcut) return 'Only a key chord with a modifier and one key can be pressed.';
+      return isShellApp(step.app) ? shellReason : undefined;
     default:
       return undefined;
   }

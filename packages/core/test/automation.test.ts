@@ -1,5 +1,10 @@
+import { randomBytes } from 'node:crypto';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  TwinAgent,
   compileRoutine,
   effectsOf,
   evaluateStep,
@@ -174,5 +179,28 @@ describe('run safety', () => {
     const result = await runAutomation(compiled(), { mode: 'supervised', policy: ctx(), approve: async () => true }, executor);
     expect(result.status).toBe('failed');
     expect(result.steps.at(-1)?.reason).toBe('The app could not be focused.');
+  });
+});
+
+describe('long routine names', () => {
+  it('compiles a six-step routine whose window classes make a name over 80 characters, and the agent still lists it', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'twin-long-name-'));
+    try {
+      const agent = new TwinAgent({ dataDir: dir, dataKey: randomBytes(32), now: () => at(10, 12) });
+      // Spreadsheet and document alternate, so no two neighbours share a window class and every step is kept.
+      const apps = ['Microsoft Excel', 'Microsoft Word', 'Microsoft Excel', 'Microsoft Word', 'Microsoft Excel', 'Microsoft Word'];
+      for (let day = 0; day < 10; day++) {
+        apps.forEach((app, index) => agent.ingest({ kind: 'focus', ts: at(day, 9, index * 5), app }));
+      }
+      const routine = agent.analyze().routines.find(candidate => candidate.steps.length === 6);
+      expect(routine).toBeDefined();
+
+      const compiled = compileRoutine(routine!);
+      expect(compiled.name.length).toBeLessThanOrEqual(80);
+      expect(compiled.name.endsWith('…')).toBe(true);
+      expect(agent.suggestions().some(suggestion => suggestion.routine.steps.length === 6)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

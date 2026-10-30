@@ -9,9 +9,10 @@ import {
   gateFraction,
   levelLabel,
   levelTone,
-  paramFor,
   passRate,
   runOutcomeLabel,
+  stepDetail,
+  stepTitle,
 } from '../labels.js';
 import { call, go, pending, state } from '../store.js';
 
@@ -348,17 +349,19 @@ function workflowPanel(view: AutomationView): HTMLElement {
 }
 
 function workflowRow(step: Step, index: number, params: readonly Param[]): HTMLElement {
-  const param = paramFor(step, params);
-  const varies: Child = param ? h('span', { class: 'mono small muted' }, `varies: ${param.options.join(' or ')}`) : undefined;
-  const isAct = step.op === 'focus_app';
-  const title = isAct ? (param ? 'App chosen for this run' : step.app) : 'Expected app is in front';
-  const detail: Child = isAct ? varies : param ? varies : h('span', { class: 'mono small muted' }, step.app);
+  const isAct = step.op !== 'check_focus';
+  const detail = stepDetail(step, params);
   return h(
     'div',
     { class: 'step-row' },
     h('span', { class: 'mono small muted' }, String(index + 1).padStart(2, '0')),
     h('span', { class: isAct ? 'kind kind-act' : 'kind kind-check' }, isAct ? 'act' : 'check'),
-    h('span', { class: 'step-app' }, h('span', null, title), detail),
+    h(
+      'span',
+      { class: 'step-app' },
+      h('span', null, stepTitle(step, params)),
+      detail ? h('span', { class: 'mono small muted' }, detail) : undefined,
+    ),
     h('span', { class: 'mono small muted' }, step.op),
   );
 }

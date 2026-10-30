@@ -1,20 +1,30 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   AutomationSchema,
+  DAY_MS,
   EncryptedStore,
   StepSchema,
   TwinAgent,
   describeStep,
   effectOfOp,
   effectsOf,
+  evaluateStep,
+  initialState,
   isSafeFilePath,
+  openableFilePath,
   parseKeyChord,
   parseWebAddress,
+  promotionCheck,
   resolveStep,
+  type Automation,
+  type AutonomyState,
+  type FileStat,
+  type PolicyContext,
+  type RunRecord,
   type Step,
 } from '../src';
 
@@ -22,6 +32,8 @@ describe('parseWebAddress', () => {
   it('accepts http and https addresses and returns the canonical form', () => {
     expect(parseWebAddress('https://Docs.Example.com/doc')?.href).toBe('https://docs.example.com/doc');
     expect(parseWebAddress('http://intranet.example.org/')?.protocol).toBe('http:');
+    // A colon after the host is part of the path, not a port, so it is still allowed.
+    expect(parseWebAddress('https://docs.example.com/doc/a:b')?.href).toBe('https://docs.example.com/doc/a:b');
   });
 
   it.each([
@@ -32,6 +44,8 @@ describe('parseWebAddress', () => {
     ['a query', 'https://example.com/doc?token=abc'],
     ['a fragment', 'https://example.com/doc#top'],
     ['an explicit port', 'https://example.com:8443/doc'],
+    ['the default https port, written out', 'https://example.com:443/doc'],
+    ['the default http port, written out', 'http://intranet.example.org:80/'],
     ['a bare host', 'https://localhost/doc'],
     ['whitespace', 'https://example.com/a b'],
     ['a relative path', '/doc/1'],
@@ -60,10 +74,91 @@ describe('isSafeFilePath', () => {
     ['an installer', 'C:\\Downloads\\setup.exe'],
     ['a shortcut file', 'C:\\Users\\me\\Desktop\\report.lnk'],
     ['a quote', '/Users/me/"x".xlsx'],
+    ['a single quote', "/Users/me/Bob's budget.xlsx"],
+    ['a backtick', '/Users/me/`budget`.xlsx'],
     ['an empty path', ''],
     ['a drive-relative path', 'C:budget.xlsx'],
   ])('refuses %s', (_label, value) => {
     expect(isSafeFilePath(value)).toBe(false);
+  });
+
+  it.each([
+    'webloc',
+    'mpkg',
+    'pkg',
+    'scpt',
+    'scptd',
+    'applescript',
+    'msc',
+    'cpl',
+    'ocx',
+    'scf',
+    'application',
+    'command',
+    'workflow',
+    'url',
+    'reg',
+    'hta',
+    'wsf',
+    'vbs',
+    'js',
+    'jar',
+    'msi',
+    'bat',
+    'cmd',
+    'com',
+    'scr',
+    'ps1',
+    'dll',
+  ])('refuses a program or script ending in .%s, in either case', extension => {
+    expect(isSafeFilePath(`/Users/me/Downloads/setup.${extension}`)).toBe(false);
+    expect(isSafeFilePath(`C:\\Users\\me\\Downloads\\setup.${extension.toUpperCase()}`)).toBe(false);
+  });
+});
+
+describe('openableFilePath', () => {
+  /** The same check the desktop adapter makes: follow any link, then ask the disk whether the target is a file. */
+  const statOnDisk = (path: string): FileStat | undefined => {
+    try {
+      const realPath = realpathSync(path);
+      return { realPath, isFile: statSync(realPath).isFile() };
+    } catch {
+      return undefined;
+    }
+  };
+
+  it('refuses a folder with no extension and accepts a regular file, on the real disk', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'twin-open-'));
+    try {
+      const folder = join(dir, 'Budget');
+      const file = join(dir, 'budget.xlsx');
+      mkdirSync(folder);
+      writeFileSync(file, 'x');
+      // The name rules alone accept a folder, so the disk check is what refuses it.
+      expect(isSafeFilePath(folder)).toBe(true);
+      expect(openableFilePath(folder, statOnDisk)).toBeUndefined();
+      expect(openableFilePath(file, statOnDisk)).toBe(realpathSync(file));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a link to a program, as it would refuse the program', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'twin-open-'));
+    try {
+      const program = join(dir, 'tool.sh');
+      const link = join(dir, 'budget.xlsx');
+      writeFileSync(program, '#!/bin/sh\n');
+      symlinkSync(program, link);
+      expect(openableFilePath(link, statOnDisk)).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a path the disk cannot read, and a name the rules refuse before the disk is asked', () => {
+    expect(openableFilePath('/Users/me/missing.xlsx', () => undefined)).toBeUndefined();
+    expect(openableFilePath('/Users/me/*.xlsx', () => ({ realPath: '/Users/me/a.xlsx', isFile: true }))).toBeUndefined();
   });
 });
 
@@ -150,10 +245,10 @@ describe('version 1 automations', () => {
 });
 
 describe('effects of the steps', () => {
-  it('classifies the new steps', () => {
+  it('classifies the new steps as external, since the twin cannot see what the app does next', () => {
     expect(effectOfOp('open_url', 'Google Chrome')).toBe('external_effect');
     expect(effectOfOp('press_shortcut', 'Microsoft Excel')).toBe('external_effect');
-    expect(effectOfOp('open_file', 'Microsoft Excel')).toBe('read_only');
+    expect(effectOfOp('open_file', 'Microsoft Excel')).toBe('external_effect');
   });
 
   it('leaves focus and check as they were', () => {
@@ -238,5 +333,79 @@ describe('describeStep', () => {
   it('keeps the wording of the focus steps', () => {
     expect(describeStep({ op: 'focus_app', app: 'slack' })).toBe('Bring "slack" to the front?');
     expect(describeStep({ op: 'check_focus', app: 'slack' })).toBe('Check that "slack" is in front?');
+  });
+});
+
+describe('shell targets', () => {
+  const SHELLS = ['powershell', 'pwsh', 'cmd', 'bash', 'zsh', 'sh', 'terminal', 'osascript', 'python', 'node'];
+
+  it.each(SHELLS)('refuses %s as the app for an open file step when the step loads', app => {
+    expect(StepSchema.safeParse({ op: 'open_file', app, path: '/Users/me/Documents/budget.xlsx' }).success).toBe(false);
+  });
+
+  it.each(SHELLS)('refuses %s as the app for a press shortcut step when the step loads', app => {
+    expect(StepSchema.safeParse({ op: 'press_shortcut', app, shortcut: 'cmd+shift+k' }).success).toBe(false);
+  });
+
+  it.each(['cmd.exe', 'Terminal.app', 'Windows Terminal', 'Command Prompt', 'python3.12', 'iTerm2'])('refuses %s too', app => {
+    expect(StepSchema.safeParse({ op: 'press_shortcut', app, shortcut: 'cmd+k' }).success).toBe(false);
+    expect(StepSchema.safeParse({ op: 'open_file', app, path: '/Users/me/a.xlsx' }).success).toBe(false);
+  });
+
+  it('still lets a shell be focused, since focus sends no keys', () => {
+    expect(StepSchema.safeParse({ op: 'focus_app', app: 'terminal' }).success).toBe(true);
+  });
+
+  it('refuses a shell that an approved parameter option names, before anything runs', () => {
+    const params = [{ name: 'p0', options: ['terminal', 'microsoft excel'], default: 'microsoft excel' }];
+    expect(() => resolveStep({ op: 'press_shortcut', app: '$p0', shortcut: 'cmd+k' }, params, { p0: 'terminal' })).toThrow(/cannot be the target/);
+    expect(() => resolveStep({ op: 'open_file', app: '$p0', path: '/Users/me/a.xlsx' }, params, { p0: 'terminal' })).toThrow(/cannot be the target/);
+  });
+});
+
+describe('promotion gate for the new steps', () => {
+  const NOW = Date.UTC(2026, 9, 30);
+  const config = { maxLevel: 4 as const, allowUnattended: true };
+  const unattended: PolicyContext = { level: 4, maxLevel: 4, unattended: true, excludedApps: [] };
+
+  /** Every condition except the effects is met, so only the effects can hold the automation back. */
+  function earned(automation: Automation): AutonomyState {
+    const runs: RunRecord[] = Array.from({ length: 30 }, () => ({
+      ts: NOW - DAY_MS,
+      mode: 'supervised',
+      level: 3,
+      status: 'completed',
+      postconditionsPassed: 4,
+      postconditionsFailed: 0,
+      reverted: false,
+    }));
+    return { ...initialState(automation.id, effectsOf(automation)), level: 3, runs };
+  }
+
+  const focus: Step = { op: 'focus_app', app: 'microsoft excel' };
+  const opens: [string, Step][] = [
+    ['a link', { op: 'open_url', app: 'google chrome', url: 'https://docs.example.com/doc' }],
+    ['a file', { op: 'open_file', app: 'microsoft excel', path: '/Users/me/Documents/budget.xlsx' }],
+    ['a key press', { op: 'press_shortcut', app: 'microsoft excel', shortcut: 'cmd+shift+k' }],
+  ];
+
+  it('offers level 4 for a focus-only automation that meets the same record', () => {
+    const automation = AutomationSchema.parse({ id: 'auto_focus', name: 'Focus', version: 2, routineId: 'focus', params: [], steps: [focus] });
+    expect(promotionCheck(earned(automation), NOW, config).eligible).toBe(true);
+  });
+
+  it.each(opens)('never offers level 4 for an automation with %s, and policy denies it unattended', (_label, step) => {
+    const automation = AutomationSchema.parse({
+      id: 'auto_opens',
+      name: 'Opens',
+      version: 2,
+      routineId: 'opens',
+      params: [],
+      steps: [focus, step],
+    });
+    const check = promotionCheck(earned(automation), NOW, config);
+    expect(check.eligible).toBe(false);
+    expect(check.reasons).toContain('Some of its effects can never run unattended.');
+    expect(evaluateStep(step, unattended).decision).toBe('deny');
   });
 });

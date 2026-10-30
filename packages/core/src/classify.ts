@@ -76,15 +76,48 @@ export function classifyApp(name: string): WindowClass {
   return CATALOG[normalizeAppName(name)] ?? 'other';
 }
 
+/** Shells and script interpreters by name. Terminal apps are matched by their window class, which covers the rest. */
+const SHELL_APPS = [
+  'bash',
+  'bun',
+  'cmd',
+  'command prompt',
+  'csh',
+  'dash',
+  'deno',
+  'fish',
+  'ksh',
+  'node',
+  'osascript',
+  'perl',
+  'php',
+  'powershell',
+  'pwsh',
+  'ruby',
+  'sh',
+  'tcsh',
+  'wsl',
+  'zsh',
+];
+
+/**
+ * True for a shell, a script interpreter or a terminal app. A file handed to one of them, or keys sent to one, can run
+ * commands, so none of them may be the target of an open or a key press.
+ */
+export function isShellApp(name: string): boolean {
+  const normalized = normalizeAppName(name);
+  return classifyApp(name) === 'terminal' || SHELL_APPS.includes(normalized) || /^python[\d.]*$/.test(normalized);
+}
+
 /**
  * Effect of a step, from its operation and the application it touches. Steps whose outcome the twin cannot see
  * into are external, so they need a person.
  */
 export function effectOfOp(op: StepOp, app: string): EffectClass {
-  // Checking focus changes nothing. Opening a file in an app only reads it; what the app does next is not seen.
-  if (op === 'check_focus' || op === 'open_file') return 'read_only';
-  // A link can trigger an action on the page, and a shortcut does whatever the app binds it to. Neither is visible.
-  if (op === 'open_url' || op === 'press_shortcut') return 'external_effect';
+  // Checking focus changes nothing.
+  if (op === 'check_focus') return 'read_only';
+  // A link or a file can trigger an action in the app, and a shortcut does whatever the app binds it to. None of it is visible.
+  if (op === 'open_url' || op === 'open_file' || op === 'press_shortcut') return 'external_effect';
   // Messages are composed and sent by the person in these apps, and the twin cannot see what is sent.
   const windowClass = classifyApp(app);
   return windowClass === 'mail' || windowClass === 'chat' ? 'external_effect' : 'read_only';
