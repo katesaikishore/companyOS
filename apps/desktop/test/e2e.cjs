@@ -52,6 +52,16 @@ async function seedActivity(app) {
   }, { core: CORE, keys: KEYS });
 }
 
+/** The app opens two pages: the main window and the tray popover. Tests drive the main window, found by its URL. */
+async function mainPage(app) {
+  for (let attempt = 0; attempt < 300; attempt++) {
+    const page = app.windows().find(candidate => candidate.url().includes('/index.html'));
+    if (page) return page;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  throw new Error('The main window never opened.');
+}
+
 async function shot(page, name) {
   await page.screenshot({ path: path.join(SHOTS, `${name}.png`), fullPage: true });
 }
@@ -66,12 +76,15 @@ async function main() {
   const app = await launch(userDataDir);
   const consoleErrors = [];
   try {
-    const page = await app.firstWindow();
+    const page = await mainPage(app);
     page.on('console', message => {
       if (message.type() === 'error') consoleErrors.push(message.text());
     });
     page.on('pageerror', error => consoleErrors.push(error.message));
-    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1200, 800));
+    await app.evaluate(({ BrowserWindow }) => {
+      const main = BrowserWindow.getAllWindows().find(win => win.webContents.getURL().includes('/index.html'));
+      main?.setContentSize(1200, 800);
+    });
 
     // 1. A fresh install opens the setup wizard, not the app.
     await page.waitForSelector('[data-testid="setup-root"]', { timeout: 30_000 });
@@ -144,11 +157,12 @@ async function main() {
     await page.waitForSelector('[data-testid="suggestion-card"]');
     await shot(page, '06-suggestions-light');
     await page.click('[data-testid="suggestion-accept"]');
-    await page.waitForSelector('[data-testid="automation-card"]', { timeout: 15_000 });
+    await page.waitForFunction(async () => (await window.twin.status()).automations.length === 1, null, { timeout: 15_000 });
     log('accepted routine is a draft automation');
 
     // 8. Automation detail: dry run shows previews, and a supervised run is refused below level 3.
     await page.click('[data-testid="nav-automations"]');
+    await page.waitForSelector('[data-testid="automation-card"]', { timeout: 15_000 });
     await page.click('[data-testid="automation-card"]');
     await page.click('[data-testid="automation-run-dry"]');
     await page.waitForSelector('[data-testid="run-result"]', { timeout: 15_000 });
@@ -182,10 +196,20 @@ async function main() {
     }, null, { timeout: 10_000 });
     log('tray stop-all switches automations off');
     await page.click('[data-testid="nav-settings"]');
+    await page.waitForFunction(async () => (await window.twin.status()).config.automationsEnabled === false, null, { timeout: 10_000 });
     await page.click('[data-testid="settings-automations-toggle"]');
+    await page.waitForFunction(async () => (await window.twin.status()).config.automationsEnabled === true, null, { timeout: 10_000 });
+    log('automations switch round-trips');
 
     // 11. Layout at the minimum window size, every main route, no horizontal overflow.
-    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(960, 640));
+    await app.evaluate(({ BrowserWindow }) => {
+      const main = BrowserWindow.getAllWindows().find(win => win.webContents.getURL().includes('/index.html'));
+      main?.setContentSize(960, 640);
+    });
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    log('window state before layout check:', JSON.stringify(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map(win => ({ url: win.webContents.getURL(), size: win.getContentSize(), visible: win.isVisible(), focused: win.isFocused() })))), 'innerWidth', await page.evaluate(() => window.innerWidth));
+    await page.waitForFunction(() => window.innerWidth <= 960, null, { timeout: 10_000 });
+    assert.ok((await page.evaluate(() => window.innerWidth)) <= 960, 'window is at the minimum width');
     for (const route of ['overview', 'suggestions', 'automations', 'ledger', 'settings']) {
       await page.click(`[data-testid="nav-${route}"]`);
       await page.waitForTimeout(300);
