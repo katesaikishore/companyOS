@@ -6,6 +6,7 @@ import {
   ipcMain,
   Menu,
   net,
+  nativeImage,
   powerMonitor,
   protocol,
   screen,
