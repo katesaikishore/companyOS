@@ -5,8 +5,8 @@ import {
   globalShortcut,
   ipcMain,
   Menu,
-  nativeImage,
   net,
+  nativeImage,
   powerMonitor,
   protocol,
   screen,
@@ -28,15 +28,16 @@ import {
   type Step,
 } from '@companyos/twin-core';
 import { APP_ORIGIN, IPC } from '../shared/ipc';
-import { solidPng } from './icon';
 import { SecureStorageUnavailableError } from './keys';
 import { buildOpenMausBotPrompt } from './openmausbot';
 import { TwinRuntime } from './runtime';
+import { startAutoUpdates } from './updater';
 
 /** Pages are served from a private scheme. Module scripts need it, because Chromium blocks them on file://. */
 protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 
 const RENDERER_DIR = join(__dirname, '..', 'renderer');
+const BRAND_DIR = join(RENDERER_DIR, 'brand');
 const STOP_ALL_SHORTCUT = 'Control+Alt+.';
 
 let runtime: TwinRuntime | undefined;
@@ -46,6 +47,8 @@ let tray: Tray | undefined;
 let paused = false;
 let quitting = false;
 
+// COMPANYOS_USER_DATA moves the twin's data folder. The performance harness uses it, so a measured run never touches a real install.
+if (process.env.COMPANYOS_USER_DATA) app.setPath('userData', resolve(process.env.COMPANYOS_USER_DATA));
 const userData = app.getPath('userData');
 
 function requireRuntime(): TwinRuntime {
@@ -240,6 +243,7 @@ function createMainWindow(): void {
     minWidth: 960,
     minHeight: 640,
     title: 'companyOS Twin',
+    icon: join(BRAND_DIR, 'app-icon.png'),
     backgroundColor: '#F3F4F1',
     show: false,
     webPreferences: WEB_PREFERENCES,
@@ -361,7 +365,10 @@ function rebuildTrayMenu(): void {
 }
 
 function createTray(): void {
-  tray = new Tray(nativeImage.createFromBuffer(solidPng(16, [14, 107, 92])));
+  // A template image: macOS draws it in the colour that suits the menu bar, light or dark.
+  const image = nativeImage.createFromPath(join(BRAND_DIR, 'tray.png'));
+  image.setTemplateImage(true);
+  tray = new Tray(image);
   tray.setToolTip('companyOS Twin');
   tray.on('click', toggleTray);
   tray.on('right-click', () => tray?.popUpContextMenu());
@@ -369,6 +376,7 @@ function createTray(): void {
 }
 
 async function boot(): Promise<void> {
+  if (process.platform === 'darwin') app.dock?.setIcon(join(BRAND_DIR, 'app-icon.png'));
   try {
     runtime = await TwinRuntime.create({
       userData,
@@ -403,6 +411,11 @@ async function boot(): Promise<void> {
   }
 
   await runtime.start();
+  // Test-only, for the performance harness. It needs an unpackaged run in its own data folder, so a real install never seeds.
+  const seedDays = Number(process.env.COMPANYOS_MEASURE_SEED_DAYS);
+  if (!app.isPackaged && process.env.COMPANYOS_USER_DATA && Number.isInteger(seedDays) && seedDays > 0) {
+    runtime.seedMeasurementActivity(Math.min(seedDays, 30));
+  }
   powerMonitor.on('lock-screen', () => runtime?.setLocked(true));
   powerMonitor.on('unlock-screen', () => runtime?.setLocked(false));
 
@@ -411,6 +424,8 @@ async function boot(): Promise<void> {
   createMainWindow();
   createTrayWindow();
   createTray();
+  // Does nothing unless the app is packaged and a feed URL is set (src/main/updater.ts).
+  startAutoUpdates(app.isPackaged, entry => requireRuntime().recordNetworkCall(entry));
 
   try {
     globalShortcut.register(STOP_ALL_SHORTCUT, () => stopAllAutomations());

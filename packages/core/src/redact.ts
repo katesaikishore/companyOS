@@ -46,7 +46,10 @@ export interface NormalizeOptions {
  * Secure input, private windows, excluded apps and (unless enabled) browsers never produce an event.
  */
 export function normalizeSignal(input: unknown, options: NormalizeOptions): TwinEvent | null {
-  const signal = RawSignalSchema.parse(input);
+  // A schema error names the offending keys, so a title sent as a key would reach the error text. Report only the fact.
+  const parsed = RawSignalSchema.safeParse(input);
+  if (!parsed.success) throw new Error('Invalid capture signal: it has a field or value the twin does not accept.');
+  const signal = parsed.data;
   if (signal.secureInput || signal.isPrivateWindow) return null;
 
   const id = (options.newId ?? randomUUID)();

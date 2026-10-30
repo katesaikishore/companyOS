@@ -3,5 +3,6 @@ dist/
 out/
 release/
 coverage/
+measure-results/
 .DS_Store
 *.log
