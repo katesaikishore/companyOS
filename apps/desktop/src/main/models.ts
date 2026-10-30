@@ -191,8 +191,11 @@ const WORKER_IDLE_STOP_MS = 5 * 60_000;
 export function createRoutineNamer(options: RoutineNamerOptions): RoutineNamingJob {
   const { agent, models } = options;
   return new RoutineNamingJob({
-    routines: () => agent.suggestions().map(suggestion => suggestion.routine),
-    rename: (routineId, name) => agent.setRoutineName(routineId, name),
+    routines: () => agent.routinesToName(),
+    rename: (routineId, name) => {
+      agent.setRoutineName(routineId, name);
+      options.onChange();
+    },
     installed: () => agent.configuration.installedModels,
     preferredModelId: options.preferredModelId,
     modelPath: spec => models.pathFor(spec),

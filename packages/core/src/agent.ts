@@ -122,6 +122,24 @@ export class TwinAgent {
   }
 
   /**
+   * Detected routines the naming job may name: neither accepted nor dismissed, and able to compile. A routine whose
+   * rule-based name is too long to compile is skipped, so it cannot stop the routines after it from being named.
+   */
+  routinesToName(): Routine[] {
+    const accepted = new Set(this.readAutomations().map(automation => automation.routineId));
+    const dismissed = new Set(this.config.dismissedRoutineIds);
+    return this.analyze().routines.filter(routine => {
+      if (accepted.has(routine.id) || dismissed.has(routine.id)) return false;
+      try {
+        compileRoutine(routine, this.routineNames.get(routine.id));
+        return true;
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  /**
    * Sets the name shown for a detected routine, such as one the local model wrote. Without one, the rule-based
    * name is used. Accepting a routine keeps the name it had at that moment.
    */

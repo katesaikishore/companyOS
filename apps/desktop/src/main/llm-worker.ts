@@ -4,10 +4,9 @@
  * network calls: llama.cpp runs from prebuilt binaries only (build 'never', no download), and it loads a model file
  * from the models folder the main process gave it. Log output is discarded, so nothing the model sees reaches a log.
  */
-import { isAbsolute, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { Llama, LlamaContext, LlamaGrammar, LlamaModel } from 'node-llama-cpp';
-import type { WorkerRequest, WorkerResponse } from '@companyos/twin-core';
+import { resolveModelPath, type WorkerRequest, type WorkerResponse } from '@companyos/twin-core';
 
 type LlamaModule = typeof import('node-llama-cpp');
 type LoadRequest = Extract<WorkerRequest, { type: 'load' }>;
@@ -67,11 +66,9 @@ function parseRequest(value: unknown): WorkerRequest | undefined {
 }
 
 async function load(request: LoadRequest): Promise<void> {
-  // The model must be a .gguf file inside the models folder. Anything else is refused before the runtime sees it.
-  const path = resolve(request.modelPath);
-  if (!isAbsolute(request.modelPath) || !path.endsWith('.gguf') || !path.startsWith(resolve(request.modelsDir) + sep)) {
-    throw new Error('The model is outside the models folder.');
-  }
+  // The model must be a .gguf file inside the models folder, after symbolic links are followed. Anything else is
+  // refused before the runtime sees it.
+  const path = await resolveModelPath(request.modelsDir, request.modelPath);
   if (loadedPath === path && context) return;
 
   context = undefined;
