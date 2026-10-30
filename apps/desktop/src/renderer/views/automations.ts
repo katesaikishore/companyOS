@@ -1,7 +1,7 @@
 import type { AgentDelegationResult, AutomationView, AutonomyLevel, HandoffView, Param, RunRecord, RunResult, Step, TwinStatus } from '@companyos/twin-core';
 import { h, type Child } from '../dom.js';
 import { button, chip, emptyState, pageHeader, panel, panelHead, progressBar } from '../components/ui.js';
-import { DAY_MS, clamp01, formatRate, formatWhen, handoffStateLabel, percent, plural, summarySourceLabel } from '../format.js';
+import { DAY_MS, clamp01, formatWhen, handoffStateLabel, noticedPerWeek, percent, plural, summarySourceLabel } from '../format.js';
 import {
   GATE,
   LEVEL_NAMES,
@@ -278,7 +278,7 @@ function ladderCells(view: AutomationView): LadderCell[] {
   const occurrences = view.automation.estimate?.occurrencesPerWeek;
   const descriptions = [
     'Watches structure only.',
-    occurrences !== undefined ? `Noticed ${formatRate(occurrences)} times a week.` : 'Noticed in your routines.',
+    occurrences !== undefined ? noticedPerWeek(occurrences) : 'Noticed in your routines.',
     'Prepared, not run.',
     'One click, you confirm.',
     'Unattended. Local and reversible.',
@@ -481,7 +481,7 @@ function gatePanel(view: AutomationView): HTMLElement {
     button('Let it run on its own', {
       variant: 'teal',
       testid: 'automation-promote',
-      disabled: !promotion.eligible || pending(`promote:${autonomy.automationId}`),
+      disabled: autonomy.level >= 4 || !promotion.eligible || pending(`promote:${autonomy.automationId}`),
       onClick: () => void call(`promote:${autonomy.automationId}`, twin => twin.promote(autonomy.automationId)),
     }, 'btn-block'),
     promotion.eligible

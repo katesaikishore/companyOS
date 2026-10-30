@@ -7,7 +7,7 @@ import { call, pending, requestRender, state } from '../store.js';
 
 export function suggestionsView(status: TwinStatus): HTMLElement {
   const list = status.suggestions;
-  const header = pageHeader('Suggestions', 'Routines the twin thinks it could take off your hands. Nothing runs until you say so.');
+  const header = pageHeader('Suggestions', 'Routines the twin thinks it could take off your hands. Nothing runs unless you start it, or you have turned on unattended runs for an automation at level 4.');
   if (list.length === 0) {
     return h(
       'div',
@@ -17,7 +17,7 @@ export function suggestionsView(status: TwinStatus): HTMLElement {
         { testid: 'suggestions-empty' },
         emptyState(
           'No new routines yet.',
-          'The twin needs about three days of repetition to notice one.',
+          'The twin needs the same sequence on at least three different days to notice one.',
         ),
       ),
     );

@@ -120,7 +120,7 @@ function welcome(): Child[] {
       { class: 'promises' },
       h('li', null, 'Raw data stays on this device.'),
       h('li', null, 'You choose what is watched.'),
-      h('li', null, 'Nothing runs until you say so.'),
+      h('li', null, 'Nothing runs unless you start it, or you have turned on unattended runs for an automation at level 4.'),
     ),
   ];
 }

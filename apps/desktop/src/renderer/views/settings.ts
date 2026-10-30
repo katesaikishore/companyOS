@@ -75,7 +75,7 @@ function openMausBotPanel(config: TwinConfig): HTMLElement {
       h('span', { class: 'toggle-label' }, 'Lead bot or room'),
       target,
     ),
-    h('p', { class: 'muted small' }, 'A handoff sends the task brief, routine name, app sequence and estimated cadence after a native confirmation. The prompt excludes activity history, screenshots, window contents and companyOS credentials. OpenMausBot may use its own configured credentials and permissions, outside companyOS autonomy controls. Handoffs are kept on this device until you delete everything.'),
+    h('p', { class: 'muted small' }, 'A handoff sends the task brief, routine name, app sequence and estimated cadence after a native confirmation. The prompt excludes activity history, screenshots, window contents and companyOS credentials. OpenMausBot may use its own configured credentials and permissions, outside companyOS autonomy controls. Handoffs are kept on this device for 90 days, or until you delete everything.'),
     h('div', { class: 'actions' }, button('Save OpenMausBot settings', {
       testid: 'settings-openmausbot-save',
       disabled: pending(key),
