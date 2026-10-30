@@ -12,9 +12,9 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "npm run build -w @companyos/twin-core && npm run build -w @companyos/desktop",
+    "build": "npm run build -w @companyos/twin-core && npm run build -w @companyos/desktop && node apps/browser-ext/scripts/build.mjs",
     "typecheck": "npm run build -w @companyos/twin-core && npm run typecheck --workspaces --if-present && tsc -p tests/privacy/tsconfig.json --noEmit",
-    "test": "npm run test -w @companyos/twin-core && npm run test -w @companyos/desktop && node --test scripts/measure/measure.test.mjs",
+    "test": "npm run test -w @companyos/twin-core && npm run test -w @companyos/desktop && node --test apps/browser-ext/test/host.test.js && node --test scripts/measure/measure.test.mjs",
     "test:privacy": "vitest run --config tests/privacy/vitest.config.ts",
     "start": "npm run build && npm run start -w @companyos/desktop",
     "dist": "npm run build && npm run dist -w @companyos/desktop",

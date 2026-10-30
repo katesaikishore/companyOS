@@ -1,4 +1,4 @@
-import type { TwinAgent } from '@companyos/twin-core';
+import { FrontAppTracker, type BridgedBrowser, type TwinAgent } from '@companyos/twin-core';
 import type { Platform } from './platform';
 
 export type CaptureState = 'capturing' | 'paused' | 'idle' | 'locked' | 'unsupported';
@@ -10,6 +10,8 @@ export interface CaptureDeps {
   onFocus?: (app: string) => void;
   /** Seconds since the last keyboard or mouse input, from the OS. */
   idleSeconds: () => number;
+  /** Whether the browser bridge is running. While it is, a Chrome or Edge change waits for the bridge's visit. */
+  bridgeRunning: () => boolean;
   now?: () => number;
 }
 
@@ -25,7 +27,7 @@ export class CaptureService {
   private paused = false;
   private locked = false;
   private idle = false;
-  private lastApp: string | undefined;
+  private readonly tracker = new FrontAppTracker();
   private detail: string;
   private readonly now: () => number;
 
@@ -66,6 +68,11 @@ export class CaptureService {
     this.deps.agent.ingest({ kind: locked ? 'lock' : 'unlock', ts: this.now() });
   }
 
+  /** The browser bridge reported a visit. The poll leaves that browser's change to the bridge while the visit is recent. */
+  noteBridgeVisit(browser: BridgedBrowser): void {
+    this.tracker.noteBridgeVisit(browser, this.now());
+  }
+
   private async tick(): Promise<void> {
     const platform = this.deps.platform;
     if (!platform) return;
@@ -91,10 +98,11 @@ export class CaptureService {
     }
     // The poll can take a second, so the state may have changed while it ran. Check again before storing.
     if (this.paused || this.locked || this.idle) return;
-    if (!app || app === this.lastApp || isOwnApp(app)) return;
+    if (!app || isOwnApp(app)) return;
 
-    this.lastApp = app;
-    if (this.deps.agent.ingest({ kind: 'focus', ts, app })) this.deps.onFocus?.(app);
+    const recorded = this.tracker.observe(app, ts, this.deps.bridgeRunning());
+    if (!recorded) return;
+    if (this.deps.agent.ingest({ kind: 'focus', ts, app: recorded })) this.deps.onFocus?.(recorded);
   }
 }
 

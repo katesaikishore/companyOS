@@ -3,7 +3,7 @@ import { h, type Child } from '../dom.js';
 import { twinCompanion } from '../components/companion.js';
 import { button, chip, exclusionEditor, fact, logo, progressBar, toggleRow } from '../components/ui.js';
 import { formatBytes } from '../format.js';
-import { fitLabel, modelFraction, modelState, modelStateLabel } from '../labels.js';
+import { browserCaptureNote, fitLabel, modelFraction, modelState, modelStateLabel } from '../labels.js';
 import { act, bridge, call, errorText, go, pending, requestRender, saveConfig, state } from '../store.js';
 
 const TITLES = ['Welcome', 'What companyOS can see', 'Your device and models', 'Start observing'];
@@ -139,7 +139,7 @@ function permissions(status: TwinStatus): Child[] {
         permRow(
           'Browsers',
           'off by default',
-          'Only the app name is recorded, not the page or the window. Private windows cannot be told apart yet.',
+          browserCaptureNote(status.browserCaptureSupported),
           toggleRow({
             testid: 'setup-browsers',
             label: 'Watch browsers',
@@ -157,7 +157,7 @@ function permissions(status: TwinStatus): Child[] {
         h(
           'ul',
           { class: 'never-list' },
-          ...['Which keys you press', 'Password and secure fields', 'Private and incognito windows', 'Apps you exclude'].map(item =>
+          ...['Which keys you press', 'Password and secure fields', 'Web pages in private and incognito windows', 'Apps you exclude'].map(item =>
             h('li', null, item),
           ),
         ),
