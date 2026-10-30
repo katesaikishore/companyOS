@@ -6,7 +6,8 @@ export type Route =
   | { name: 'automations' }
   | { name: 'automation'; id: string }
   | { name: 'ledger' }
-  | { name: 'readiness' }
+  /** The app readiness list, or one app's detail when the route names an app. */
+  | { name: 'readiness'; app?: string }
   | { name: 'harness' }
   | { name: 'settings' };
 
@@ -142,7 +143,7 @@ export function routeFromHash(hash: string): Route {
     case 'ledger':
       return { name: 'ledger' };
     case 'readiness':
-      return { name: 'readiness' };
+      return parts[1] ? { name: 'readiness', app: safeDecode(parts[1]) } : { name: 'readiness' };
     case 'harness':
       return { name: 'harness' };
     case 'settings':
@@ -154,6 +155,7 @@ export function routeFromHash(hash: string): Route {
 
 export function routeKey(route: Route): string {
   if (route.name === 'automation') return `#/automations/${encodeURIComponent(route.id)}`;
+  if (route.name === 'readiness' && route.app !== undefined) return `#/readiness/${encodeURIComponent(route.app)}`;
   return `#/${route.name}`;
 }
 

@@ -122,7 +122,7 @@ function viewFor(status: TwinStatus, route: Route): HTMLElement {
     case 'ledger':
       return ledgerView(status);
     case 'readiness':
-      return readinessView(status);
+      return readinessView(status, route.app);
     case 'harness':
       return harnessView(status);
     case 'settings':
