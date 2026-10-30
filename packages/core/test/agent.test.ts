@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { TwinAgent, mineRoutines, normalizeSignal, segment, type Executor, type TwinEvent } from '../src';
+import { RETENTION_DAYS, TwinAgent, mineRoutines, normalizeSignal, segment, type Executor, type TwinEvent } from '../src';
 import { SECRET_QUERY, at, workdays } from './fixtures';
 
 const DAY = 86_400_000;
@@ -112,6 +112,16 @@ describe('persistence and retention', () => {
     expect(later.prune()).toBeGreaterThan(0);
     expect((later.exportAll() as { events: unknown[] }).events).toHaveLength(0);
     expect(agent).toBeDefined();
+  });
+
+  it('prunes at the RETENTION_DAYS window the Overview reports', () => {
+    const { dir, key } = seeded(10);
+    // The window ends exactly at the start of the newest day, so every older day is dropped and that day is kept.
+    const later = openAgent(dir, key, at(9, 0) + RETENTION_DAYS * DAY);
+    later.prune();
+    const kept = (later.exportAll() as { events: TwinEvent[] }).events;
+    expect(kept.length).toBeGreaterThan(0);
+    expect(kept.every(event => event.ts >= at(9, 0))).toBe(true);
   });
 });
 

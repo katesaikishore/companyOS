@@ -28,7 +28,8 @@ import {
 
 const DAY_MS = 86_400_000;
 const ANALYSIS_DAYS = 30;
-const RETENTION_DAYS = 90;
+/** Raw events older than this are pruned. The desktop status reports the same figure to the Overview. */
+export const RETENTION_DAYS = 90;
 /** Names kept in memory for detected routines. The oldest are dropped first. */
 const MAX_ROUTINE_NAMES = 200;
 

@@ -1,4 +1,5 @@
 import {
+  RETENTION_DAYS,
   TRIGGER_RULES,
   TriggerGate,
   TwinAgent,
@@ -208,6 +209,7 @@ export class TwinRuntime {
       activity: this.agent.activityGrid(28),
       recordedFocusEvents: observed.recordedFocusEvents,
       storageBytes: this.agent.storageBytes(),
+      retentionDays: RETENTION_DAYS,
       readiness: emptyReadiness(),
       handoffs: [],
       stats: {
@@ -491,6 +493,7 @@ export class TwinRuntime {
         days: routine.days,
         score: routine.score,
         minutesPerWeek: preview.estimate?.minutesPerWeek ?? 0,
+        lastSeenAt: routine.lastSeenAt,
         drafted,
         effects: effectsOf(preview),
         parameters: preview.params.map(param => ({ name: param.name, options: [...param.options] })),

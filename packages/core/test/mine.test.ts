@@ -46,6 +46,13 @@ describe('mineRoutines', () => {
     expect(keys).not.toContain('mail>chat>browser');
   });
 
+  it('records when a routine was last seen, the start of its latest occurrence', () => {
+    const routines = mineRoutines(segment(events(workdays(10)), 60 * 60_000));
+    const routine = routines.find(r => r.steps.map(s => s.windowClass).join('>') === 'spreadsheet>mail>chat>browser');
+
+    expect(routine?.lastSeenAt).toBe(at(9, 9));
+  });
+
   it('does not invent routines from one-off noise', () => {
     const noise = Array.from({ length: 10 }, (_, day) => [
       { kind: 'focus' as const, ts: at(day, 9), app: `Vendor Tool ${day}` },

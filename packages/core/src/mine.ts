@@ -33,6 +33,8 @@ export interface Routine {
   /** Mean time from the first to the last step of one occurrence. */
   durationMs: number;
   occurrencesPerWeek: number;
+  /** When the latest occurrence began, in ms. */
+  lastSeenAt: number;
 }
 
 interface Step {
@@ -130,6 +132,7 @@ function toRoutine(key: string, group: Group, weeks: number): Routine {
     segmentIds: [...group.segments],
     durationMs: Math.round(durationMs),
     occurrencesPerWeek: Number((support / Math.max(1, weeks)).toFixed(2)),
+    lastSeenAt: group.occurrences.reduce((latest, occurrence) => Math.max(latest, occurrence[0].startTs), 0),
   };
 }
 

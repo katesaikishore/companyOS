@@ -43,6 +43,8 @@ export interface SuggestionView {
   score: number;
   /** Estimate of the time this routine takes by hand, per week. Not measured from the person. */
   minutesPerWeek: number;
+  /** When the latest occurrence of this routine began, in ms. */
+  lastSeenAt: number;
   drafted: DraftStep[];
   effects: EffectClass[];
   parameters: Array<{ name: string; options: string[] }>;
@@ -134,6 +136,8 @@ export interface TwinStatus {
   recordedFocusEvents: number;
   /** Bytes on disk for the twin's encrypted store. */
   storageBytes: number;
+  /** Days raw events are kept before the engine prunes them. */
+  retentionDays: number;
   stats: StatsView;
   downloads: DownloadState[];
   /** Offers waiting for an answer. Expired offers are removed. */
