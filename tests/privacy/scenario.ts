@@ -40,7 +40,8 @@ export interface Planted {
 
 /**
  * Every ingest surface the suite plants on. The AXSecureTextField and IsPassword entries stand for what a native
- * capture adapter would send: the secure flag set and the value withheld, or the value attached by mistake.
+ * capture adapter would send: the secure flag set and the value withheld, or the value attached by mistake. A secure
+ * or excluded event still carries the page URL it came from, so each dropped row plants a canary the scanner can find.
  */
 export const PLANTED: readonly Planted[] = [
   { label: 'window title in a title key', outcome: 'rejected', signal: ts => ({ kind: 'focus', ts, app: 'Slack', title: CANARIES.windowTitle }) },
@@ -53,7 +54,7 @@ export const PLANTED: readonly Planted[] = [
   { label: 'keystroke event carrying typed text', outcome: 'rejected', signal: ts => ({ kind: 'keystroke', ts, typed: CANARIES.typedText }) },
   { label: 'clipboard content', outcome: 'rejected', signal: ts => ({ kind: 'focus', ts, app: 'Microsoft Word', clipboard: CANARIES.clipboard }) },
   { label: 'AXSecureTextField with its value attached', outcome: 'rejected', signal: ts => ({ kind: 'focus', ts, app: 'Safari', secureInput: true, value: CANARIES.secureFieldValue }) },
-  { label: 'IsPassword field with the value withheld', outcome: 'dropped', signal: ts => ({ kind: 'focus', ts, app: 'Microsoft Edge', secureInput: true }) },
+  { label: 'IsPassword field with the value withheld', outcome: 'dropped', signal: ts => ({ kind: 'focus', ts, app: 'Microsoft Edge', secureInput: true, url: `https://login.example.com/signin?t=${CANARIES.secureFieldUrl}` }) },
   { label: 'private window with a URL', outcome: 'dropped', signal: ts => ({ kind: 'focus', ts, app: 'Google Chrome', isPrivateWindow: true, url: `https://docs.example.com/doc/x?token=${CANARIES.privateWindowUrl}` }) },
   { label: 'URL query and fragment in a browser', outcome: 'stored', signal: ts => ({ kind: 'focus', ts, app: 'Google Chrome', url: CHROME_URL }) },
   { label: 'URL userinfo in a browser', outcome: 'stored', signal: ts => ({ kind: 'focus', ts, app: 'Google Chrome', url: `https://${CANARIES.urlUserinfo}@docs.example.com/wiki/page` }) },
@@ -61,7 +62,8 @@ export const PLANTED: readonly Planted[] = [
   { label: 'URL on a chat app', outcome: 'stored', signal: ts => ({ kind: 'focus', ts, app: 'Slack', url: `https://chat.example.com/room?t=${CANARIES.urlQuery}` }) },
   { label: 'file URL in a browser', outcome: 'stored', signal: ts => ({ kind: 'focus', ts, app: 'Google Chrome', url: `file:///Users/someone/${CANARIES.urlQuery}.txt` }) },
   { label: 'overlong URL', outcome: 'rejected', signal: ts => ({ kind: 'focus', ts, app: 'Google Chrome', url: `https://docs.example.com/${'a'.repeat(2100)}?t=${CANARIES.overlongUrl}` }) },
-  { label: 'excluded password manager', outcome: 'dropped', signal: ts => ({ kind: 'focus', ts, app: '1Password 8' }) },
+  { label: 'excluded password manager', outcome: 'dropped', signal: ts => ({ kind: 'focus', ts, app: '1Password 8', url: `https://vault.example.com/item?t=${CANARIES.excludedAppUrl}` }) },
+  { label: 'percent-encoded URL query in a browser', outcome: 'stored', signal: ts => ({ kind: 'focus', ts, app: 'Google Chrome', url: `https://docs.example.com/doc/5f0e7c21/view?t=${encodeURIComponent(CANARIES.encodedForms)}` }) },
 ];
 
 export interface ScenarioRun {
