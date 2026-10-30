@@ -511,6 +511,18 @@ Full lists: [`os-capture.md`](../research/os-capture.md), [`prior-art.md`](../re
 3. Get legal review on §3 and §8 before any pilot.
 4. Choose open or closed client (§13, question 3). This gates the repository and license setup.
 
+## 15a. Decision: open models only (for security)
+
+Recorded after the first build. The product owner asked for open-weight models only, for now. No closed or hosted model
+receives any data. The rules that follow:
+
+- Catalogue: Apache-2.0 or MIT, not gated, pinned SHA-256 from the Hugging Face file index. Gemma and Llama are excluded
+  because their licences are custom, not OSI-approved.
+- Setup recommends a chat model from the device's measured memory and disk, plus an embedding model, and installs them
+  with checksum verification.
+- The Claude naming path is removed from the app. The network ledger replaces the cloud ledger and lists model downloads.
+- Downloads: HTTPS only, from `huggingface.co` and `*.hf.co`, with every redirect hop checked.
+
 ## 16. Implementation status (MVP build)
 
 The MVP is built on branch `work-twin-app`. It follows this plan with these deliberate deviations:
@@ -527,4 +539,4 @@ The MVP is built on branch `work-twin-app`. It follows this plan with these deli
 
 What the engine tests cover (`packages/core/test`, 61 tests): redaction and privacy at ingest, store encryption and tamper detection, segmentation, routine mining, compilation, policy evaluation order, runner outcomes, the promotion gate and demotion, the cloud trace schema, the ledger, and an end-to-end agent run. The desktop smoke test checks that the page renders and the bridge answers.
 
-Not yet done: signing and notarisation, real icons, a manual pass on each OS against real apps, and company mode.
+Not yet done: signing and notarisation, real icons, a manual pass on each OS against real apps, running the installed model (labels and names still use rules), and company mode.

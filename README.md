@@ -9,19 +9,22 @@ A private, employee-owned work twin for macOS, Windows and Linux. It notices how
 
 - **Raw activity stays on the device.** Stored records are AES-256-GCM sealed under a key held in the OS keychain.
 - **No titles, no keystrokes, no URL queries.** Redaction happens at ingest. Secure input, private windows and excluded apps produce no event.
-- **Cloud only with consent, and only anonymised traces.** Claude is off by default. The only thing it may receive is a strict schema of pseudonymised app tokens and window classes. Every call is written to a ledger the owner can read.
+- **Open models only.** The twin runs open-weight models (Apache-2.0 or MIT) on this device. No closed or hosted model receives any data. Models come from a fixed catalogue with pinned SHA-256 digests.
+- **Network calls are listed.** The only network traffic is model downloads. Each one is recorded in the network ledger with its host, path, size and checksum result. No personal data is sent.
 - **Autonomy is earned.** Drafts never execute. One-click runs ask before any external step. Unattended runs need level 4, local and reversible effects only, and a promotion gate.
-- **Fail closed.** If the OS cannot protect the key, the twin does not start.
+- **Fail closed.** If the OS cannot protect the key, the twin does not start. On Linux without a real keyring, it does not start either.
 
 ## Layout
 
 ```
-packages/core     Engine: redaction, encrypted store, segmentation, routine mining,
-                  automations, policy, runner, autonomy gates, cloud trace (Vitest)
-apps/desktop      Electron app: main process (capture, OS control, IPC), sandboxed
-                  preload, renderer (plain TypeScript, no framework)
-.github/workflows CI on macOS, Windows and Linux
-docs/             Plan and research
+packages/core       Engine: redaction, encrypted store, segmentation, routine mining,
+                    automations, policy, runner, autonomy gates, open-model catalogue,
+                    hardware planning, verified downloads (Vitest)
+apps/desktop        Electron app: main process (capture, OS control, model installs, IPC),
+                    sandboxed preload, renderer (TypeScript modules, no framework)
+apps/desktop/test   End-to-end tests against the built app (Playwright + Electron)
+.github/workflows   CI on macOS, Windows and Linux
+docs/               Plan and research
 ```
 
 ## Build and run
@@ -31,41 +34,44 @@ Requires Node.js 22 or later.
 ```bash
 npm ci
 npm run typecheck
-npm test            # core engine tests
+npm test            # engine tests
 npm run build       # core + desktop
 npm start           # run the app from source
 npm run dist:dir    # package an unpacked app for this platform
-npm run dist        # installers (DMG/ZIP, NSIS, AppImage/deb/rpm), unsigned unless signing env vars are set
+npm run dist        # installers, unsigned unless signing environment variables are set
 ```
 
-Smoke test (Linux, headless):
+End-to-end tests (Linux, headless; needs network access to huggingface.co for the embedding-model download):
 
 ```bash
-NODE_PATH="$(npm root -g)" xvfb-run -a node apps/desktop/test/smoke.cjs
+npm run build
+NODE_PATH="$(npm root -g)" xvfb-run -a node apps/desktop/test/e2e.cjs
 ```
 
-On Linux without a keyring, the app refuses to start because it cannot protect the key. For local testing only, `--password-store=basic` allows it, and that is what the smoke test uses. Do not use it for real data.
+On Linux without a keyring, the app refuses to start. The end-to-end test sets `COMPANYOS_TEST_BASIC_STORE=1` to get past this in CI. Never set it for real data.
 
-## What works now
+## What works
 
-- Redaction, encrypted storage, segmentation, routine mining, compilation of routines into automations, policy, supervised and unattended runners, promotion and demotion gates, cloud naming with a strict trace, data export and deletion (61 engine tests).
-- Desktop shell: single instance, tray, sandboxed window with CSP, validated IPC, native approval dialogs before external steps, and key storage through the OS keychain.
-- Capture adapters: macOS (System Events, requires Automation permission), Windows (PowerShell with `GetForegroundWindow`), Linux X11 (xdotool). Idle and lock from Electron's `powerMonitor`.
+- Engine: redaction, encrypted storage, segmentation, routine mining, compilation into automations, policy, runners (dry, supervised, unattended), promotion and demotion gates, dismissals, a stop-all switch, and time estimates.
+- Setup: the wizard detects the device (CPU, memory, GPU vendor, free disk) and recommends the largest open chat model that fits, plus the embedding model. Downloads are verified and cancellable.
+- Pages: overview, suggestions, automation detail with the autonomy ladder and promotion gate, network ledger, settings. Light and dark themes.
+- Tray popover with the stop-all button. The stop-all shortcut is Control+Alt+. (it is skipped if another app owns it).
+- Capture adapters: macOS (System Events, asks for Automation permission), Windows (PowerShell with `GetForegroundWindow`), Linux X11 (xdotool). Idle and lock from Electron's `powerMonitor`.
 
 ## What does not work yet
 
-- **Wayland.** App capture needs a compositor extension (spike S4). It is reported as unavailable.
-- **Native capture.** Polling adapters are a stand-in. The target is native helpers (Accessibility, UI Automation, AT-SPI) after the spikes in the plan. Polling costs more CPU, especially on Windows.
-- **Browsers.** Browser capture is off by default. The twin can only record the app name, and it cannot tell a private or incognito window from a normal one yet. Turn it on in settings only if you accept that. A browser extension that detects private windows is the fix.
-- **Browser extension.** URL templates keep only the host and first path word. No extension feeds them yet.
+- **Model use.** Installed models are not yet loaded. Routine labels and names still come from rules. Running the local model is the next step.
+- **Wayland.** App capture needs a compositor extension. It is reported as unavailable.
+- **Native capture.** The polling adapters are a stand-in. Native helpers (Accessibility, UI Automation, AT-SPI) are the target. Polling costs more CPU, especially on Windows.
+- **Browsers.** Browser capture is off by default. The twin can only record the app name, and it cannot tell a private or incognito window from a normal one yet. A browser extension that detects private windows is the fix.
 - **Lock on Linux.** Electron does not report screen lock on Linux, so capture relies on the idle threshold there.
-- **Keystroke counts.** Not captured yet. Global input hooks need the native helper.
-- **Storage.** The MVP uses record-level AES-GCM over an append-only log. The plan targets SQLCipher. That needs a native build spike on all three OSes.
+- **Keystroke counts and screenshots.** Not captured in this version.
+- **Storage.** The MVP uses record-level AES-GCM over an append-only log. The plan targets SQLCipher, which needs a native build spike on all three OSes.
 - **Signing and notarisation.** Installers are built unsigned. Release signing needs the secrets listed in `apps/desktop/electron-builder.yml`.
-- **App icons.** The tray icon is generated at runtime. Real icons belong in `apps/desktop/build/` before a release.
-- **Company mode.** Not started. The plan describes it; the engine has no aggregation yet.
+- **Company mode.** Not started.
 
 ## Notes for reviewers
 
-- The smoke test checks that the page renders, the bridge answers, and there are no page errors. It sets `COMPANYOS_TEST_BASIC_STORE=1`, which lets Linux start on Electron's built-in key store. Without that switch the app refuses to open on Linux without a real keyring. The rest of the desktop behaviour has not been run against real apps. It needs a manual pass on each OS.
+- Model downloads go only to `huggingface.co` and `*.hf.co`, over HTTPS, and every redirect hop is checked against that list.
 - `apps/desktop/src/main/preload.ts` repeats the channel names on purpose: sandboxed preloads cannot import local modules.
+- The renderer is served from the `app://` scheme. Chromium blocks ES module scripts loaded from `file://`, so the protocol is what lets the pages load.
