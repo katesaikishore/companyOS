@@ -22,6 +22,16 @@ export function effectLabel(effect: EffectClass): string {
   return effect.replace(/_/g, ' ');
 }
 
+/**
+ * What capture records from browsers, by platform. The browser bridge runs on macOS and Linux only. The setup and
+ * settings pages both show this, so they say the same thing. Only what the engine really does is said here.
+ */
+export function browserCaptureNote(bridgeSupported: boolean): string {
+  return bridgeSupported
+    ? 'On macOS and Linux, the companyOS Twin extension in Chrome and Edge sends only the host and path shape of the active tab, never a query, a fragment or a title. It never reads a private or incognito window. A page the extension does not send, such as a new tab, and any private window, record only the app name, because the twin cannot tell windows apart. Other browsers record only the app name.'
+    : 'Without the browser bridge, as on Windows, Chrome and Edge record only the app name, and their private windows cannot be told apart. Other browsers do the same. No page addresses are recorded.';
+}
+
 export function effectsAreLocal(effects: readonly EffectClass[]): boolean {
   return effects.every(effect => LOCAL_EFFECTS.includes(effect));
 }

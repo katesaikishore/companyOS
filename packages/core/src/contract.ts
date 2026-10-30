@@ -83,6 +83,8 @@ export interface AgentDelegationResult {
 
 export interface TwinStatus {
   capture: { state: 'capturing' | 'paused' | 'idle' | 'locked' | 'unsupported'; detail: string };
+  /** Whether browser capture can run on this system. The browser bridge is available on macOS and Linux only. */
+  browserCaptureSupported: boolean;
   config: TwinConfig;
   usage: AppUsageView[];
   suggestions: SuggestionView[];

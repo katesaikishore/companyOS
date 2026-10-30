@@ -2,7 +2,7 @@ import type { HardwareProfile, ModelFit, ModelSpec, SetupPlan, TwinStatus } from
 import { h, type Child } from '../dom.js';
 import { button, chip, exclusionEditor, fact, logo, progressBar, toggleRow } from '../components/ui.js';
 import { formatBytes } from '../format.js';
-import { fitLabel, modelFraction, modelState, modelStateLabel } from '../labels.js';
+import { browserCaptureNote, fitLabel, modelFraction, modelState, modelStateLabel } from '../labels.js';
 import { act, bridge, call, errorText, go, pending, requestRender, saveConfig, state } from '../store.js';
 
 const TITLES = ['Welcome', 'What companyOS can see', 'Your device and models', 'Start observing'];
@@ -137,7 +137,7 @@ function permissions(status: TwinStatus): Child[] {
         permRow(
           'Browsers',
           'off by default',
-          'On macOS and Linux, Chrome and Edge record only the host and path shape of the active tab, never a private window. Other browsers, and Windows, record only the app name, and their private windows cannot be told apart.',
+          browserCaptureNote(status.browserCaptureSupported),
           toggleRow({
             testid: 'setup-browsers',
             label: 'Watch browsers',
@@ -155,7 +155,7 @@ function permissions(status: TwinStatus): Child[] {
         h(
           'ul',
           { class: 'never-list' },
-          ...['Which keys you press', 'Password and secure fields', 'Private and incognito windows in Chrome and Edge', 'Apps you exclude'].map(item =>
+          ...['Which keys you press', 'Password and secure fields', 'Web pages in private and incognito windows', 'Apps you exclude'].map(item =>
             h('li', null, item),
           ),
         ),

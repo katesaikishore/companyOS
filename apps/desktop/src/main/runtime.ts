@@ -7,7 +7,6 @@ import {
   effectOfOp,
   effectsOf,
   planSetup,
-  polledFocusApp,
   resolveStep,
   type Automation,
   type AutomationView,
@@ -64,14 +63,6 @@ const NO_CONTROL: Executor = {
 const DAY_MS = 86_400_000;
 
 /**
- * The capture poll reads the front app. While the browser bridge runs, Chrome and Edge are recorded from the bridge,
- * which sees the tab, so the poll leaves them out. Otherwise each visit would be counted twice.
- */
-function pollWithoutBridgedBrowsers(platform: Platform, bridgeRunning: () => boolean): Platform {
-  return { ...platform, frontmost: async () => polledFocusApp(await platform.frontmost(), bridgeRunning()) };
-}
-
-/**
  * Connects the twin engine to the operating system and to the model installer. It is the only thing the IPC
  * layer talks to, so the page never receives a key, a raw event, or a path it did not ask for.
  */
@@ -103,8 +94,9 @@ export class TwinRuntime {
     this.capture = new CaptureService(
       {
         agent: this.agent,
-        platform: platform && pollWithoutBridgedBrowsers(platform, () => this.browserBridge !== undefined),
+        platform,
         idleSeconds: options.idleSeconds,
+        bridgeRunning: () => this.browserBridge !== undefined,
         onFocus: app => this.observeFocus(app),
       },
       detail,
@@ -186,6 +178,7 @@ export class TwinRuntime {
     const observed = this.agent.observed();
     return {
       capture: this.browserProblem ? { ...this.capture.status, detail: this.browserProblem } : this.capture.status,
+      browserCaptureSupported: isBrowserCaptureSupported(),
       config,
       usage: this.agent.appUsage(7),
       suggestions,
@@ -387,9 +380,11 @@ export class TwinRuntime {
 
   /**
    * A visit from the browser extension. It goes through the engine's normal ingest, so the browser setting and the
-   * private-window rule apply. It does not trigger a routine offer, which is for app focus alone.
+   * private-window rule apply. It does not trigger a routine offer, which is for app focus alone. The capture poll is
+   * told too, so it leaves that browser's change to the bridge.
    */
   private observeBrowserVisit(visit: BrowserVisit): void {
+    this.capture.noteBridgeVisit(visit.browser);
     this.agent.ingest({ kind: 'focus', ts: Date.now(), app: BROWSER_APP_NAMES[visit.browser], url: `https://${visit.template}` });
   }
 

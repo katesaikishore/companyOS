@@ -1,6 +1,7 @@
 import type { TwinConfig, TwinStatus } from '@companyos/twin-core';
 import { h } from '../dom.js';
 import { button, exclusionEditor, panel, panelHead, toggleRow } from '../components/ui.js';
+import { browserCaptureNote } from '../labels.js';
 import { formatBytes } from '../format.js';
 import { act, bridge, confirmDeleteAll, pending, saveConfig, setNotice, state } from '../store.js';
 import { openSetup } from './setup.js';
@@ -29,7 +30,7 @@ export function settingsView(status: TwinStatus): HTMLElement {
       ),
     ),
     appearancePanel(config.theme),
-    capturePanel(config.watchBrowsers, config.excludedApps),
+    capturePanel(config.watchBrowsers, config.excludedApps, status.browserCaptureSupported),
     automationsPanel(config),
     openMausBotPanel(config),
     modelsPanel(status),
@@ -111,13 +112,13 @@ function appearancePanel(current: Theme): HTMLElement {
   );
 }
 
-function capturePanel(watchBrowsers: boolean, excluded: readonly string[]): HTMLElement {
+function capturePanel(watchBrowsers: boolean, excluded: readonly string[], bridgeSupported: boolean): HTMLElement {
   return panel({ testid: 'settings-capture', labelledBy: 'capture-title' },
     panelHead('Capture', undefined, 'capture-title'),
     toggleRow({
       testid: 'settings-browsers',
       label: 'Watch browsers',
-      note: 'On macOS and Linux, Chrome and Edge record only the host and path shape of the active tab, never a query, a title or a private window. Other browsers, and Windows, record only the app name, and their private windows cannot be told apart. Off by default.',
+      note: `${browserCaptureNote(bridgeSupported)} Off by default.`,
       checked: watchBrowsers,
       onChange: checked => void saveConfig('browsers', { watchBrowsers: checked }),
     }),

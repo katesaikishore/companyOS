@@ -69,11 +69,11 @@ export function bridgedBrowserOf(app: string): BridgedBrowser | undefined {
 }
 
 /**
- * The app the capture poll should record for the front app it read. While the bridge runs, Chrome and Edge come
- * from the bridge, which sees the tab, so a polled focus for them is dropped. Otherwise one visit counts twice.
+ * The app the capture poll should record for the front app it read. When the bridge has reported a visit for Chrome
+ * or Edge recently, the bridge sees that tab, so a polled focus for the browser is dropped. Otherwise one visit counts twice.
  */
-export function polledFocusApp(app: string | undefined, bridgeRunning: boolean): string | undefined {
-  if (app && bridgeRunning && bridgedBrowserOf(app)) return undefined;
+export function polledFocusApp(app: string | undefined, bridgeReported: boolean): string | undefined {
+  if (app && bridgeReported && bridgedBrowserOf(app)) return undefined;
   return app;
 }
 

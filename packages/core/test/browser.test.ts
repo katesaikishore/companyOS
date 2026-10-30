@@ -10,7 +10,7 @@ const SECRET = 'SECRET123456';
 
 /**
  * What the capture poll and the bridge send when the person switches to Chrome and opens a page. The poll names the
- * app the way the OS does (Linux reports google-chrome), and the poll's focus is dropped while the bridge runs.
+ * app the way the OS does (Linux reports google-chrome), and the poll's focus is dropped while the bridge has a recent visit.
  */
 function switchToChrome(agent: TwinAgent, ts: number, rawUrl: string, polledName: string): void {
   const polled = polledFocusApp(polledName, true);
