@@ -47,8 +47,13 @@ export function diskSurfaces(root: string, storeDir: string, key: Buffer): Surfa
     }
   }
   const store = new EncryptedStore(storeDir, key);
-  for (const collection of COLLECTIONS) {
-    surfaces.push({ name: `store:decrypted:${collection}`, text: JSON.stringify(store.readAll(collection), null, 2) });
+  try {
+    for (const collection of COLLECTIONS) {
+      surfaces.push({ name: `store:decrypted:${collection}`, text: JSON.stringify(store.readAll(collection), null, 2) });
+    }
+  } finally {
+    // Windows will not delete the store's files while this handle is open.
+    store.close();
   }
   return surfaces;
 }

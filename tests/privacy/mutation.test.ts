@@ -41,6 +41,16 @@ function freshFolder(): { root: string; storeDir: string; key: Buffer } {
   return { root, storeDir: join(root, 'twin'), key: randomBytes(32) };
 }
 
+/** Writes one record and closes the store, so the folder can be removed on Windows. */
+function seedStore(storeDir: string, key: Buffer, record: unknown): void {
+  const store = new EncryptedStore(storeDir, key);
+  try {
+    store.append('events', record);
+  } finally {
+    store.close();
+  }
+}
+
 function automationNamed(name: string): Automation {
   return {
     id: 'auto_channel',
@@ -86,14 +96,14 @@ describe('each output channel is scanned, so a leak planted on it is caught', ()
 
   it('a plaintext file beside the encrypted store', () => {
     const { root, storeDir, key } = freshFolder();
-    new EncryptedStore(storeDir, key).append('events', { kind: 'focus', app: 'slack' });
+    seedStore(storeDir, key, { kind: 'focus', app: 'slack' });
     writeFileSync(join(storeDir, 'debug-dump.txt'), `title ${CANARIES.windowTitle}`);
     expect(caught(diskSurfaces(root, storeDir, key))).toEqual([['store:raw:debug-dump.txt', 'windowTitle', 'raw']]);
   });
 
   it('a record sealed with the data key, found by decrypting the store', () => {
     const { root, storeDir, key } = freshFolder();
-    new EncryptedStore(storeDir, key).append('events', { kind: 'focus', app: 'slack', title: CANARIES.windowTitle });
+    seedStore(storeDir, key, { kind: 'focus', app: 'slack', title: CANARIES.windowTitle });
     expect(caught(diskSurfaces(root, storeDir, key))).toEqual([['store:decrypted:events', 'windowTitle', 'raw']]);
   });
 
@@ -118,6 +128,7 @@ describe('each output channel is scanned, so a leak planted on it is caught', ()
     expect(caught([{ name: 'ledger', text: JSON.stringify(agent.networkLedger()) }])).toEqual([
       ['ledger', 'urlQuery', 'raw'],
     ]);
+    agent.close();
   });
 
   it('the full data export, through a setting that ends up in it', () => {
@@ -127,6 +138,7 @@ describe('each output channel is scanned, so a leak planted on it is caught', ()
     expect(caught([{ name: 'export', text: JSON.stringify(agent.exportAll()) }])).toEqual([
       ['export', 'routineName', 'raw'],
     ]);
+    agent.close();
   });
 
   it('the OpenMausBot prompt preview', () => {
@@ -156,7 +168,7 @@ describe('each output channel is scanned, so a leak planted on it is caught', ()
 
   it('a plaintext file holding a base64url copy', () => {
     const { root, storeDir, key } = freshFolder();
-    new EncryptedStore(storeDir, key).append('events', { kind: 'focus', app: 'slack' });
+    seedStore(storeDir, key, { kind: 'focus', app: 'slack' });
     writeFileSync(join(storeDir, 'debug-dump.txt'), Buffer.from(CANARIES.encodedForms).toString('base64url'));
     expect(caught(diskSurfaces(root, storeDir, key))).toEqual([['store:raw:debug-dump.txt', 'encodedForms', 'base64url']]);
   });

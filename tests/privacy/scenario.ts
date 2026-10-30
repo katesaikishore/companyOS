@@ -125,8 +125,8 @@ export async function runPlantedScenario(): Promise<ScenarioRun> {
   const restoreOutbound = refuseOutbound(outbound);
   const capture = new ConsoleCapture();
 
+  const agent = new TwinAgent({ dataDir: storeDir, dataKey: key, now: () => at(10, 0) });
   try {
-    const agent = new TwinAgent({ dataDir: storeDir, dataKey: key, now: () => at(10, 0) });
     agent.updateConfig({ watchBrowsers: true });
     for (let day = 0; day < 10; day++) for (const signal of workday(day)) agent.ingest(signal);
     PLANTED.forEach((planted, index) => {
@@ -191,6 +191,8 @@ export async function runPlantedScenario(): Promise<ScenarioRun> {
   } finally {
     capture.restore();
     restoreOutbound();
+    // Windows will not delete the store's files while the agent holds them open.
+    agent.close();
     rmSync(root, { recursive: true, force: true });
   }
 }
