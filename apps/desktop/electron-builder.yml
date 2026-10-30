@@ -8,6 +8,9 @@ files:
   - dist/**/*
   - package.json
 asar: true
+# The encrypted store's native module (better-sqlite3-multiple-ciphers) ships Node-API prebuilds for every platform,
+# so it runs unchanged in Electron. A rebuild would compile the bundled SQLite from source for no benefit.
+npmRebuild: false
 # Unsigned local builds are fine for development. Release builds need signing identities in CI secrets:
 #   macOS:   CSC_LINK, CSC_KEY_PASSWORD, APPLE_API_KEY, APPLE_API_KEY_ID, APPLE_API_ISSUER
 #   Windows: WIN_CSC_LINK, WIN_CSC_KEY_PASSWORD (or Azure Artifact Signing)
