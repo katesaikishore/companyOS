@@ -11,3 +11,4 @@ measure-results/
 *.p12
 *.mobileprovision
 *.cer
+*.b64
