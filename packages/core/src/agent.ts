@@ -283,8 +283,16 @@ export class TwinAgent {
     return grid;
   }
 
-  /** Focus counts per app over the last N days, for the dashboard. Names stay on this device. */
-  appUsage(days = 7): Array<{ app: string; windowClass: WindowClass; events: number }> {
+  /** Focus counts per app over the last N days plus the strongest mined pattern score. Names stay on this device. */
+  appUsage(days = 7): Array<{
+    app: string;
+    windowClass: WindowClass;
+    events: number;
+    learningScore: number;
+    patternCount: number;
+    patternSupport: number;
+    patternDays: number;
+  }> {
     const counts = new Map<string, { windowClass: WindowClass; events: number }>();
     for (const event of this.recentEvents(days)) {
       if (event.kind !== 'focus' || !event.app || !event.windowClass) continue;
@@ -292,8 +300,32 @@ export class TwinAgent {
       entry.events++;
       counts.set(event.app, entry);
     }
+    const patternSignals = new Map<string, { count: number; score: number; support: number; days: number }>();
+    for (const routine of this.analyze().routines) {
+      const apps = new Set(routine.steps.flatMap(step => [step.app, ...step.options]));
+      for (const app of apps) {
+        const current = patternSignals.get(app) ?? { count: 0, score: 0, support: 0, days: 0 };
+        current.count++;
+        if (routine.score > current.score) {
+          current.score = routine.score;
+          current.support = routine.support;
+          current.days = routine.days;
+        }
+        patternSignals.set(app, current);
+      }
+    }
     return [...counts.entries()]
-      .map(([app, entry]) => ({ app, ...entry }))
+      .map(([app, entry]) => {
+        const signal = patternSignals.get(app);
+        return {
+          app,
+          ...entry,
+          learningScore: signal?.score ?? 0,
+          patternCount: signal?.count ?? 0,
+          patternSupport: signal?.support ?? 0,
+          patternDays: signal?.days ?? 0,
+        };
+      })
       .sort((a, b) => b.events - a.events)
       .slice(0, 10);
   }

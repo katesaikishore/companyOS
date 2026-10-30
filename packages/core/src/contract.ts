@@ -12,7 +12,17 @@ import type { RunResult } from './runner';
 export interface AppUsageView {
   app: string;
   windowClass: string;
+  /** Focus switches for this app over the last seven days. */
   events: number;
+  /**
+   * Strength of the strongest recurring routine pattern involving this app. This is based on
+   * observed repetition and distinct days in the 30-day analysis window, not a prediction of
+   * error-free automation or a measured run-success rate.
+   */
+  learningScore: number;
+  patternCount: number;
+  patternSupport: number;
+  patternDays: number;
 }
 
 /** One step of the workflow the twin would draft from a routine. */

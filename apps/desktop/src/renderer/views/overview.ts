@@ -1,12 +1,13 @@
 import type { AutomationView, TwinStatus } from '@companyos/twin-core';
 import { h, type Child } from '../dom.js';
 import { button, fact, levelMeter, panel, panelHead, emptyState } from '../components/ui.js';
-import { DAY_MS, formatBytes, formatHours, formatRate, plural } from '../format.js';
+import { DAY_MS, formatBytes, formatHours, formatRate, percent, plural } from '../format.js';
 import { appsSummary, captureTitle, levelLabel } from '../labels.js';
 import { call, go, state } from '../store.js';
 
 const HOURS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const APP_PATTERN_REVIEW_THRESHOLD = 0.8;
 
 export function overviewView(status: TwinStatus): HTMLElement {
   const { stats, automations, suggestions, network } = status;
@@ -279,36 +280,59 @@ function heatmapPanel(activity: number[][]): HTMLElement {
 
 function usagePanel(usage: TwinStatus['usage']): HTMLElement {
   const top = [...usage].sort((a, b) => b.events - a.events).slice(0, 5);
-  const max = top[0]?.events ?? 0;
   return panel(
     { testid: 'overview-usage', labelledBy: 'usage-title' },
-    panelHead('Apps in your week', 'App switches · past 7 days', 'usage-title'),
+    panelHead('Apps you use', 'Top apps · switches from the past 7 days, patterns from the past 30', 'usage-title'),
     top.length === 0
       ? emptyState('No app activity yet.', 'Your app usage summary stays on this device.')
-      : h('div', { class: 'usage-list' }, ...top.map(app => usageRow(app, max))),
+      : h(
+          'div',
+          { class: 'usage-list' },
+          ...top.map(app => appLearningRow(app)),
+          h(
+            'p',
+            { class: 'muted small app-learning-note' },
+            'This repetition-based learning score is not model confidence or task accuracy. At 80%, a pattern is ready for your review—not blanket app access. Sends and external writes still ask; unattended runs must pass each routine’s safety gate.',
+          ),
+        ),
   );
 }
 
-function usageRow(app: TwinStatus['usage'][number], max: number): HTMLElement {
-  const fraction = max > 0 ? app.events / max : 0;
+function appLearningRow(app: TwinStatus['usage'][number]): HTMLElement {
+  const score = Math.round(app.learningScore * 100);
+  const hasPattern = app.patternCount > 0;
+  const strongPattern = app.learningScore >= APP_PATTERN_REVIEW_THRESHOLD;
+  const evidence = hasPattern
+    ? `${app.patternSupport} observations across ${app.patternDays} ${app.patternDays === 1 ? 'day' : 'days'} · ${plural(app.patternCount, 'pattern')}`
+    : 'No repeated workflow pattern yet';
   return h(
     'div',
-    { class: 'usage-row' },
-    h('div', { class: 'usage-meta' },
+    { class: 'usage-row app-learning-row' },
+    h(
+      'div',
+      { class: 'usage-meta' },
       h('span', { class: 'usage-app' }, app.app),
-      h('span', { class: 'mono small muted' }, `${app.events} ${app.events === 1 ? 'switch' : 'switches'}`),
+      h('span', { class: 'mono small muted' }, plural(app.events, 'switch')),
     ),
     h(
       'div',
       {
-        class: 'usage-bar',
+        class: `usage-bar app-learning-bar${strongPattern ? ' is-strong' : ''}`,
         role: 'progressbar',
-        'aria-label': `${app.app}: ${app.events} app switches in the past seven days`,
+        'aria-label': `${app.app}: ${score}% repetition-based learning signal. This is not model confidence or automation success rate.`,
         'aria-valuemin': 0,
-        'aria-valuemax': max,
-        'aria-valuenow': app.events,
+        'aria-valuemax': 100,
+        'aria-valuenow': score,
       },
-      h('span', { style: { width: `${Math.round(fraction * 100)}%` } }),
+      h('span', { style: { width: `${score}%` } }),
+    ),
+    h(
+      'div',
+      { class: 'app-learning-foot' },
+      h('span', { class: 'mono small app-learning-score' }, `${percent(app.learningScore)} learning`),
+      h('span', { class: strongPattern ? 'small teal app-learning-status' : 'small muted app-learning-status' },
+        strongPattern ? `Strong · ${evidence}` : evidence,
+      ),
     ),
   );
 }

@@ -155,7 +155,7 @@ export class TwinRuntime {
     return {
       capture: this.capture.status,
       config,
-      usage: this.agent.appUsage(7).map(entry => ({ app: entry.app, windowClass: entry.windowClass, events: entry.events })),
+      usage: this.agent.appUsage(7),
       suggestions,
       automations,
       network: this.agent.networkLedger(),
