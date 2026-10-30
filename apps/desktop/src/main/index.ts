@@ -5,7 +5,6 @@ import {
   globalShortcut,
   ipcMain,
   Menu,
-  nativeImage,
   net,
   powerMonitor,
   protocol,
@@ -27,10 +26,11 @@ import {
   type Step,
 } from '@companyos/twin-core';
 import { APP_ORIGIN, IPC } from '../shared/ipc';
-import { solidPng } from './icon';
+import { trayImage, windowIconPath } from './icon';
 import { SecureStorageUnavailableError } from './keys';
 import { buildOpenMausBotPrompt } from './openmausbot';
 import { TwinRuntime } from './runtime';
+import { startAutoUpdates } from './updater';
 
 /** Pages are served from a private scheme. Module scripts need it, because Chromium blocks them on file://. */
 protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
@@ -239,6 +239,7 @@ function createMainWindow(): void {
     minWidth: 960,
     minHeight: 640,
     title: 'companyOS Twin',
+    icon: windowIconPath(),
     backgroundColor: '#F3F4F1',
     show: false,
     webPreferences: WEB_PREFERENCES,
@@ -360,7 +361,7 @@ function rebuildTrayMenu(): void {
 }
 
 function createTray(): void {
-  tray = new Tray(nativeImage.createFromBuffer(solidPng(16, [14, 107, 92])));
+  tray = new Tray(trayImage());
   tray.setToolTip('companyOS Twin');
   tray.on('click', toggleTray);
   tray.on('right-click', () => tray?.popUpContextMenu());
@@ -410,6 +411,8 @@ async function boot(): Promise<void> {
   createMainWindow();
   createTrayWindow();
   createTray();
+  // Does nothing unless the app is packaged and a feed URL is set (src/main/updater.ts).
+  startAutoUpdates(app.isPackaged);
 
   try {
     globalShortcut.register(STOP_ALL_SHORTCUT, () => stopAllAutomations());

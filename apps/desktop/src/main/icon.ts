@@ -1,9 +1,38 @@
+import { nativeImage, type NativeImage } from 'electron';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { deflateSync } from 'node:zlib';
 
+/** The PNG sizes written by scripts/make-icons.mjs from build/icon.svg. electron-builder ships them inside the app. */
+const ICON_DIR = join(__dirname, '..', '..', 'build', 'icons');
+const FALLBACK_COLOUR: [number, number, number] = [14, 107, 92];
+
 /**
- * A plain coloured PNG, generated at runtime so the tray works before real icon assets exist.
- * Replace with the designed icon set in build/ before a public release.
+ * The tray icon: 16 px, with a 32 px version for high-density screens. If the files are missing, a plain square
+ * of the same colour is used, so the tray still appears.
  */
+export function trayImage(): NativeImage {
+  try {
+    const image = nativeImage.createEmpty();
+    image.addRepresentation({ scaleFactor: 1, buffer: readFileSync(join(ICON_DIR, '16x16.png')) });
+    image.addRepresentation({ scaleFactor: 2, buffer: readFileSync(join(ICON_DIR, '32x32.png')) });
+    if (!image.isEmpty()) return image;
+  } catch {
+    // Fall through to the plain square below.
+  }
+  return nativeImage.createFromBuffer(solidPng(16, FALLBACK_COLOUR));
+}
+
+/**
+ * The window icon for Windows and Linux. macOS takes the Dock icon from the app bundle, so it does not use this.
+ * Undefined when the file is missing, which leaves the window with the default icon.
+ */
+export function windowIconPath(): string | undefined {
+  const file = join(ICON_DIR, '256x256.png');
+  return existsSync(file) ? file : undefined;
+}
+
+/** A plain coloured PNG, used only when the icon files are missing. */
 const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
   let c = n;
   for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
