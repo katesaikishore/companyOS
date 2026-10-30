@@ -64,6 +64,7 @@ On Linux without a keyring, the app refuses to start. The end-to-end test sets `
 ## What does not work yet
 
 - **Model use.** Installed models are not yet loaded. Routine labels and names still come from rules. Running the local model is the next step.
+- **Automation steps.** An automation can only bring an app to the front and check that it is in front. Typing, clicking and sending are not automated yet.
 - **Wayland.** App capture needs a compositor extension. It is reported as unavailable.
 - **Native capture.** The polling adapters are a stand-in. Native helpers (Accessibility, UI Automation, AT-SPI) are the target. Polling costs more CPU, especially on Windows.
 - **Browsers.** Browser capture is off by default. The twin can only record the app name, and it cannot tell a private or incognito window from a normal one yet. A browser extension that detects private windows is the fix.
@@ -74,7 +75,7 @@ On Linux without a keyring, the app refuses to start. The end-to-end test sets `
 - **Company mode.** Not started.
 - **OpenMausBot.** Delegation requires its CLI and an existing lead bot or room to be installed and configured separately. Its agents run under OpenMausBot's own permissions; companyOS can confirm the handoff but cannot supervise or stop delegated actions.
 
-The architecture target in [`docs/plan`](docs/plan/README.md) describes a future Rust/Tauri design. The current desktop MVP on this branch is Electron with a TypeScript core, as described above.
+The plan in [`docs/plan`](docs/plan/README.md) describes the target design: a separate headless agent, native capture helpers, a browser extension and a SQLCipher store. Its §16 lists where this MVP differs.
 
 ## Notes for reviewers
 
