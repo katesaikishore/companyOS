@@ -1,12 +1,26 @@
 import { normalizeAppName } from './classify';
-import { resolveStep, type Automation, type Step } from './automation';
+import { parseWebAddress, resolveStep, type Automation, type Step } from './automation';
 import { evaluateStep, type Decision, type PolicyContext } from './policy';
 import type { AutonomyLevel } from './types';
 
-/** The only side-effecting surface the runner touches. Tests supply a fake; the desktop app supplies the OS. */
+/**
+ * The only side-effecting surface the runner touches. Tests supply a fake; the desktop app supplies the OS.
+ * The three optional methods are steps an adapter may not support. A missing method blocks that step before anyone
+ * is asked. A block is not a failure, so it does not demote the automation.
+ */
 export interface Executor {
   focusApp(app: string): Promise<boolean>;
   frontmostApp(): Promise<string | undefined>;
+  /** Opens an allowed http or https address, in canonical form, in the named browser. */
+  openUrl?(app: string, url: string): Promise<boolean>;
+  /** Opens one checked file in the named application. */
+  openFile?(app: string, path: string): Promise<boolean>;
+  /**
+   * Presses a checked key chord in the named application. The adapter must bring that application forward and send the
+   * keys only once it is in front, and return false otherwise. The runner cannot check this itself: the approval dialog
+   * takes focus, so a check made before approval would be wrong by the time the keys are sent.
+   */
+  pressShortcut?(app: string, shortcut: string): Promise<boolean>;
 }
 
 export type RunMode = 'dry_run' | 'supervised' | 'unattended';
@@ -40,10 +54,68 @@ export interface RunRequest {
   shouldStop?: () => boolean;
   /** Called only for steps the policy marks 'ask', and only in supervised mode. */
   approve?: (step: Step, decision: Decision) => Promise<boolean>;
+  /**
+   * How long the postcondition of an open or key step waits for the OS to bring the expected app forward. Focus
+   * can take a moment to move. Defaults to 1.5 seconds. Tests set it to 0.
+   */
+  settleMs?: number;
 }
+
+const DEFAULT_SETTLE_MS = 1_500;
+const SETTLE_POLL_MS = 150;
+
+const FAILED_REASON = {
+  open_url: 'The address could not be opened.',
+  open_file: 'The file could not be opened.',
+  press_shortcut: 'The shortcut could not be pressed.',
+} as const;
 
 function sameApp(observed: string | undefined, expected: string): boolean {
   return observed !== undefined && normalizeAppName(observed) === normalizeAppName(expected);
+}
+
+/** Why this system cannot carry out a step at all, or undefined when it can. */
+function unsupportedReason(step: Step, executor: Executor): string | undefined {
+  if (step.op === 'open_url' && !executor.openUrl) return 'This system cannot open web addresses yet.';
+  if (step.op === 'open_file' && !executor.openFile) return 'This system cannot open files yet.';
+  if (step.op === 'press_shortcut' && !executor.pressShortcut) return 'This system cannot press shortcuts yet.';
+  return undefined;
+}
+
+/** Carries out one open or key step. A thrown error is an ordinary failure, as with focusApp. */
+async function perform(step: Step, executor: Executor): Promise<boolean> {
+  try {
+    switch (step.op) {
+      case 'open_url': {
+        const url = parseWebAddress(step.url);
+        return url !== undefined && (await executor.openUrl?.(step.app, url.href)) === true;
+      }
+      case 'open_file':
+        return (await executor.openFile?.(step.app, step.path)) === true;
+      case 'press_shortcut':
+        return (await executor.pressShortcut?.(step.app, step.shortcut)) === true;
+      default:
+        return false;
+    }
+  } catch {
+    return false;
+  }
+}
+
+/** True when the expected app is in front, looking again for up to budgetMs because the OS may take a moment. */
+async function settlesInFront(executor: Executor, app: string, budgetMs: number): Promise<boolean> {
+  const deadline = Date.now() + budgetMs;
+  for (;;) {
+    let front: string | undefined;
+    try {
+      front = await executor.frontmostApp();
+    } catch {
+      front = undefined;
+    }
+    if (sameApp(front, app)) return true;
+    if (Date.now() >= deadline) return false;
+    await new Promise(resolve => setTimeout(resolve, SETTLE_POLL_MS));
+  }
 }
 
 /**
@@ -76,6 +148,13 @@ export async function runAutomation(automation: Automation, request: RunRequest,
       const preview = evaluateStep(step, { ...request.policy, level: 3, unattended: false });
       record('dry_run', preview.reason);
       continue;
+    }
+
+    // Refused before anyone is asked, so a person is never asked to approve a step that cannot run.
+    const unsupported = unsupportedReason(step, executor);
+    if (unsupported) {
+      record('blocked', unsupported);
+      return finish('blocked');
     }
 
     let approved = false;
@@ -118,6 +197,22 @@ export async function runAutomation(automation: Automation, request: RunRequest,
       }
       record('executed', decision.reason);
       continue;
+    }
+
+    if (step.op === 'open_url' || step.op === 'open_file' || step.op === 'press_shortcut') {
+      // One action, then its postcondition: the expected app is in front once the action has run.
+      if (!(await perform(step, executor))) {
+        record('failed', FAILED_REASON[step.op]);
+        return finish('failed');
+      }
+      if (await settlesInFront(executor, step.app, request.settleMs ?? DEFAULT_SETTLE_MS)) {
+        passed++;
+        record('passed', 'Done. The expected app is in front.');
+        continue;
+      }
+      failed++;
+      record('check_failed', 'A different app is in front.');
+      return finish('failed');
     }
 
     let front: string | undefined;

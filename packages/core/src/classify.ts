@@ -1,4 +1,4 @@
-import type { WindowClass } from './types';
+import type { EffectClass, StepOp, WindowClass } from './types';
 
 /** Normalised application names mapped to a coarse window class. Anything unknown is 'other'. */
 const CATALOG: Readonly<Record<string, WindowClass>> = {
@@ -74,6 +74,20 @@ export function normalizeAppName(name: string): string {
 
 export function classifyApp(name: string): WindowClass {
   return CATALOG[normalizeAppName(name)] ?? 'other';
+}
+
+/**
+ * Effect of a step, from its operation and the application it touches. Steps whose outcome the twin cannot see
+ * into are external, so they need a person.
+ */
+export function effectOfOp(op: StepOp, app: string): EffectClass {
+  // Checking focus changes nothing. Opening a file in an app only reads it; what the app does next is not seen.
+  if (op === 'check_focus' || op === 'open_file') return 'read_only';
+  // A link can trigger an action on the page, and a shortcut does whatever the app binds it to. Neither is visible.
+  if (op === 'open_url' || op === 'press_shortcut') return 'external_effect';
+  // Messages are composed and sent by the person in these apps, and the twin cannot see what is sent.
+  const windowClass = classifyApp(app);
+  return windowClass === 'mail' || windowClass === 'chat' ? 'external_effect' : 'read_only';
 }
 
 /**

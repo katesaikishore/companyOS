@@ -29,6 +29,9 @@ export type EffectClass = (typeof EFFECT_CLASSES)[number];
 /** Effects that always need a person, at every autonomy level. */
 export const FLOOR_EFFECTS: readonly EffectClass[] = ['external_effect', 'money', 'deletion', 'permission', 'install'];
 
+/** Every operation an automation step can perform. Focus and check are the original vocabulary; the rest open or press things. */
+export type StepOp = 'focus_app' | 'check_focus' | 'open_url' | 'open_file' | 'press_shortcut';
+
 /** 0 observe, 1 suggest, 2 draft, 3 one-click run, 4 unattended (local, reversible), 5 external (not in this version). */
 export type AutonomyLevel = 0 | 1 | 2 | 3 | 4 | 5;
 export const AutonomyLevelSchema = z.union([
