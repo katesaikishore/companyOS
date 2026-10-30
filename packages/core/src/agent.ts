@@ -18,6 +18,8 @@ import {
 import { runAutomation, type Executor, type RunMode, type RunRequest, type RunResult } from './runner';
 import { segment, type Segment } from './segment';
 import { EncryptedStore } from './store';
+import { HANDOFF_READ_LIMIT, HandoffSchema, INTERRUPTED_HANDOFF_SUMMARY } from './handoff';
+import type { HandoffView } from './contract';
 import type { InstalledModel, NetworkEntry } from './models/types';
 import {
   DEFAULT_CONFIG,
@@ -323,6 +325,44 @@ export class TwinAgent {
     return this.store.readAll<NetworkEntry>('ledger');
   }
 
+  /**
+   * Writes a handoff, or replaces the stored one with the same id in place. The runtime writes it as "sending" before
+   * the CLI starts, so a send is on record even if it never returns.
+   */
+  recordHandoff(view: HandoffView): void {
+    const record = HandoffSchema.parse(view);
+    const current = this.readHandoffs();
+    const index = current.findIndex(candidate => candidate.id === record.id);
+    const next = index === -1 ? [...current, record] : current.map((candidate, position) => (position === index ? record : candidate));
+    this.store.replaceAll('handoffs', next);
+  }
+
+  /** The newest handoffs first. A read returns at most HANDOFF_READ_LIMIT, whatever limit is asked for. */
+  handoffs(limit: number = HANDOFF_READ_LIMIT): HandoffView[] {
+    const requested = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : HANDOFF_READ_LIMIT;
+    return this.readHandoffs()
+      .map((record, position) => ({ record, position }))
+      .sort((a, b) => b.record.sentAt - a.record.sentAt || b.position - a.position)
+      .slice(0, Math.min(HANDOFF_READ_LIMIT, requested))
+      .map(item => item.record);
+  }
+
+  /**
+   * Closes every handoff still "sending" when the app starts. Nothing can still be waiting for its reply, so each one
+   * is recorded as a companyOS failure. Returns how many were closed.
+   */
+  closeInterruptedHandoffs(): number {
+    const current = this.readHandoffs();
+    let closed = 0;
+    const next = current.map(record => {
+      if (record.state !== 'sending') return record;
+      closed++;
+      return { ...record, state: 'failed' as const, summary: INTERRUPTED_HANDOFF_SUMMARY, localFailure: true };
+    });
+    if (closed > 0) this.store.replaceAll('handoffs', next);
+    return closed;
+  }
+
   /** Records a model that was downloaded and verified. A model with the same id is replaced. */
   markModelInstalled(model: InstalledModel): void {
     const others = this.config.installedModels.filter(installed => installed.id !== model.id);
@@ -426,6 +466,7 @@ export class TwinAgent {
       automations: this.readAutomations(),
       autonomy: this.readStates(),
       network: this.networkLedger(),
+      handoffs: this.readHandoffs(),
     };
   }
 
@@ -455,6 +496,14 @@ export class TwinAgent {
 
   private readStates(): AutonomyState[] {
     return this.store.readAll<AutonomyState>('autonomy');
+  }
+
+  /** A stored record that no longer fits the schema is left out, rather than failing every read of the page. */
+  private readHandoffs(): HandoffView[] {
+    return this.store.readAll<unknown>('handoffs').flatMap(record => {
+      const parsed = HandoffSchema.safeParse(record);
+      return parsed.success ? [parsed.data] : [];
+    });
   }
 
   private requireAutomation(automationId: string): Automation {

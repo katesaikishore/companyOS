@@ -12,6 +12,7 @@ export * from './policy';
 export * from './runner';
 export * from './autonomy';
 export * from './agent';
+export * from './handoff';
 export * from './models';
 export * from './triggers';
 export * from './contract';

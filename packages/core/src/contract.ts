@@ -146,14 +146,22 @@ export interface HandoffView {
   id: string;
   automationId: string;
   routineName: string;
+  /** The lead bot or room the handoff was sent to. */
   target: string;
+  /** The outcome the person described. */
   brief: string;
+  /** The app names the prompt carried, in order. No activity history. */
+  apps: string[];
+  /** Estimated occurrences per week, as the prompt carried it. */
+  cadencePerWeek?: number;
   sentAt: number;
   state: AgentDelegationResult['state'] | 'sending';
   summary: string;
   threadId?: string;
   /** The harness job tree, as sanitised JSON text. */
   taskTree?: string;
+  /** True when companyOS itself failed. The summary is then companyOS's message, not OpenMausBot's reply. */
+  localFailure: boolean;
 }
 
 export interface TwinStatus {
