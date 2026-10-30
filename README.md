@@ -24,8 +24,10 @@ only after it has earned that. Your activity is stored encrypted on your device.
 - **Store.** One SQLCipher database, opened with a 32-byte key that the OS keychain seals. It includes export
   (a plain file, after a warning), Delete everything, and 90-day pruning of raw events.
 - **Routines.** Fixed rules find repeated app sequences and offer them as suggestions. An accepted one becomes
-  a draft, which can be dry-run. At level 3 and up you start each run, from a tray offer or with **Run now**,
-  and steps with external effects ask again. An offer never starts a run by itself.
+  a draft, which can be dry-run. At level 3 you start each run, from a tray offer or with **Run now**, and steps
+  with external effects ask again. At level 4, with **Allow unattended runs** on, a routine with only local,
+  reversible steps runs on its own when its app comes to the front. Otherwise level 4 works like level 3. An
+  offer never starts a run by itself.
 - **Autonomy.** Autonomy levels, a deterministic policy check before every step, a promotion gate to level 4,
   and demotion after a failed or undone run. Stop all automations is one switch.
 - **Downloads.** Installing a model fetches it only from Hugging Face hosts and checks its SHA-256 digest.
@@ -34,7 +36,7 @@ only after it has earned that. Your activity is stored encrypted on your device.
   is the fallback. Names are kept in memory only. Not verified with a real model file, because the tests use
   a fake worker.
 - **OpenMausBot handoff.** Sends a task brief to an external CLI after a native confirmation. Not run against
-  the real CLI, and no test covers it.
+  the real CLI. The privacy suite checks its prompt and arguments against a fake CLI.
 
 **Not done yet**
 
@@ -52,8 +54,9 @@ only after it has earned that. Your activity is stored encrypted on your device.
   saved, although its dialog says installed models are removed.
 - **Company mode** is not built. `packages/core/src/company` holds only the aggregate release maths (cohort
   minimum, noise, privacy budget). Nothing sends or shows it.
-- **Packaging** is unverified. Signing and notarisation run only when certificates are set. `apps/desktop` does
-  not declare `@companyos/twin-core`, which its main process imports, so a packaged app may not start.
+- **Packaging** is built in CI (unpacked, unsigned), but no test starts a packaged app. Signing and notarisation
+  run only when certificates are set. `apps/desktop` does not declare `@companyos/twin-core`, which its main
+  process imports, so a packaged app may not start.
   Auto-update checks run only when `COMPANYOS_UPDATE_URL` is set, and no update feed exists yet.
 
 ## Quick start
