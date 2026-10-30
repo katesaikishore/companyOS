@@ -45,6 +45,8 @@ let tray: Tray | undefined;
 let paused = false;
 let quitting = false;
 
+// COMPANYOS_USER_DATA moves the twin's data folder. The performance harness uses it, so a measured run never touches a real install.
+if (process.env.COMPANYOS_USER_DATA) app.setPath('userData', resolve(process.env.COMPANYOS_USER_DATA));
 const userData = app.getPath('userData');
 
 function requireRuntime(): TwinRuntime {
@@ -402,6 +404,11 @@ async function boot(): Promise<void> {
   }
 
   await runtime.start();
+  // Test-only, for the performance harness. It needs an unpackaged run in its own data folder, so a real install never seeds.
+  const seedDays = Number(process.env.COMPANYOS_MEASURE_SEED_DAYS);
+  if (!app.isPackaged && process.env.COMPANYOS_USER_DATA && Number.isInteger(seedDays) && seedDays > 0) {
+    runtime.seedMeasurementActivity(Math.min(seedDays, 30));
+  }
   powerMonitor.on('lock-screen', () => runtime?.setLocked(true));
   powerMonitor.on('unlock-screen', () => runtime?.setLocked(false));
 
