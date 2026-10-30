@@ -50,13 +50,12 @@ only after it has earned that. Your activity is stored encrypted on your device.
 - **Capture** polls every 3 to 5 seconds with OS tools. There are no native helpers and no keystroke counts.
   The poll cannot see private windows, so with Watch browsers on, an incognito Chrome window is recorded under
   the browser's name.
-- **Delete everything** removes the store and the data key. It does not remove model files or any export you
-  saved, although its dialog says installed models are removed.
+- **Delete everything** removes the store, the data key and the installed model files. Any export you saved
+  elsewhere is yours and is not touched.
 - **Company mode** is not built. `packages/core/src/company` holds only the aggregate release maths (cohort
   minimum, noise, privacy budget). Nothing sends or shows it.
-- **Packaging** is built in CI (unpacked, unsigned), but no test starts a packaged app. Signing and notarisation
-  run only when certificates are set. `apps/desktop` does not declare `@companyos/twin-core`, which its main
-  process imports, so a packaged app may not start.
+- **Packaging** is built in CI (unpacked, unsigned), and a packaged macOS build was launched once by hand. No
+  test starts a packaged app. Signing and notarisation run only when certificates are set.
   Auto-update checks run only when `COMPANYOS_UPDATE_URL` is set, and no update feed exists yet.
 
 ## Quick start
