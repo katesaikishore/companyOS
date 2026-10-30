@@ -95,12 +95,17 @@ function gateRequirements(
   const unattended = config.maxLevel >= 4 && config.allowUnattended;
   const local = state.effects.every(effect => LOCAL_EFFECTS.includes(effect));
   const targetRate = `${Math.round(minPassRate * 100)}%`;
+  const supervisedNeeded = minSupervisedRuns - supervised;
+  const windowNeeded = minRunsInWindow - recent.length;
+  // Only promote() reaches level 4, and it needs every condition met. So at level 4 both level-3 conditions are met,
+  // even after old supervised runs fall out of the capped run history.
+  const promoted = state.level >= 4;
 
   const requirements: GateRequirement[] = [
     {
       label: 'Level 3, one-click run first',
       value: `L${state.level}`,
-      met: state.level === 3,
+      met: state.level >= 3,
       reason: 'It must first run at level 3 (one-click run).',
     },
     {
@@ -118,16 +123,16 @@ function gateRequirements(
     {
       label: 'Supervised runs at level 3',
       value: `${supervised} / ${minSupervisedRuns}`,
-      met: supervised >= minSupervisedRuns,
+      met: promoted || supervised >= minSupervisedRuns,
       progress: Math.min(1, supervised / minSupervisedRuns),
-      reason: `Needs ${minSupervisedRuns - supervised} more supervised runs.`,
+      reason: `Needs ${supervisedNeeded} more supervised ${supervisedNeeded === 1 ? 'run' : 'runs'}.`,
     },
     {
       label: `Runs in the last ${windowDays} days`,
       value: `${recent.length} / ${minRunsInWindow}`,
       met: recent.length >= minRunsInWindow,
       progress: Math.min(1, recent.length / minRunsInWindow),
-      reason: `Needs ${minRunsInWindow - recent.length} more runs in the last ${windowDays} days.`,
+      reason: `Needs ${windowNeeded} more ${windowNeeded === 1 ? 'run' : 'runs'} in the last ${windowDays} days.`,
     },
     {
       label: `Pass rate in the last ${windowDays} days`,

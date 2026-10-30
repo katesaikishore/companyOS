@@ -3,6 +3,7 @@ import {
   DAY_MS,
   initialState,
   promote,
+  PROMOTION_RULES,
   promotionCheck,
   recordRun,
   setLevel,
@@ -123,5 +124,40 @@ describe('gate checklist', () => {
     const check = promotionCheck(readyState(), NOW, config);
     expect(check.requirements.every(requirement => requirement.met)).toBe(true);
     expect(check.requirements.find(requirement => requirement.label.startsWith('Pass rate'))).toMatchObject({ value: '100.0% / 99%', met: true });
+  });
+
+  it('a level-4 automation meets every condition, with none open', () => {
+    const check = promotionCheck({ ...readyState(), level: 4 as const }, NOW, config);
+    const met = check.requirements.filter(requirement => requirement.met);
+    expect(check.requirements.find(requirement => requirement.label === 'Level 3, one-click run first')).toMatchObject({ value: 'L4', met: true });
+    expect(met).toHaveLength(8);
+    expect(met).toHaveLength(check.requirements.length);
+    expect(check.reasons).toEqual([]);
+    expect(check.eligible).toBe(true);
+  });
+
+  it('keeps the supervised-run condition met at level 4 once those runs fall out of the history', () => {
+    const runs = Array.from({ length: 30 }, () => run({ mode: 'unattended', level: 4 }));
+    const check = promotionCheck({ ...initialState('a', ['read_only']), level: 4 as const, runs }, NOW, config);
+    expect(check.requirements.find(requirement => requirement.label === 'Supervised runs at level 3')).toMatchObject({ met: true });
+    expect(check.eligible).toBe(true);
+  });
+
+  it('keeps the level-3 condition open below level 3', () => {
+    const check = promotionCheck({ ...readyState(), level: 2 as const }, NOW, config);
+    expect(check.requirements.find(requirement => requirement.label === 'Level 3, one-click run first')).toMatchObject({ value: 'L2', met: false });
+    expect(check.reasons).toContain('It must first run at level 3 (one-click run).');
+  });
+
+  it('reads one more run in the singular', () => {
+    const oneSupervised = { ...initialState('a', ['read_only']), runs: Array.from({ length: 9 }, () => run()) };
+    expect(promotionCheck(oneSupervised, NOW, config).reasons).toContain('Needs 1 more supervised run.');
+    const oneInWindow = { ...initialState('a', ['read_only']), runs: Array.from({ length: 24 }, () => run()) };
+    expect(promotionCheck(oneInWindow, NOW, config).reasons).toContain(`Needs 1 more run in the last ${PROMOTION_RULES.windowDays} days.`);
+  });
+
+  it('reads runs in the plural for any other count', () => {
+    const state = { ...initialState('a', ['read_only']), runs: Array.from({ length: 3 }, () => run()) };
+    expect(promotionCheck(state, NOW, config).reasons).toContain(`Needs 22 more runs in the last ${PROMOTION_RULES.windowDays} days.`);
   });
 });
