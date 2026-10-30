@@ -1,6 +1,7 @@
 import type { TwinStatus } from '@companyos/twin-core';
 import { h, mount } from './dom.js';
 import { shell } from './components/shell.js';
+import { openCommandPalette } from './commands.js';
 import { modelFraction, modelStateLabel } from './labels.js';
 import { automationDetailView, automationsView } from './views/automations.js';
 import { ledgerView } from './views/ledger.js';
@@ -177,6 +178,13 @@ function boot(): void {
     state.route = routeFromHash(location.hash);
     state.dirty.clear();
     requestRender();
+  });
+
+  window.addEventListener('keydown', event => {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+      event.preventDefault();
+      if (state.status?.config.setupCompleted && !state.wizardForced) openCommandPalette();
+    }
   });
 
   document.addEventListener('visibilitychange', () => {

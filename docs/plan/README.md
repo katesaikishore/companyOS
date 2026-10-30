@@ -1,6 +1,6 @@
 # companyOS Twin: plan
 
-**Status:** Draft v0.1, 2026-10-30. Planning only; no application code yet.
+**Status:** Draft v0.1, 2026-10-30. This is the target architecture, not the shipped desktop implementation. The current MVP is Electron with a TypeScript core; see the repository [README](../../README.md).
 **Working name:** companyOS Twin.
 **Research base:** [`docs/research/`](../research/) (five tracks, each with sources, key decisions, risks and an "unverified" list).
 

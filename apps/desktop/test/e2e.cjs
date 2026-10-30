@@ -20,7 +20,7 @@ const log = (...args) => console.log('[e2e]', ...args);
 
 async function launch(userDataDir) {
   const app = await electron.launch({
-    executablePath: require('/home/user/companyOS/node_modules/electron'),
+    executablePath: require('electron'),
     args: [APP, '--no-sandbox', '--password-store=basic', `--user-data-dir=${userDataDir}`],
     env: { ...process.env, COMPANYOS_TEST_BASIC_STORE: '1', COMPANYOS_TEST_FAKE_PLATFORM: path.join(userDataDir, 'front-app.txt') },
     timeout: 60_000,

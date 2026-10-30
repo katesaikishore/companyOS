@@ -54,8 +54,10 @@ On Linux without a keyring, the app refuses to start. The end-to-end test sets `
 
 - Engine: redaction, encrypted storage, segmentation, routine mining, compilation into automations, policy, runners (dry, supervised, unattended), promotion and demotion gates, dismissals, a stop-all switch, and time estimates.
 - Setup: the wizard detects the device (CPU, memory, GPU vendor, free disk) and recommends the largest open chat model that fits, plus the embedding model. Downloads are verified and cancellable.
-- Pages: overview, suggestions, automation detail with the autonomy ladder and promotion gate, network ledger, settings. Light and dark themes.
+- Pages: overview, suggestions, automation detail with the autonomy ladder and promotion gate, network ledger, settings. Light and dark themes. `Ctrl/⌘ K` opens a searchable command palette for pages, routines, and capture controls.
 - Tray popover with the stop-all button. The stop-all shortcut is Control+Alt+. (it is skipped if another app owns it).
+- Level 4 routines run on their trigger only when unattended runs are enabled, the global automation switch is on, and the configured maximum allows level 4. They remain limited to local, reversible steps and show a native completion or stop notification.
+- Stop all cancels the remaining steps of an in-flight routine, even if automations are turned back on immediately. Privacy and autonomy settings are re-read after approval dialogs and before each step.
 - Capture adapters: macOS (System Events, asks for Automation permission), Windows (PowerShell with `GetForegroundWindow`), Linux X11 (xdotool). Idle and lock from Electron's `powerMonitor`.
 
 ## What does not work yet
@@ -69,6 +71,8 @@ On Linux without a keyring, the app refuses to start. The end-to-end test sets `
 - **Storage.** The MVP uses record-level AES-GCM over an append-only log. The plan targets SQLCipher, which needs a native build spike on all three OSes.
 - **Signing and notarisation.** Installers are built unsigned. Release signing needs the secrets listed in `apps/desktop/electron-builder.yml`.
 - **Company mode.** Not started.
+
+The architecture target in [`docs/plan`](docs/plan/README.md) describes a future Rust/Tauri design. The current desktop MVP on this branch is Electron with a TypeScript core, as described above.
 
 ## Notes for reviewers
 

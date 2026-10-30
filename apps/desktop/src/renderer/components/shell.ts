@@ -3,6 +3,7 @@ import { h, type Child } from '../dom.js';
 import { call, type Route } from '../store.js';
 import { captureTitle } from '../labels.js';
 import { button, logo } from './ui.js';
+import { openCommandPalette } from '../commands.js';
 
 interface NavItem {
   label: string;
@@ -57,6 +58,18 @@ export function shell(status: TwinStatus, route: Route, content: Child): HTMLEle
         ),
       ),
       h('nav', { class: 'nav', 'aria-label': 'Main' }, ...items.map(navLink)),
+      h(
+        'button',
+        {
+          type: 'button',
+          class: 'command-launch',
+          'data-testid': 'command-open',
+          'aria-keyshortcuts': 'Control+K Meta+K',
+          onclick: openCommandPalette,
+        },
+        h('span', null, 'Search commands'),
+        h('kbd', null, 'Ctrl / ⌘ K'),
+      ),
       h(
         'div',
         { class: 'sidebar-foot' },

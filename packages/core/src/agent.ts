@@ -56,6 +56,10 @@ export class TwinAgent {
   private readonly store: EncryptedStore;
   private readonly now: () => number;
   private config: TwinConfig;
+  /** Advances whenever the global stop switch is turned off, so a quick off/on still cancels active runs. */
+  private stopGeneration = 0;
+  /** Turning unattended execution off also cancels an active level 4 run, including across a quick off/on. */
+  private unattendedGeneration = 0;
   /** One run per automation at a time. Overlapping runs would overwrite each other's state. */
   private readonly running = new Set<string>();
 
@@ -73,6 +77,8 @@ export class TwinAgent {
   updateConfig(patch: Partial<TwinConfig>): TwinConfig {
     const next = TwinConfigSchema.parse({ ...this.config, ...patch });
     const excludedChanged = JSON.stringify(next.excludedApps) !== JSON.stringify(this.config.excludedApps);
+    if (this.config.automationsEnabled && !next.automationsEnabled) this.stopGeneration++;
+    if (this.config.allowUnattended && !next.allowUnattended) this.unattendedGeneration++;
     this.config = next;
     this.store.replaceAll('settings', [next]);
     if (excludedChanged) this.purgeExcluded();
@@ -190,6 +196,8 @@ export class TwinAgent {
     }
 
     this.running.add(automationId);
+    const generationAtStart = this.stopGeneration;
+    const unattendedGenerationAtStart = this.unattendedGeneration;
     try {
       const result = await runAutomation(
         automation,
@@ -205,6 +213,17 @@ export class TwinAgent {
           },
           // A kill switch pressed during the run applies to the steps that have not started yet.
           currentLevel: () => this.requireState(automationId).level,
+          currentPolicy: () => ({
+            level: this.requireState(automationId).level,
+            maxLevel: this.config.maxAutonomyLevel,
+            unattended: request.mode === 'unattended',
+            excludedApps: this.config.excludedApps,
+          }),
+          shouldStop: () =>
+            generationAtStart !== this.stopGeneration ||
+            !this.config.automationsEnabled ||
+            (request.mode === 'unattended' &&
+              (unattendedGenerationAtStart !== this.unattendedGeneration || !this.config.allowUnattended)),
         },
         executor,
       );

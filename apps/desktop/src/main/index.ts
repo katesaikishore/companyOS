@@ -346,6 +346,19 @@ async function boot(): Promise<void> {
       idleSeconds: () => (process.env.COMPANYOS_TEST_FAKE_PLATFORM ? 0 : powerMonitor.getSystemIdleTime()),
       onChange: () => undefined,
       onOffer: showOffer,
+      onUnattendedRun: result => {
+        if (!Notification.isSupported()) return;
+        const body =
+          result.status === 'completed'
+            ? 'A level 4 routine finished. See its run history in Automations.'
+            : result.status === 'failed'
+              ? 'A level 4 routine failed and was demoted. Check it in Automations.'
+              : 'A level 4 routine stopped before completion.';
+        new Notification({
+          title: 'companyOS Twin',
+          body,
+        }).show();
+      },
     });
   } catch (error) {
     // Any failure at startup, including a damaged key file, ends visibly. A silent process with no window is worse.

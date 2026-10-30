@@ -34,6 +34,10 @@ export interface RunRequest {
   policy: PolicyContext;
   /** Read before every step, so a level change made during the run (a kill switch) takes effect at once. */
   currentLevel?: () => AutonomyLevel;
+  /** Re-read privacy and autonomy settings before every step and after every approval wait. */
+  currentPolicy?: () => PolicyContext;
+  /** A global stop request cancels steps that have not started, even if automations are turned back on. */
+  shouldStop?: () => boolean;
   /** Called only for steps the policy marks 'ask', and only in supervised mode. */
   approve?: (step: Step, decision: Decision) => Promise<boolean>;
 }
@@ -74,19 +78,31 @@ export async function runAutomation(automation: Automation, request: RunRequest,
       continue;
     }
 
-    const level = request.currentLevel ? request.currentLevel() : request.policy.level;
-    const policy = { ...request.policy, level, unattended: request.mode === 'unattended' };
-    const decision = evaluateStep(step, policy);
-    if (decision.decision === 'deny') {
-      record('blocked', decision.reason);
-      return finish('blocked');
-    }
-    if (decision.decision === 'ask') {
-      const approved = request.approve ? await request.approve(step, decision) : false;
+    let approved = false;
+    let decision: Decision;
+    for (;;) {
+      if (request.shouldStop?.()) {
+        record('blocked', 'Automations were stopped.');
+        return finish('blocked');
+      }
+
+      const livePolicy = request.currentPolicy?.() ?? {
+        ...request.policy,
+        level: request.currentLevel ? request.currentLevel() : request.policy.level,
+      };
+      decision = evaluateStep(step, { ...livePolicy, unattended: request.mode === 'unattended' });
+      if (decision.decision === 'deny') {
+        record('blocked', decision.reason);
+        return finish('blocked');
+      }
+      if (decision.decision !== 'ask' || approved) break;
+
+      approved = request.approve ? await request.approve(step, decision) : false;
       if (!approved) {
         record('blocked', 'Not approved.');
         return finish('blocked');
       }
+      // Settings may have changed while the native approval dialog was open. Loop and re-check them.
     }
 
     if (step.op === 'focus_app') {

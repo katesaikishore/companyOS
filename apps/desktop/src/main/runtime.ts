@@ -41,6 +41,8 @@ export interface RuntimeOptions {
   onChange: () => void;
   /** Called when a routine is offered. The main process shows the tray and a notification. */
   onOffer: (offer: PendingRunView) => void;
+  /** Called after a level 4 run so the owner can see that it ran or stopped. */
+  onUnattendedRun?: (result: RunResult) => void;
   fetchImpl?: typeof fetch;
 }
 
@@ -142,6 +144,7 @@ export class TwinRuntime {
   status(): TwinStatus {
     const suggestions = this.suggestionViews();
     const automations = this.agent.automations();
+    const config = this.agent.configuration;
     const drafts = automations.filter(view => view.state.level === 2).length;
     const minutesBack = automations
       .filter(view => view.state.level >= 3)
@@ -149,7 +152,7 @@ export class TwinRuntime {
     const observed = this.agent.observed();
     return {
       capture: this.capture.status,
-      config: this.agent.configuration,
+      config,
       usage: this.agent.appUsage(7).map(entry => ({ app: entry.app, windowClass: entry.windowClass, events: entry.events })),
       suggestions,
       automations,
@@ -160,7 +163,13 @@ export class TwinRuntime {
       stats: {
         routinesLearned: suggestions.length + automations.length,
         waiting: suggestions.length + drafts,
-        runningOwn: automations.filter(view => view.state.level === 4).length,
+        unattendedReady: automations.filter(
+          view =>
+            config.automationsEnabled &&
+            config.allowUnattended &&
+            config.maxAutonomyLevel >= 4 &&
+            view.state.level === 4,
+        ).length,
         minutesBackPerWeek: Math.round(minutesBack * 10) / 10,
         observedDays: observed.observedDays,
       },
@@ -227,8 +236,21 @@ export class TwinRuntime {
     if (this.activeRuns > 0) return;
     this.expireOffers();
     if (this.pending.length > 0) return;
-    const pick = this.agent.triggerCandidates(app).find(view => this.gate.eligible(view.automation.id));
+    const config = this.agent.configuration;
+    const pick = this.agent
+      .triggerCandidates(app)
+      .find(view => view.state.level <= config.maxAutonomyLevel && this.gate.eligible(view.automation.id));
     if (!pick) return;
+
+    // Level 4 only runs without a prompt after the owner enabled it. The core re-checks the live policy
+    // before every step. Counting it in the same cooldown prevents repeats from the run's own app switches.
+    const unattendedSafe = pick.state.effects.every(effect => effect === 'read_only' || effect === 'local_reversible');
+    if (pick.state.level === 4 && config.allowUnattended && unattendedSafe) {
+      this.gate.recordOffer(pick.automation.id);
+      void this.runUnattended(pick.automation.id);
+      return;
+    }
+
     const createdAt = Date.now();
     const offer: PendingRunView = {
       id: randomUUID(),
@@ -241,6 +263,23 @@ export class TwinRuntime {
     this.pending = [...this.pending, offer];
     this.gate.recordOffer(pick.automation.id);
     this.options.onOffer(offer);
+  }
+
+  private async runUnattended(automationId: string): Promise<void> {
+    const platform = this.platform;
+    if (!platform) return;
+    try {
+      const result = await this.withRun(() =>
+        this.agent.run(
+          automationId,
+          { mode: 'unattended' },
+          { focusApp: app => platform.focus(app), frontmostApp: () => platform.frontmost() },
+        ),
+      );
+      this.options.onUnattendedRun?.(result);
+    } catch {
+      // A concurrent settings change can invalidate the run before its first step. Keep capture alive and fail closed.
+    }
   }
 
   hasPendingOffers(): boolean {

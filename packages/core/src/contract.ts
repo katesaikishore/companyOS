@@ -44,7 +44,7 @@ export interface StatsView {
   /** Suggestions not yet accepted, plus automations still at draft. */
   waiting: number;
   /** Automations at level 4, running without a person. */
-  runningOwn: number;
+  unattendedReady: number;
   /** Estimated minutes per week across automations at level 3 or above. */
   minutesBackPerWeek: number;
   /** Days since the first recorded event. */

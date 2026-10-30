@@ -188,6 +188,165 @@ a {
   color: var(--muted);
 }
 
+.command-launch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.command-launch:hover {
+  color: var(--ink);
+  border-color: var(--border-strong);
+}
+
+.command-launch kbd,
+.command-esc {
+  padding: 2px 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  color: var(--muted);
+  font: 10px 'Geist Mono', ui-monospace, monospace;
+  white-space: nowrap;
+}
+
+.command-dialog {
+  width: min(560px, calc(100vw - 32px));
+  max-width: none;
+  max-height: min(580px, calc(100vh - 40px));
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
+}
+
+.command-dialog::backdrop {
+  background: rgba(9, 12, 13, 0.44);
+  backdrop-filter: blur(3px);
+}
+
+.command-box {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.command-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px 8px;
+}
+
+.command-input {
+  width: calc(100% - 36px);
+  min-height: 48px;
+  margin: 0 18px 10px;
+  padding: 0 2px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px;
+}
+
+.command-input:focus-visible {
+  outline: 0;
+  border-color: var(--accent);
+}
+
+.command-input::placeholder {
+  color: var(--muted);
+}
+
+.command-results {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 390px;
+  min-height: 0;
+  padding: 4px 10px 10px;
+  overflow-y: auto;
+}
+
+.command-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 52px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.command-row:hover,
+.command-row.is-active {
+  background: var(--inset);
+}
+
+.command-row-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.command-title {
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-detail {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-return {
+  color: var(--muted);
+  font: 12px 'Geist Mono', ui-monospace, monospace;
+}
+
+.command-empty {
+  padding: 18px 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.command-foot {
+  padding: 10px 18px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .sidebar-foot {
   margin-top: auto;
   display: flex;

@@ -31,7 +31,7 @@ export function overviewView(status: TwinStatus): HTMLElement {
       { class: 'stat-grid', 'data-testid': 'overview-stats', 'aria-label': 'Summary' },
       statCard('Routines learned', String(stats.routinesLearned), 'Detected or accepted'),
       statCard('Waiting for you', String(stats.waiting), 'Suggestions and drafts'),
-      statCard('Running on their own', String(stats.runningOwn), 'Local and reversible only'),
+      statCard('Unattended ready', String(stats.unattendedReady), 'Level 4 · local and reversible'),
       statCard('Time back', formatHours(stats.minutesBackPerWeek), 'Estimate per week, from automations you kept'),
     ),
     h(
