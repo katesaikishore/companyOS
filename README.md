@@ -56,7 +56,9 @@ On Linux without a keyring, the app refuses to start because it cannot protect t
 
 - **Wayland.** App capture needs a compositor extension (spike S4). It is reported as unavailable.
 - **Native capture.** Polling adapters are a stand-in. The target is native helpers (Accessibility, UI Automation, AT-SPI) after the spikes in the plan. Polling costs more CPU, especially on Windows.
-- **Browser extension.** URL templates are supported by the engine, but no extension feeds them yet.
+- **Browsers.** Browser capture is off by default. The twin can only record the app name, and it cannot tell a private or incognito window from a normal one yet. Turn it on in settings only if you accept that. A browser extension that detects private windows is the fix.
+- **Browser extension.** URL templates keep only the host and first path word. No extension feeds them yet.
+- **Lock on Linux.** Electron does not report screen lock on Linux, so capture relies on the idle threshold there.
 - **Keystroke counts.** Not captured yet. Global input hooks need the native helper.
 - **Storage.** The MVP uses record-level AES-GCM over an append-only log. The plan targets SQLCipher. That needs a native build spike on all three OSes.
 - **Signing and notarisation.** Installers are built unsigned. Release signing needs the secrets listed in `apps/desktop/electron-builder.yml`.
@@ -65,5 +67,5 @@ On Linux without a keyring, the app refuses to start because it cannot protect t
 
 ## Notes for reviewers
 
-- The smoke test checks that the page renders, the bridge answers, and there are no page errors. The rest of the desktop behaviour has not been run against real apps. It needs a manual pass on each OS.
+- The smoke test checks that the page renders, the bridge answers, and there are no page errors. It sets `COMPANYOS_TEST_BASIC_STORE=1`, which lets Linux start on Electron's built-in key store. Without that switch the app refuses to open on Linux without a real keyring. The rest of the desktop behaviour has not been run against real apps. It needs a manual pass on each OS.
 - `apps/desktop/src/main/preload.ts` repeats the channel names on purpose: sandboxed preloads cannot import local modules.

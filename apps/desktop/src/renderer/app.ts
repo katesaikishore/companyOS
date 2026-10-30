@@ -12,6 +12,12 @@ const LEVEL_LABELS: Record<number, string> = {
 
 let notice: string | undefined;
 let busy = false;
+/** True while the settings form has edits that are not saved yet. Background refreshes must not discard them. */
+let formDirty = false;
+
+function markDirty(): void {
+  formDirty = true;
+}
 let last: TwinStatus | undefined;
 
 type Child = Node | string | false | undefined;
@@ -243,6 +249,7 @@ function usage(status: TwinStatus): HTMLElement {
 function privacy(status: TwinStatus): HTMLElement {
   const cloud = h('input', { type: 'checkbox', checked: status.config.cloudEnabled, id: 'cloud' });
   const unattended = h('input', { type: 'checkbox', checked: status.config.allowUnattended, id: 'unattended' });
+  const browsers = h('input', { type: 'checkbox', checked: status.config.watchBrowsers, id: 'browsers' });
   const maxLevel = h(
     'select',
     { id: 'maxlevel' },
@@ -254,15 +261,26 @@ function privacy(status: TwinStatus): HTMLElement {
 
   return h(
     'section',
-    {},
+    { oninput: markDirty, onchange: markDirty },
     h('h2', {}, 'Privacy and settings'),
     h(
       'div',
       { class: 'card' },
       h('label', { class: 'check' }, cloud, 'Allow Claude to name routines from anonymised traces. Off by default.'),
       h('label', { class: 'check' }, unattended, 'Allow unattended runs at level 4, for local and reversible steps only.'),
+      h(
+        'label',
+        { class: 'check' },
+        browsers,
+        'Watch browsers. Only the app name is recorded, not the page or the window, and private windows cannot be told apart yet. Off by default.',
+      ),
       h('label', { class: 'row' }, 'Highest level the twin may reach', maxLevel),
-      h('label', {}, 'Never watch these apps (comma separated)', excluded),
+      h(
+        'label',
+        {},
+        'Never watch these apps (comma separated, as you see them, for example Microsoft Edge or msedge). Anything already recorded is deleted.',
+        excluded,
+      ),
       h(
         'div',
         { class: 'row' },
@@ -277,12 +295,16 @@ function privacy(status: TwinStatus): HTMLElement {
                     cloudEnabled: cloud.checked,
                     allowUnattended: unattended.checked,
                     maxAutonomyLevel: Number(maxLevel.value) as 3 | 4,
+                    watchBrowsers: browsers.checked,
                     excludedApps: excluded.value
                       .split(',')
                       .map(name => name.trim())
                       .filter(name => name.length > 0),
                   }),
-                () => 'Settings saved.',
+                () => {
+                  formDirty = false;
+                  return 'Settings saved.';
+                },
               ),
           },
           'Save settings',
@@ -374,7 +396,7 @@ function render(status: TwinStatus): void {
 // Refresh in the background, but not while the person is typing in a form.
 setInterval(() => {
   const active = document.activeElement;
-  if (busy || (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT'))) return;
+  if (busy || formDirty || (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT'))) return;
   void refresh();
 }, 5000);
 

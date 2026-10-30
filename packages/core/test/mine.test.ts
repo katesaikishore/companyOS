@@ -6,7 +6,7 @@ const EXCLUDED = ['1password'];
 
 function events(signals: ReturnType<typeof workdays>): TwinEvent[] {
   return signals
-    .map((signal, index) => normalizeSignal(signal, { excludedApps: EXCLUDED, newId: () => `e${index}` }))
+    .map((signal, index) => normalizeSignal(signal, { excludedApps: EXCLUDED, watchBrowsers: true, newId: () => `e${index}` }))
     .filter((event): event is TwinEvent => event !== null);
 }
 

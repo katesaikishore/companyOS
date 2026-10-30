@@ -4,10 +4,16 @@ import { Pseudonymizer, classifyApp, isExcludedApp, normalizeAppName, normalizeS
 const EXCLUDED = ['1password', 'bitwarden'];
 
 describe('templateUrl', () => {
-  it('keeps host and shape, replaces identifiers, drops query and fragment', () => {
-    expect(templateUrl('https://docs.example.com/doc/1ab2cd3ef4567890/edit?token=abc#frag')).toBe(
-      'docs.example.com/doc/:id/edit',
+  it('keeps the host and the first path word, and drops everything else', () => {
+    expect(templateUrl('https://docs.example.com/doc/1ab2cd3ef4567890/edit?token=abc#frag')).toBe('docs.example.com/doc');
+  });
+
+  it('does not keep later segments that carry names, titles or ids', () => {
+    expect(templateUrl('https://www.linkedin.com/in/jane-doe')).toBe('www.linkedin.com/in');
+    expect(templateUrl('https://acme.atlassian.net/wiki/spaces/HR/pages/98765/Terminating+John+Smith')).toBe(
+      'acme.atlassian.net/wiki',
     );
+    expect(templateUrl('https://example.com/42/Jane-Doe')).toBe('example.com/:id');
   });
 
   it('rejects non-web schemes and malformed input', () => {
@@ -37,7 +43,7 @@ describe('app classification', () => {
 });
 
 describe('normalizeSignal', () => {
-  const options = { excludedApps: EXCLUDED, newId: () => 'e1' };
+  const options = { excludedApps: EXCLUDED, watchBrowsers: true, newId: () => 'e1' };
 
   it('stores a focus event with class and no raw titles', () => {
     const event = normalizeSignal({ kind: 'focus', ts: 1, app: 'Slack' }, options);
@@ -59,7 +65,7 @@ describe('normalizeSignal', () => {
       { kind: 'focus', ts: 1, app: 'Chrome', url: 'https://a.example.com/x/1ab2cd3ef4567890?q=secret' },
       options,
     );
-    expect(browser?.urlTemplate).toBe('a.example.com/x/:id');
+    expect(browser?.urlTemplate).toBe('a.example.com/x');
     const notBrowser = normalizeSignal(
       { kind: 'focus', ts: 1, app: 'Slack', url: 'https://a.example.com/x' },
       options,
@@ -75,5 +81,23 @@ describe('Pseudonymizer', () => {
     expect(a.token('app', 'slack')).toBe(a.token('app', 'slack'));
     expect(a.token('app', 'slack')).not.toBe(b.token('app', 'slack'));
     expect(a.token('app', 'slack')).toMatch(/^app_[A-Za-z0-9_-]{12}$/);
+  });
+});
+
+describe('exclusions match every name an app is known by', () => {
+  it('matches the display name a person types against the process name the OS reports', () => {
+    expect(isExcludedApp('msedge', ['Microsoft Edge'])).toBe(true);
+    expect(isExcludedApp('google-chrome', ['Google Chrome'])).toBe(true);
+  });
+
+  it('does not let a short name swallow unrelated apps', () => {
+    expect(isExcludedApp('knowledge base', ['edge'])).toBe(false);
+  });
+});
+
+describe('browser capture is opt-in', () => {
+  it('drops browser focus unless browsers are watched', () => {
+    const off = normalizeSignal({ kind: 'focus', ts: 1, app: 'Google Chrome' }, { excludedApps: [], watchBrowsers: false });
+    expect(off).toBeNull();
   });
 });

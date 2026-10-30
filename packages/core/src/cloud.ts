@@ -80,16 +80,23 @@ export interface LedgerEntry {
   ts: number;
   purpose: 'name_automation';
   model: string;
+  /** Fields handed to the client. Recorded for every attempt, even when the call later fails. */
   fieldsSent: readonly string[];
   outcome: 'ok' | 'refused' | 'error';
 }
 
-/** Asks the model for a name for an anonymised routine. Validates the trace again before sending. */
-export async function nameRoutine(
-  trace: CloudTrace,
-  client: MessagesClient,
-  now: number,
-): Promise<{ suggestion: NameSuggestion | undefined; entry: LedgerEntry }> {
+export interface NameResult {
+  suggestion?: NameSuggestion;
+  entry: LedgerEntry;
+  /** A short, non-sensitive reason when there is no suggestion. */
+  reason?: string;
+}
+
+/**
+ * Asks the model for a name for an anonymised routine. The trace is validated again before sending.
+ * Once the request is attempted, the ledger entry lists the fields whatever the outcome.
+ */
+export async function nameRoutine(trace: CloudTrace, client: MessagesClient, now: number): Promise<NameResult> {
   const checked = CloudTraceSchema.parse(trace);
   const entry = (outcome: LedgerEntry['outcome']): LedgerEntry => ({
     ts: now,
@@ -99,23 +106,34 @@ export async function nameRoutine(
     outcome,
   });
 
-  const response = await client.messages.create({
-    model: CLOUD_MODEL,
-    max_tokens: 1024,
-    output_config: { effort: 'low', format: { type: 'json_schema', schema: NAME_SCHEMA } },
-    messages: [
-      {
-        role: 'user',
-        content:
-          'This is an anonymised trace of a repeated work routine. App names are pseudonyms; only window classes ' +
-          'are meaningful. Give the routine a short plain name and a one-sentence description.\n\n' +
-          JSON.stringify(checked),
-      },
-    ],
-  });
+  let response: Awaited<ReturnType<MessagesClient['messages']['create']>>;
+  try {
+    response = await client.messages.create({
+      model: CLOUD_MODEL,
+      max_tokens: 1024,
+      output_config: { effort: 'low', format: { type: 'json_schema', schema: NAME_SCHEMA } },
+      messages: [
+        {
+          role: 'user',
+          content:
+            'This is an anonymised trace of a repeated work routine. App names are pseudonyms; only window classes ' +
+            'are meaningful. Give the routine a short plain name and a one-sentence description.\n\n' +
+            JSON.stringify(checked),
+        },
+      ],
+    });
+  } catch {
+    return { entry: entry('error'), reason: 'The request to Claude failed.' };
+  }
 
-  if (response.stop_reason === 'refusal') return { suggestion: undefined, entry: entry('refused') };
-  const text = response.content.find(block => block.type === 'text')?.text;
-  if (!text) throw new Error('The model returned no text.');
-  return { suggestion: NameSchema.parse(JSON.parse(text)), entry: entry('ok') };
+  if (response.stop_reason === 'refusal') {
+    return { entry: entry('refused'), reason: 'The model declined this request.' };
+  }
+
+  const text = response.content.find(block => block.type === 'text')?.text ?? '';
+  try {
+    return { suggestion: NameSchema.parse(JSON.parse(text)), entry: entry('ok') };
+  } catch {
+    return { entry: entry('error'), reason: 'The reply was not a usable name.' };
+  }
 }

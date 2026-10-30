@@ -76,10 +76,40 @@ export function classifyApp(name: string): WindowClass {
   return CATALOG[normalizeAppName(name)] ?? 'other';
 }
 
-export function isExcludedApp(name: string, excluded: readonly string[]): boolean {
+/**
+ * Names that refer to the same application on different systems. A person types the display name
+ * ("Microsoft Edge"); the OS reports the process name ("msedge"). Exclusion matches every alias.
+ */
+const ALIAS_GROUPS: readonly (readonly string[])[] = [
+  ['chrome', 'google chrome', 'google-chrome'],
+  ['msedge', 'microsoft edge', 'edge'],
+  ['firefox', 'mozilla firefox'],
+  ['brave', 'brave browser'],
+  ['excel', 'microsoft excel'],
+  ['word', 'microsoft word'],
+  ['outlook', 'microsoft outlook'],
+  ['teams', 'microsoft teams'],
+  ['calc', 'libreoffice calc', 'libreoffice-calc'],
+  ['writer', 'libreoffice writer', 'libreoffice-writer'],
+  ['iterm', 'iterm2'],
+  ['windowsterminal', 'windows terminal'],
+  ['gnome-terminal', 'gnome-terminal-server'],
+  ['keepass', 'keepassxc'],
+];
+
+function aliasesOf(name: string): string[] {
   const normalized = normalizeAppName(name);
-  return excluded.some(pattern => {
-    const p = normalizeAppName(pattern);
-    return p.length > 0 && normalized.includes(p);
-  });
+  const group = ALIAS_GROUPS.find(candidates => candidates.includes(normalized));
+  return group ? [...group] : [normalized];
+}
+
+/**
+ * True when the observed name is one of the excluded apps. Short names must match exactly, so that
+ * "edge" does not swallow unrelated names. Longer names may also match inside a longer name.
+ */
+export function isExcludedApp(name: string, excluded: readonly string[]): boolean {
+  const observed = normalizeAppName(name);
+  return excluded.some(pattern =>
+    aliasesOf(pattern).some(alias => alias.length > 0 && (observed === alias || (alias.length >= 6 && observed.includes(alias)))),
+  );
 }

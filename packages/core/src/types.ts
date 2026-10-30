@@ -76,6 +76,7 @@ export const TwinConfigSchema = z
     cloudEnabled: z.boolean(),
     maxAutonomyLevel: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
     allowUnattended: z.boolean(),
+    watchBrowsers: z.boolean(),
     idleGapMs: z.number().int().min(60_000).max(3_600_000),
   })
   .strict();
@@ -97,6 +98,8 @@ export const DEFAULT_CONFIG: TwinConfig = {
   cloudEnabled: false,
   maxAutonomyLevel: 3,
   allowUnattended: false,
+  // Browser capture is off until private windows can be detected. Otherwise the twin would record them.
+  watchBrowsers: false,
   // Time spent in one app is dwell, not idleness. The OS idle signal marks idleness. This gap is a fallback.
   idleGapMs: 60 * 60_000,
 };

@@ -1,4 +1,5 @@
 import { hkdfSync } from 'node:crypto';
+import { isExcludedApp } from './classify';
 import { AutomationSchema, compileRoutine, effectsOf, type Automation } from './automation';
 import { buildCloudTrace, nameRoutine, type LedgerEntry, type MessagesClient, type NameSuggestion } from './cloud';
 import { DEFAULT_MINING, mineRoutines, type Routine } from './mine';
@@ -50,6 +51,8 @@ export class TwinAgent {
   private readonly now: () => number;
   private readonly claude: MessagesClient | undefined;
   private config: TwinConfig;
+  /** One run per automation at a time. Overlapping runs would overwrite each other's state. */
+  private readonly running = new Set<string>();
 
   constructor(options: AgentOptions) {
     this.store = new EncryptedStore(options.dataDir, options.dataKey);
@@ -67,14 +70,26 @@ export class TwinAgent {
 
   updateConfig(patch: Partial<TwinConfig>): TwinConfig {
     const next = TwinConfigSchema.parse({ ...this.config, ...patch });
+    const excludedChanged = JSON.stringify(next.excludedApps) !== JSON.stringify(this.config.excludedApps);
     this.config = next;
     this.store.replaceAll('settings', [next]);
+    if (excludedChanged) this.purgeExcluded();
     return this.configuration;
+  }
+
+  /** An app added to the exclusion list is forgotten, not just ignored from now on. */
+  private purgeExcluded(): void {
+    const all = this.store.readAll<TwinEvent>('events');
+    const kept = all.filter(event => !event.app || !isExcludedApp(event.app, this.config.excludedApps));
+    if (kept.length !== all.length) this.store.replaceAll('events', kept);
   }
 
   /** Feeds one raw capture signal. Returns false when redaction dropped it. */
   ingest(signal: unknown): boolean {
-    const event = normalizeSignal(signal, { excludedApps: this.config.excludedApps });
+    const event = normalizeSignal(signal, {
+      excludedApps: this.config.excludedApps,
+      watchBrowsers: this.config.watchBrowsers,
+    });
     if (!event) return false;
     this.store.append('events', event);
     return true;
@@ -140,6 +155,7 @@ export class TwinAgent {
     request: { mode: RunMode; values?: Record<string, string>; approve?: RunRequest['approve'] },
     executor: Executor,
   ): Promise<RunResult> {
+    if (this.running.has(automationId)) throw new Error('This automation is already running.');
     const automation = this.requireAutomation(automationId);
     const state = this.requireState(automationId);
     if (request.mode === 'supervised' && state.level < 3) {
@@ -149,36 +165,44 @@ export class TwinAgent {
       throw new Error('Unattended runs need level 4 and the setting switched on.');
     }
 
-    const result = await runAutomation(
-      automation,
-      {
-        mode: request.mode,
-        values: request.values,
-        approve: request.approve,
-        policy: {
-          level: state.level,
-          maxLevel: this.config.maxAutonomyLevel,
-          unattended: request.mode === 'unattended',
-          excludedApps: this.config.excludedApps,
+    this.running.add(automationId);
+    try {
+      const result = await runAutomation(
+        automation,
+        {
+          mode: request.mode,
+          values: request.values,
+          approve: request.approve,
+          policy: {
+            level: state.level,
+            maxLevel: this.config.maxAutonomyLevel,
+            unattended: request.mode === 'unattended',
+            excludedApps: this.config.excludedApps,
+          },
+          // A kill switch pressed during the run applies to the steps that have not started yet.
+          currentLevel: () => this.requireState(automationId).level,
         },
-      },
-      executor,
-    );
+        executor,
+      );
 
-    // Only completed and failed runs count as evidence. A blocked run says nothing about the automation.
-    if (result.status === 'completed' || result.status === 'failed') {
-      const record: RunRecord = {
-        ts: this.now(),
-        mode: request.mode === 'unattended' ? 'unattended' : 'supervised',
-        level: state.level,
-        status: result.status,
-        postconditionsPassed: result.postconditionsPassed,
-        postconditionsFailed: result.postconditionsFailed,
-        reverted: false,
-      };
-      this.writeState(recordRun(state, record));
+      // Only completed and failed runs count as evidence. A blocked run says nothing about the automation.
+      if (result.status === 'completed' || result.status === 'failed') {
+        const record: RunRecord = {
+          ts: this.now(),
+          mode: request.mode === 'unattended' ? 'unattended' : 'supervised',
+          level: state.level,
+          status: result.status,
+          postconditionsPassed: result.postconditionsPassed,
+          postconditionsFailed: result.postconditionsFailed,
+          reverted: false,
+        };
+        // Written from the latest state, not the snapshot taken before the run, so no change made meanwhile is lost.
+        this.writeState(recordRun(this.requireState(automationId), record));
+      }
+      return result;
+    } finally {
+      this.running.delete(automationId);
     }
-    return result;
   }
 
   /**
@@ -192,20 +216,10 @@ export class TwinAgent {
     if (!routine) throw new Error('That routine is no longer detected.');
 
     const trace = buildCloudTrace(routine, this.pseudonyms);
-    try {
-      const { suggestion, entry } = await nameRoutine(trace, this.claude, this.now());
-      this.store.append('ledger', entry);
-      return suggestion;
-    } catch (error) {
-      this.store.append('ledger', {
-        ts: this.now(),
-        purpose: 'name_automation',
-        model: 'claude-opus-5-5',
-        fieldsSent: [],
-        outcome: 'error',
-      } satisfies LedgerEntry);
-      throw error;
-    }
+    const result = await nameRoutine(trace, this.claude, this.now());
+    this.store.append('ledger', result.entry);
+    if (!result.suggestion) throw new Error(result.reason ?? 'No name was returned.');
+    return result.suggestion;
   }
 
   ledger(): LedgerEntry[] {

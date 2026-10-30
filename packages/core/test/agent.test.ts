@@ -28,6 +28,7 @@ function seeded(days = 10): { agent: TwinAgent; dir: string; key: Buffer; now: n
   const key = randomBytes(32);
   const now = at(days, 0);
   const agent = openAgent(dir, key, now);
+  agent.updateConfig({ watchBrowsers: true });
   for (const signal of workdays(days)) agent.ingest(signal);
   return { agent, dir, key, now };
 }
@@ -49,7 +50,7 @@ describe('privacy at ingest', () => {
     expect(stored).not.toContain('token=');
     const events = (agent.exportAll() as { events: TwinEvent[] }).events;
     expect(events.some(event => event.app === '1password')).toBe(false);
-    expect(events.find(event => event.urlTemplate)?.urlTemplate).toBe('docs.example.com/doc/:id/edit');
+    expect(events.find(event => event.urlTemplate)?.urlTemplate).toBe('docs.example.com/doc');
   });
 
   it('rejects a capture adapter that sends a window title', () => {
@@ -117,6 +118,7 @@ describe('cloud naming', () => {
     const key = randomBytes(32);
     const now = at(10, 0);
     const seed = openAgent(dir, key, now);
+    seed.updateConfig({ watchBrowsers: true });
     for (const signal of workdays(10)) seed.ingest(signal);
     const create = vi.fn(async () => ({
       content: [{ type: 'text', text: JSON.stringify({ name: 'Weekly reconciliation', description: 'Moves numbers from a sheet to mail and chat.' }) }],
@@ -142,7 +144,7 @@ describe('cloud naming', () => {
 describe('trace schema', () => {
   it('refuses a trace with an extra raw field', () => {
     const events: TwinEvent[] = workdays(10)
-      .map((signal, i) => normalizeSignal(signal, { excludedApps: [], newId: () => `e${i}` }))
+      .map((signal, i) => normalizeSignal(signal, { excludedApps: [], watchBrowsers: true, newId: () => `e${i}` }))
       .filter((e): e is TwinEvent => e !== null);
     const routine = mineRoutines(segment(events, 3_600_000)).find(r => r.steps.length === 4)!;
     const trace = buildCloudTrace(routine, new Pseudonymizer(Buffer.alloc(32, 9)));
@@ -166,5 +168,80 @@ describe('persistence and retention', () => {
     expect(later.prune()).toBeGreaterThan(0);
     expect((later.exportAll() as { events: unknown[] }).events).toHaveLength(0);
     expect(agent).toBeDefined();
+  });
+});
+
+describe('review fixes', () => {
+  function plain(): { agent: TwinAgent; dir: string; key: Buffer; now: number } {
+    const dir = mkdtempSync(join(tmpdir(), 'twin-review-'));
+    const key = randomBytes(32);
+    const now = at(10, 0);
+    return { agent: openAgent(dir, key, now), dir, key, now };
+  }
+
+  function routineId(agent: TwinAgent): string {
+    return agent.suggestions().find(s => s.routine.steps.length === 4)!.routine.id;
+  }
+
+  it('does not record browser activity with the default settings', () => {
+    const { agent } = plain();
+    expect(agent.ingest({ kind: 'focus', ts: at(0, 10), app: 'Google Chrome' })).toBe(false);
+    expect((agent.exportAll() as { events: unknown[] }).events).toHaveLength(0);
+  });
+
+  it('forgets stored events of an app once it is excluded', () => {
+    const { agent } = seeded(3);
+    agent.updateConfig({ excludedApps: [...agent.configuration.excludedApps, 'slack'] });
+    const events = (agent.exportAll() as { events: TwinEvent[] }).events;
+    expect(events.some(event => event.app === 'slack')).toBe(false);
+    expect(events.some(event => event.app === 'microsoft outlook')).toBe(true);
+  });
+
+  it('refuses a second run of the same automation while one is in flight', async () => {
+    const { agent } = seeded(10);
+    const id = agent.acceptRoutine(routineId(agent)).automation.id;
+    agent.setLevel(id, 3);
+    let release!: (ok: boolean) => void;
+    const pending = new Promise<boolean>(resolve => {
+      release = resolve;
+    });
+    const first = agent.run(id, { mode: 'supervised', approve: () => pending }, focusingExecutor());
+    await expect(agent.run(id, { mode: 'dry_run' }, focusingExecutor())).rejects.toThrow(/already running/);
+    release(true);
+    await first;
+  });
+
+  it('a kill switch pressed during a run stops the steps that have not started', async () => {
+    const { agent } = seeded(10);
+    const id = agent.acceptRoutine(routineId(agent)).automation.id;
+    agent.setLevel(id, 3);
+    let release!: (ok: boolean) => void;
+    const pending = new Promise<boolean>(resolve => {
+      release = resolve;
+    });
+    const run = agent.run(id, { mode: 'supervised', approve: () => pending }, focusingExecutor());
+    agent.setLevel(id, 2);
+    release(true);
+    const result = await run;
+    expect(result.status).toBe('blocked');
+    expect(agent.automations()[0].state.level).toBe(2);
+  });
+
+  it('records the fields sent even when the reply cannot be used', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'twin-ledger-'));
+    const key = randomBytes(32);
+    const now = at(10, 0);
+    const seed = openAgent(dir, key, now);
+    seed.updateConfig({ watchBrowsers: true });
+    for (const signal of workdays(10)) seed.ingest(signal);
+    const create = vi.fn(async () => ({ content: [{ type: 'text', text: 'not json' }], stop_reason: 'end_turn' }));
+    const agent = openAgent(dir, key, now, { messages: { create } });
+    agent.updateConfig({ cloudEnabled: true });
+
+    await expect(agent.requestName(routineId(agent))).rejects.toThrow(/not a usable name/);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(agent.ledger()).toHaveLength(1);
+    expect(agent.ledger()[0].outcome).toBe('error');
+    expect(agent.ledger()[0].fieldsSent.length).toBeGreaterThan(0);
   });
 });

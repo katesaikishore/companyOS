@@ -15,7 +15,7 @@ import {
 import { join } from 'node:path';
 import type { AppUsageView, SuggestionView, TwinStatus } from '@companyos/twin-core';
 import { CaptureService } from './capture';
-import { destroyDataKey, loadApiKey, loadOrCreateDataKey, saveApiKey } from './keys';
+import { destroyStoredSecrets, loadApiKey, loadOrCreateDataKey, saveApiKey } from './keys';
 import { choosePlatform, type Platform } from './platform';
 
 export interface RuntimeOptions {
@@ -73,6 +73,8 @@ export class TwinRuntime {
   }
 
   start(): void {
+    // Retention is enforced at launch as well as daily, so an app restarted more often than once a day still prunes.
+    this.agent.prune();
     this.capture.start();
     setInterval(() => this.agent.prune(), 24 * 60 * 60 * 1000).unref();
   }
@@ -179,6 +181,6 @@ export class TwinRuntime {
   deleteAll(): void {
     this.stop();
     this.agent.wipe();
-    destroyDataKey(this.options.userData);
+    destroyStoredSecrets(this.options.userData);
   }
 }

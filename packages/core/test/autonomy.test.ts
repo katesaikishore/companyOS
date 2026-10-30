@@ -88,3 +88,18 @@ describe('demotion and manual levels', () => {
     expect(() => setLevel(readyState(), 3, { maxLevel: 2, allowUnattended: false })).toThrow(/maximum/);
   });
 });
+
+describe('failure history', () => {
+  it('a failed run in the window blocks promotion until the window is clean', () => {
+    const runs = [...Array.from({ length: 30 }, () => run()), run({ status: 'failed', postconditionsPassed: 3, postconditionsFailed: 1 })];
+    const check = promotionCheck({ ...readyState(), runs }, NOW, config);
+    expect(check.eligible).toBe(false);
+    expect(check.reasons.join(' ')).toMatch(/failed/);
+  });
+
+  it('a demoted automation cannot be promoted straight back', () => {
+    const demoted = recordRun({ ...readyState(), level: 4 }, run({ status: 'failed', postconditionsPassed: 0, postconditionsFailed: 1 }));
+    expect(demoted.level).toBe(3);
+    expect(() => promote(demoted, NOW, config)).toThrow(/failed/);
+  });
+});

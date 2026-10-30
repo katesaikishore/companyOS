@@ -68,13 +68,16 @@ export class CaptureService {
     const platform = this.deps.platform;
     if (!platform) return;
 
+    // Pause and lock stop everything, including idle bookkeeping. Nothing is recorded while they are on.
+    if (this.paused || this.locked) return;
+
     const ts = this.now();
     const idle = this.deps.idleSeconds() >= IDLE_THRESHOLD_SECONDS;
     if (idle !== this.idle) {
       this.idle = idle;
       this.deps.agent.ingest({ kind: idle ? 'idle_start' : 'idle_end', ts });
     }
-    if (this.paused || this.locked || this.idle) return;
+    if (this.idle) return;
 
     let app: string | undefined;
     try {
@@ -84,6 +87,8 @@ export class CaptureService {
       this.detail = 'Could not read the active app. Retrying.';
       return;
     }
+    // The poll can take a second, so the state may have changed while it ran. Check again before storing.
+    if (this.paused || this.locked || this.idle) return;
     if (!app || app === this.lastApp || isOwnApp(app)) return;
 
     this.lastApp = app;

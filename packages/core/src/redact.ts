@@ -2,11 +2,13 @@ import { createHmac, randomUUID } from 'node:crypto';
 import { classifyApp, isExcludedApp, normalizeAppName } from './classify';
 import { RawSignalSchema, type TwinEvent } from './types';
 
-/** Path segments that look like identifiers are replaced by :id. Over-redacting is the safe failure. */
-const ID_LIKE =
-  /^(\d+|[0-9a-f]{8,}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[A-Za-z0-9_-]{16,}|[^/]+@[^/]+\.[^/]+)$/i;
+/** The first path segment is kept only when it is a plain lowercase word, such as "doc" or "wiki". */
+const PLAIN_WORD = /^[a-z]{1,12}$/;
 
-/** Keeps host and path shape only. Query, fragment and credentials are dropped. */
+/**
+ * Keeps the host and the first path segment, and nothing else. Later segments are where names, ids and
+ * titles tend to live (for example "/in/jane-doe"), so they are never stored.
+ */
 export function templateUrl(raw: string): string | undefined {
   let url: URL;
   try {
@@ -15,11 +17,9 @@ export function templateUrl(raw: string): string | undefined {
     return undefined;
   }
   if (url.protocol !== 'https:' && url.protocol !== 'http:') return undefined;
-  const segments = url.pathname
-    .split('/')
-    .filter(Boolean)
-    .map(segment => (ID_LIKE.test(segment) ? ':id' : segment));
-  return [url.hostname.toLowerCase(), ...segments].join('/');
+  const first = url.pathname.split('/').find(Boolean);
+  const shape = first === undefined ? '' : `/${PLAIN_WORD.test(first) ? first : ':id'}`;
+  return `${url.hostname.toLowerCase()}${shape}`;
 }
 
 /** Keyed, deterministic pseudonyms. Used wherever data leaves the store (cloud traces, aggregates). */
@@ -36,12 +36,14 @@ export class Pseudonymizer {
 
 export interface NormalizeOptions {
   excludedApps: readonly string[];
+  /** Off by default: browser private windows cannot be detected yet, so browser focus is not recorded. */
+  watchBrowsers: boolean;
   newId?: () => string;
 }
 
 /**
  * Turns one raw capture signal into a stored event, or returns null when the signal must be dropped.
- * Secure input, private windows and excluded apps never produce an event.
+ * Secure input, private windows, excluded apps and (unless enabled) browsers never produce an event.
  */
 export function normalizeSignal(input: unknown, options: NormalizeOptions): TwinEvent | null {
   const signal = RawSignalSchema.parse(input);
@@ -54,6 +56,8 @@ export function normalizeSignal(input: unknown, options: NormalizeOptions): Twin
 
   if (!signal.app || isExcludedApp(signal.app, options.excludedApps)) return null;
   const windowClass = classifyApp(signal.app);
+  if (windowClass === 'browser' && !options.watchBrowsers) return null;
+
   const urlTemplate = signal.url && windowClass === 'browser' ? templateUrl(signal.url) : undefined;
   return {
     id,

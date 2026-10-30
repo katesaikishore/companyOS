@@ -26,7 +26,7 @@ const ctx = (overrides: Partial<PolicyContext> = {}): PolicyContext => ({
 
 function compiled(): Automation {
   const events: TwinEvent[] = workdays(10)
-    .map((signal, index) => normalizeSignal(signal, { excludedApps: EXCLUDED, newId: () => `e${index}` }))
+    .map((signal, index) => normalizeSignal(signal, { excludedApps: EXCLUDED, watchBrowsers: true, newId: () => `e${index}` }))
     .filter((event): event is TwinEvent => event !== null);
   const routine = mineRoutines(segment(events, 60 * 60_000)).find(r => r.steps.length === 4);
   if (!routine) throw new Error('fixture routine not found');
@@ -152,5 +152,27 @@ describe('runAutomation', () => {
       executor,
     );
     expect(result.status).toBe('blocked');
+  });
+});
+
+describe('run safety', () => {
+  it('checks parameter values before the first step, so a bad value runs nothing', async () => {
+    const executor = fakeExecutor(() => undefined);
+    await expect(
+      runAutomation(compiled(), { mode: 'supervised', policy: ctx(), values: { p0: 'rm -rf' }, approve: async () => true }, executor),
+    ).rejects.toThrow(/not an observed option/);
+    expect(executor.focus).not.toHaveBeenCalled();
+  });
+
+  it('treats an executor error as a failed step, not an exception', async () => {
+    const executor: Executor = {
+      focusApp: async () => {
+        throw new Error('Command failed: powershell.exe -EncodedCommand ...');
+      },
+      frontmostApp: async () => undefined,
+    };
+    const result = await runAutomation(compiled(), { mode: 'supervised', policy: ctx(), approve: async () => true }, executor);
+    expect(result.status).toBe('failed');
+    expect(result.steps.at(-1)?.reason).toBe('The app could not be focused.');
   });
 });

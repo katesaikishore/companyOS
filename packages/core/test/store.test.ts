@@ -81,3 +81,14 @@ describe('EncryptedStore', () => {
     expect(() => new EncryptedStore(freshDir(), randomBytes(16))).toThrow(/32 bytes/);
   });
 });
+
+describe('crash recovery', () => {
+  it('cuts a torn tail so the next record starts on a fresh line', () => {
+    const dir = freshDir();
+    const store = new EncryptedStore(dir, randomBytes(32));
+    store.append('events', { a: 1 });
+    appendFileSync(join(dir, 'events.log'), 'QUJDREVG');
+    store.append('events', { a: 2 });
+    expect(store.readAll('events')).toEqual([{ a: 1 }, { a: 2 }]);
+  });
+});

@@ -16,6 +16,10 @@ export class SecureStorageUnavailableError extends Error {
  */
 async function requireSecureStorage(): Promise<void> {
   if (!(await safeStorage.isAsyncEncryptionAvailable())) throw new SecureStorageUnavailableError();
+  // Without a keyring, Electron on Linux falls back to a fixed key built into Chromium. That is obfuscation, not protection.
+  // COMPANYOS_TEST_BASIC_STORE=1 exists only so the headless smoke test can run; never set it for real data.
+  const basic = process.platform === 'linux' && safeStorage.getSelectedStorageBackend() === 'basic_text';
+  if (basic && process.env.COMPANYOS_TEST_BASIC_STORE !== '1') throw new SecureStorageUnavailableError();
 }
 
 async function readSealed(path: string): Promise<Buffer | undefined> {
@@ -40,8 +44,10 @@ export async function loadOrCreateDataKey(userData: string): Promise<Buffer> {
   return key;
 }
 
-export function destroyDataKey(userData: string): void {
+/** Removes every sealed secret. Without the data key the stored records are unreadable. */
+export function destroyStoredSecrets(userData: string): void {
   rmSync(join(userData, 'data-key.bin'), { force: true });
+  rmSync(join(userData, 'api-key.bin'), { force: true });
 }
 
 export async function loadApiKey(userData: string): Promise<string | undefined> {

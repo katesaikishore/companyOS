@@ -11,6 +11,8 @@ const { _electron: electron } = require('playwright');
   const app = await electron.launch({
     executablePath: require('electron'),
     args: [path.join(__dirname, '..'), '--no-sandbox', '--password-store=basic'],
+    // Headless Linux has no keyring. This test-only switch lets the app start with Electron's basic store.
+    env: { ...process.env, COMPANYOS_TEST_BASIC_STORE: '1' },
     timeout: 60_000,
   });
   try {

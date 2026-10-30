@@ -1,5 +1,18 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  closeSync,
+  existsSync,
+  fstatSync,
+  ftruncateSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 
 export const COLLECTIONS = ['events', 'ledger', 'automations', 'autonomy', 'settings'] as const;
@@ -26,7 +39,44 @@ export class EncryptedStore {
   }
 
   append(collection: Collection, record: unknown): void {
-    appendFileSync(this.fileFor(collection), `${this.seal(collection, JSON.stringify(record))}\n`, { mode: 0o600 });
+    const path = this.fileFor(collection);
+    this.repairTornTail(path);
+    appendFileSync(path, `${this.seal(collection, JSON.stringify(record))}\n`, { mode: 0o600 });
+  }
+
+  /**
+   * A crash during append can leave a partial record with no newline. Appending after it would glue two
+   * records into one unreadable line, so the partial bytes are cut back to the last complete line first.
+   * Only the bytes after the last newline are touched, so this stays cheap on large logs.
+   */
+  private repairTornTail(path: string): void {
+    if (!existsSync(path)) return;
+    const fd = openSync(path, 'r+');
+    try {
+      const size = fstatSync(fd).size;
+      if (size === 0) return;
+      const last = Buffer.alloc(1);
+      readSync(fd, last, 0, 1, size - 1);
+      if (last[0] === 0x0a) return;
+
+      const chunk = Buffer.alloc(4096);
+      let end = size;
+      let cut = 0;
+      while (end > 0) {
+        const start = Math.max(0, end - chunk.length);
+        const length = end - start;
+        readSync(fd, chunk, 0, length, start);
+        const index = chunk.subarray(0, length).lastIndexOf(0x0a);
+        if (index >= 0) {
+          cut = start + index + 1;
+          break;
+        }
+        end = start;
+      }
+      ftruncateSync(fd, cut);
+    } finally {
+      closeSync(fd);
+    }
   }
 
   readAll<T = unknown>(collection: Collection): T[] {

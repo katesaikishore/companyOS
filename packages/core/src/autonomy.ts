@@ -82,6 +82,8 @@ export function promotionCheck(
   }
 
   if (recent.some(run => run.reverted)) reasons.push('A run in the window was reverted.');
+  // A failure is not forgiven by a later promote(). The window must be clean, so a demotion has to be re-earned.
+  if (recent.some(run => run.status === 'failed')) reasons.push('A run in the window failed.');
   return { eligible: reasons.length === 0, reasons, passRate };
 }
 

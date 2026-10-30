@@ -1,6 +1,7 @@
 import { normalizeAppName } from './classify';
 import { resolveStep, type Automation, type Step } from './automation';
 import { evaluateStep, type Decision, type PolicyContext } from './policy';
+import type { AutonomyLevel } from './types';
 
 /** The only side-effecting surface the runner touches. Tests supply a fake; the desktop app supplies the OS. */
 export interface Executor {
@@ -31,6 +32,8 @@ export interface RunRequest {
   mode: RunMode;
   values?: Readonly<Record<string, string>>;
   policy: PolicyContext;
+  /** Read before every step, so a level change made during the run (a kill switch) takes effect at once. */
+  currentLevel?: () => AutonomyLevel;
   /** Called only for steps the policy marks 'ask', and only in supervised mode. */
   approve?: (step: Step, decision: Decision) => Promise<boolean>;
 }
@@ -42,11 +45,13 @@ function sameApp(observed: string | undefined, expected: string): boolean {
 /**
  * Runs an automation step by step. Dry runs never call the executor and show what would happen
  * at the next level up. Any denied step, refused approval, failed action or failed postcondition
- * stops the run.
+ * stops the run. Parameter values are checked before the first step, so a bad value runs nothing.
  */
 export async function runAutomation(automation: Automation, request: RunRequest, executor: Executor): Promise<RunResult> {
-  const steps: StepRecord[] = [];
   const values = request.values ?? {};
+  const resolved = automation.steps.map(template => resolveStep(template, automation.params, values));
+
+  const steps: StepRecord[] = [];
   let passed = 0;
   let failed = 0;
 
@@ -57,8 +62,7 @@ export async function runAutomation(automation: Automation, request: RunRequest,
     postconditionsFailed: failed,
   });
 
-  for (const [index, template] of automation.steps.entries()) {
-    const step = resolveStep(template, automation.params, values);
+  for (const [index, step] of resolved.entries()) {
     const record = (outcome: StepOutcome, reason: string): void => {
       steps.push({ index, op: step.op, app: step.app, outcome, reason });
     };
@@ -70,7 +74,9 @@ export async function runAutomation(automation: Automation, request: RunRequest,
       continue;
     }
 
-    const decision = evaluateStep(step, { ...request.policy, unattended: request.mode === 'unattended' });
+    const level = request.currentLevel ? request.currentLevel() : request.policy.level;
+    const policy = { ...request.policy, level, unattended: request.mode === 'unattended' };
+    const decision = evaluateStep(step, policy);
     if (decision.decision === 'deny') {
       record('blocked', decision.reason);
       return finish('blocked');
@@ -84,7 +90,12 @@ export async function runAutomation(automation: Automation, request: RunRequest,
     }
 
     if (step.op === 'focus_app') {
-      const ok = await executor.focusApp(step.app);
+      let ok = false;
+      try {
+        ok = await executor.focusApp(step.app);
+      } catch {
+        ok = false; // A thrown error is an ordinary failure. Its text may contain paths or scripts, so it is not kept.
+      }
       if (!ok) {
         record('failed', 'The app could not be focused.');
         return finish('failed');
@@ -93,7 +104,12 @@ export async function runAutomation(automation: Automation, request: RunRequest,
       continue;
     }
 
-    const front = await executor.frontmostApp();
+    let front: string | undefined;
+    try {
+      front = await executor.frontmostApp();
+    } catch {
+      front = undefined;
+    }
     if (sameApp(front, step.app)) {
       passed++;
       record('passed', 'Expected app is in front.');

@@ -80,14 +80,25 @@ function registerIpc(): void {
   });
 
   handle(IPC.exportData, async () => {
+    // Shown before the save dialog: the save dialog's own message is macOS-only, so it cannot carry this warning everywhere.
+    const warning: MessageBoxOptions = {
+      type: 'warning',
+      buttons: ['Export anyway', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      message: 'The export is not encrypted',
+      detail: 'It lists every app switch the twin recorded, with timestamps, and any URL shapes. Keep it somewhere private, and do not put it in a synced folder.',
+    };
+    const parent = parentWindow();
+    const warned = parent ? await dialog.showMessageBox(parent, warning) : await dialog.showMessageBox(warning);
+    if (warned.response !== 0) return '';
+
     const data = requireRuntime().exportData();
     const options: SaveDialogOptions = {
       title: 'Export your twin data',
       defaultPath: 'companyos-twin-export.json',
       filters: [{ name: 'JSON', extensions: ['json'] }],
-      message: 'The export is not encrypted. Keep it somewhere safe.',
     };
-    const parent = parentWindow();
     const result = parent ? await dialog.showSaveDialog(parent, options) : await dialog.showSaveDialog(options);
     if (result.canceled || !result.filePath) return '';
     writeFileSync(result.filePath, data, { mode: 0o600 });
@@ -101,7 +112,7 @@ function registerIpc(): void {
       defaultId: 1,
       cancelId: 1,
       message: 'Delete everything the twin knows about you?',
-      detail: 'This removes all events, automations and the ledger on this device. It cannot be undone.',
+      detail: 'This removes all events, automations, the cloud ledger and the stored Claude API key on this device. It cannot be undone.',
     };
     const parent = parentWindow();
     const choice = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
@@ -203,12 +214,11 @@ async function boot(): Promise<void> {
       idleSeconds: () => powerMonitor.getSystemIdleTime(),
     });
   } catch (error) {
-    if (error instanceof SecureStorageUnavailableError) {
-      dialog.showErrorBox('companyOS Twin cannot start', error.message);
-      app.quit();
-      return;
-    }
-    throw error;
+    // Any failure at startup, including a damaged key file, ends visibly. A silent process with no window is worse.
+    const detail = error instanceof SecureStorageUnavailableError ? error.message : 'The stored key could not be opened. Check the twin folder or reset it from another start.';
+    dialog.showErrorBox('companyOS Twin cannot start', detail);
+    app.quit();
+    return;
   }
 
   runtime.start();
@@ -228,5 +238,8 @@ if (!app.requestSingleInstanceLock()) {
     quitting = true;
     runtime?.stop();
   });
-  void app.whenReady().then(boot);
+  void app.whenReady().then(boot).catch(error => {
+    dialog.showErrorBox('companyOS Twin cannot start', error instanceof Error ? error.message : 'Unknown error.');
+    app.quit();
+  });
 }

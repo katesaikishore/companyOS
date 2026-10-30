@@ -47,7 +47,11 @@ const macOS: Platform = {
     return name || undefined;
   },
   async focus(app) {
-    return (await run('osascript', ['-l', 'JavaScript', '-e', MAC_FOCUS, app])) === 'ok';
+    try {
+      return (await run('osascript', ['-l', 'JavaScript', '-e', MAC_FOCUS, app])) === 'ok';
+    } catch {
+      return false;
+    }
   },
 };
 
@@ -83,7 +87,11 @@ const windows: Platform = {
   },
   async focus(app) {
     const env = { ...process.env, TWIN_APP: app };
-    return (await run('powershell.exe', [...POWERSHELL, encode(WIN_FOCUS)], env)) === 'ok';
+    try {
+      return (await run('powershell.exe', [...POWERSHELL, encode(WIN_FOCUS)], env)) === 'ok';
+    } catch {
+      return false; // Exit code 2 means the app is not running. Errors carry the command text, so they are not surfaced.
+    }
   },
 };
 
@@ -100,8 +108,12 @@ const linuxX11: Platform = {
     return className || undefined;
   },
   async focus(app) {
-    await run('xdotool', ['search', '--onlyvisible', '--class', `^${escapeRegex(app)}$`, 'windowactivate', '--sync']);
-    return true;
+    try {
+      await run('xdotool', ['search', '--onlyvisible', '--class', `^${escapeRegex(app)}$`, 'windowactivate', '--sync']);
+      return true;
+    } catch {
+      return false;
+    }
   },
 };
 
