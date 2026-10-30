@@ -69,11 +69,14 @@ export interface DownloadState {
 /** A network call the twin made. Recorded so the person can see exactly what left the device. */
 export interface NetworkEntry {
   ts: number;
-  purpose: 'model_download';
-  modelId: string;
+  purpose: 'model_download' | 'update_check';
+  /** Model downloads only. */
+  modelId?: string;
   host: string;
   path: string;
+  /** Bytes received. An update check records zero, since electron-updater does not report the channel file's size. */
   bytes: number;
-  sha256Verified: boolean;
+  /** Model downloads only. An update check has no checksum to verify. */
+  sha256Verified?: boolean;
   outcome: 'ok' | 'failed' | 'cancelled';
 }

@@ -7,30 +7,48 @@ directories:
 files:
   - dist/**/*
   - package.json
+  # The tray and window icons are read from these PNGs at run time (src/main/icon.ts).
+  - build/icons/*.png
 asar: true
 # The encrypted store's native module (better-sqlite3-multiple-ciphers) ships Node-API prebuilds for every platform,
 # so it runs unchanged in Electron. A rebuild would compile the bundled SQLite from source for no benefit.
 npmRebuild: false
-# Unsigned local builds are fine for development. Release builds need signing identities in CI secrets:
-#   macOS:   CSC_LINK, CSC_KEY_PASSWORD, APPLE_API_KEY, APPLE_API_KEY_ID, APPLE_API_ISSUER
-#   Windows: WIN_CSC_LINK, WIN_CSC_KEY_PASSWORD (or Azure Artifact Signing)
+# Code signing is off unless a certificate is configured in the environment. No secret or password lives in this file.
+# Set these in CI (or locally) to sign and notarise:
+#   macOS, signing:       CSC_LINK (a .p12 file or its base64 text), CSC_KEY_PASSWORD
+#   macOS, notarisation:  APPLE_API_KEY (path to the .p8 key), APPLE_API_KEY_ID, APPLE_API_ISSUER,
+#                         or APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID. Notarisation runs only when one set is complete.
+#   Windows, signing:     WIN_CSC_LINK, WIN_CSC_KEY_PASSWORD (Azure Artifact Signing is not configured yet)
+# Local builds (npm run dist, npm run dist:dir) go through scripts/package.mjs, which keeps auto-discovery off, so a
+# keychain identity is used only when CSC_LINK, CSC_NAME or WIN_CSC_LINK is set.
+# Icons: build/icon.icns, build/icon.ico and build/icons/*.png come from scripts/make-icons.mjs.
+# Auto-update: the placeholder feed below does not resolve, and no feed exists yet. A packaged build checks the feed in
+# COMPANYOS_UPDATE_URL when that variable is set (src/main/updater.ts). It checks nothing otherwise.
+publish:
+  provider: generic
+  url: https://updates.companyos.invalid/twin
 mac:
   category: public.app-category.productivity
+  icon: build/icon.icns
   target:
     - dmg
     - zip
   hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
     # macOS shows this text when the twin first asks to see the frontmost app through System Events.
     NSAppleEventsUsageDescription: companyOS Twin asks macOS which app is in front, so it can understand your routines on this device.
 win:
+  icon: build/icon.ico
   target:
     - nsis
+  signAndEditExecutable: true
 linux:
+  icon: build/icons
   category: Utility
   maintainer: companyOS <packages@companyos.invalid>
   description: Private, employee-owned work twin.
   target:
-    - AppImage
     - deb
     - rpm

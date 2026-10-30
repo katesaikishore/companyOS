@@ -1,0 +1,121 @@
+name: release
+
+# Builds the installers when a version tag such as v0.2.0 is pushed. Each platform signs only when its certificate
+# secret exists, and otherwise builds unsigned. Nothing here publishes a release: installers and the update files that
+# electron-updater reads (latest*.yml and *.blockmap) are uploaded as workflow artifacts. Secrets are referenced by
+# name only and never stored in the repository (see electron-builder.yml).
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: package (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      # electron-builder must not pick up a certificate that happens to be on the runner.
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Check the tag matches the desktop version
+        shell: bash
+        run: |
+          version="$(node -p "require('./apps/desktop/package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "The tag $GITHUB_REF_NAME does not match apps/desktop/package.json version $version."
+            exit 1
+          fi
+
+      - name: Install (also downloads the Electron binary)
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests (core engine and desktop)
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Install rpm tooling (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm
+
+      - name: Load the macOS notarisation key (only when its secrets exist)
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          if [ -z "$APPLE_API_KEY_P8" ] || [ -z "$APPLE_API_KEY_ID" ] || [ -z "$APPLE_API_ISSUER" ]; then
+            echo "Notarisation: skipped, the App Store Connect secrets are not set."
+            exit 0
+          fi
+          key="$RUNNER_TEMP/AuthKey_$APPLE_API_KEY_ID.p8"
+          printf '%s' "$APPLE_API_KEY_P8" > "$key"
+          {
+            echo "APPLE_API_KEY=$key"
+            echo "APPLE_API_KEY_ID=$APPLE_API_KEY_ID"
+            echo "APPLE_API_ISSUER=$APPLE_API_ISSUER"
+          } >> "$GITHUB_ENV"
+          echo "Notarisation: enabled."
+
+      - name: Package macOS (signed only when CSC_LINK is set)
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: |
+          if [ -n "$CSC_LINK" ]; then echo "Signing: a certificate is set."; else echo "Signing: no certificate, building unsigned."; fi
+          npm run dist -w @companyos/desktop
+
+      - name: Package Windows (signed only when WIN_CSC_LINK is set)
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: |
+          if [ -n "$WIN_CSC_LINK" ]; then echo "Signing: a certificate is set."; else echo "Signing: no certificate, building unsigned."; fi
+          npm run dist -w @companyos/desktop
+
+      - name: Package Linux (unsigned)
+        if: runner.os == 'Linux'
+        run: npm run dist -w @companyos/desktop
+
+      # Per platform, electron-updater reads latest-mac.yml with the zip (and its blockmap), latest.yml with the NSIS
+      # installer (and its blockmap), or latest-linux.yml with the deb and rpm. The dmg is for a manual install only.
+      - name: Upload installers and update files
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ runner.os }}
+          path: |
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.zip
+            apps/desktop/release/*.exe
+            apps/desktop/release/*.deb
+            apps/desktop/release/*.rpm
+            apps/desktop/release/*.blockmap
+            apps/desktop/release/latest*.yml
+          if-no-files-found: error

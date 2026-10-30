@@ -8,17 +8,20 @@
     "build": "tsc -p tsconfig.main.json && tsc -p tsconfig.renderer.json && node scripts/copy-assets.mjs",
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
     "start": "electron .",
-    "dist": "electron-builder --publish never",
-    "dist:dir": "electron-builder --dir --publish never",
+    "dist": "node scripts/package.mjs --publish never",
+    "dist:dir": "node scripts/package.mjs --dir --publish never",
+    "icons": "node scripts/make-icons.mjs",
+    "test": "vitest run",
     "test:e2e": "node test/e2e.cjs"
   },
   "devDependencies": {
+    "@types/cross-spawn": "^6.0.6",
     "electron": "45.1.0",
     "electron-builder": "^26.18.0",
-    "typescript": "^5.9.3",
-    "@types/cross-spawn": "^6.0.6"
+    "typescript": "^5.9.3"
   },
   "dependencies": {
-    "cross-spawn": "^7.0.6"
+    "cross-spawn": "^7.0.6",
+    "electron-updater": "^6.8.10"
   }
 }

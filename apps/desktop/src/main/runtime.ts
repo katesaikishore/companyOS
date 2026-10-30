@@ -15,6 +15,7 @@ import {
   type DraftStep,
   type Executor,
   type HardwareProfile,
+  type NetworkEntry,
   type RunResult,
   type SetupPlan,
   type Step,
@@ -141,6 +142,11 @@ export class TwinRuntime {
 
   completeSetup(): void {
     this.agent.completeSetup();
+  }
+
+  /** Update checks are written to the same network ledger as model downloads. */
+  recordNetworkCall(entry: NetworkEntry): void {
+    this.agent.recordNetworkCall(entry);
   }
 
   status(): TwinStatus {
