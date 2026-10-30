@@ -1,42 +1,76 @@
-import type { AutomationView, TwinStatus } from '@companyos/twin-core';
+import type { AutomationView, DraftStep, SuggestionView, TwinStatus } from '@companyos/twin-core';
 import { h, type Child } from '../dom.js';
-import { button, fact, levelMeter, panel, panelHead, emptyState } from '../components/ui.js';
-import { DAY_MS, formatBytes, formatHours, formatRate, percent, plural } from '../format.js';
-import { appsSummary, captureTitle, levelLabel } from '../labels.js';
-import { call, go, state } from '../store.js';
+import { button, emptyState, levelMeter } from '../components/ui.js';
+import { formatBytes, formatRate, percent, plural } from '../format.js';
+import { appsSummary, captureTitle, LEVEL_NAMES, levelLabel } from '../labels.js';
+import {
+  heroLede,
+  hoursBack,
+  ladderCounts,
+  lastSeenLabel,
+  networkCallsThisWeek,
+  readyTitle,
+  RHYTHM_DAYS,
+  RHYTHM_HOURS,
+  rhythmLevels,
+  routineApps,
+  routineEvidence,
+} from '../overview-model.js';
+import { call, go, pending, state } from '../store.js';
 
-const HOURS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
-const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const APP_PATTERN_REVIEW_THRESHOLD = 0.8;
 
 export function overviewView(status: TwinStatus): HTMLElement {
   const { stats, automations, suggestions, network } = status;
-  const weekAgo = Date.now() - 7 * DAY_MS;
-  const callsThisWeek = network.filter(entry => entry.ts >= weekAgo).length;
   return h(
     'div',
-    { class: 'stack', 'data-testid': 'view-overview' },
+    { class: 'ov-page', 'data-testid': 'view-overview' },
+    overviewTop(status),
     overviewHero(status),
-    stats.routinesLearned === 0 ? learningPanel(status) : undefined,
+    statsRow(status),
     h(
-      'section',
-      { class: 'stat-grid', 'data-testid': 'overview-stats', 'aria-label': 'Summary' },
-      statCard('Routines learned', String(stats.routinesLearned), 'Detected or accepted'),
-      statCard('Waiting for you', String(stats.waiting), 'Suggestions and drafts'),
-      statCard('Unattended ready', String(stats.unattendedReady), 'Level 4 · local and reversible'),
-      statCard('Time back', formatHours(stats.minutesBackPerWeek), 'Estimate per week, from automations you kept'),
+      'div',
+      { class: 'ov-split' },
+      h(
+        'div',
+        { class: 'ov-main' },
+        stats.routinesLearned === 0 ? learningPanel(status) : undefined,
+        waitingPanel(suggestions),
+        routinesPanel(automations, suggestions.length),
+        usagePanel(status.usage),
+      ),
+      h(
+        'div',
+        { class: 'ov-side' },
+        heatmapPanel(status.activity),
+        devicePanel(status, networkCallsThisWeek(network, Date.now())),
+      ),
+    ),
+  );
+}
+
+function overviewTop(status: TwinStatus): HTMLElement {
+  const captured = status.capture.state;
+  return h(
+    'div',
+    { class: 'ov-top' },
+    h(
+      'nav',
+      { class: 'ov-crumb', 'aria-label': 'Breadcrumb' },
+      h('span', null, 'Twin'),
+      h('span', { 'aria-hidden': 'true' }, '/'),
+      h('span', { class: 'ov-crumb-current', 'aria-current': 'page' }, 'Overview'),
     ),
     h(
       'div',
-      { class: 'split' },
-      routinesPanel(automations, suggestions.length),
+      { class: 'ov-top-pills' },
       h(
-        'div',
-        { class: 'stack' },
-        heatmapPanel(status.activity),
-        usagePanel(status.usage),
-        devicePanel(status.storageBytes, callsThisWeek),
+        'span',
+        { class: captured === 'paused' ? 'ov-pill ov-capture-paused' : 'ov-pill', 'data-testid': 'overview-capture-state' },
+        h('span', { class: `dot dot-${captured}`, 'aria-hidden': 'true' }),
+        captureTitle(captured),
       ),
+      h('span', { class: 'ov-pill mono' }, 'Encrypted · OS keychain'),
     ),
   );
 }
@@ -45,44 +79,225 @@ function overviewHero(status: TwinStatus): HTMLElement {
   const { suggestions, automations } = status;
   const primary =
     suggestions.length > 0
-      ? button(`Review ${plural(suggestions.length, 'suggestion')}`, {
-          variant: 'primary',
-          onClick: () => go('#/suggestions'),
-        })
+      ? button(`Review ${plural(suggestions.length, 'suggestion')}`, { variant: 'primary', onClick: () => go('#/suggestions') }, 'ov-cta')
       : automations.length > 0
-        ? button('View automations', { variant: 'primary', onClick: () => go('#/automations') })
+        ? button('View automations', { variant: 'primary', onClick: () => go('#/automations') }, 'ov-cta')
         : undefined;
-  const summary =
-    status.recordedFocusEvents > 0
-      ? `${plural(status.recordedFocusEvents, 'app switch')} observed over ${status.stats.observedDays} days. ` +
-        'Your data stays encrypted on this device.'
-      : 'Learn repeated work patterns from app names and timing. Your activity stays encrypted on this device.';
 
   return h(
     'header',
-    { class: 'overview-hero' },
+    { class: 'ov-hero' },
     h(
       'div',
-      { class: 'overview-hero-copy' },
-      h('span', { class: 'eyebrow hero-eyebrow' }, 'PRIVATE WORK TWIN'),
-      h('h1', { class: 'page-title' }, 'Your twin'),
-      h('p', { class: 'page-sub' }, summary),
+      { class: 'ov-hero-copy' },
+      h('span', { class: 'ov-eyebrow' }, 'PRIVATE WORK TWIN'),
+      h('h1', { class: 'ov-title' }, readyTitle(suggestions.length)),
+      h('p', { class: 'ov-lede' }, heroLede(status.recordedFocusEvents, status.stats.observedDays)),
+      h('div', { class: 'ov-hero-actions' },
+        primary,
+        button('Open network ledger', { onClick: () => go('#/ledger') }, 'ov-cta-quiet'),
+      ),
+    ),
+    ladderCard(automations),
+  );
+}
+
+function ladderCard(automations: readonly AutomationView[]): HTMLElement {
+  const counts = ladderCounts(automations);
+  const most = Math.max(0, ...counts);
+  return h(
+    'section',
+    { class: 'ov-ladder', 'aria-labelledby': 'ladder-title' },
+    h(
+      'div',
+      { class: 'ov-ladder-head' },
+      h('h2', { class: 'ov-ladder-title', id: 'ladder-title' }, 'Autonomy ladder'),
+      h('span', { class: 'ov-ladder-tag mono' }, 'earned, never assumed'),
+    ),
+    h('ol', { class: 'ov-ladder-steps' }, ...LEVEL_NAMES.map((name, level) => ladderStep(level, name, counts[level], most))),
+  );
+}
+
+function ladderStep(level: number, name: string, count: number, most: number): HTMLElement {
+  const width = most > 0 ? Math.round((count / most) * 100) : 0;
+  return h(
+    'li',
+    { class: count > 0 ? 'ov-ladder-step is-active' : 'ov-ladder-step' },
+    h('span', { class: 'ov-ladder-code mono' }, `L${level}`),
+    h(
+      'span',
+      { class: 'ov-ladder-body' },
+      h('span', { class: 'ov-ladder-name' }, name),
+      h('span', { class: 'ov-ladder-track', 'aria-hidden': 'true' }, h('span', { class: 'ov-ladder-fill', style: { width: `${width}%` } })),
+    ),
+    h('span', { class: 'ov-ladder-count mono' }, String(count)),
+  );
+}
+
+function statsRow(status: TwinStatus): HTMLElement {
+  const { stats } = status;
+  return h(
+    'section',
+    { class: 'ov-stats', 'data-testid': 'overview-stats', 'aria-label': 'Summary' },
+    statCard({ label: 'Routines learned', value: String(stats.routinesLearned), note: 'Detected or accepted' }),
+    statCard({
+      label: 'Waiting for you',
+      value: String(stats.waiting),
+      note: 'Suggestions and drafts',
+      tag: stats.waiting > 0 ? { text: 'review', review: true } : undefined,
+    }),
+    statCard({ label: 'Unattended ready', value: String(stats.unattendedReady), note: 'Level 4 · local and reversible', tag: { text: 'gated' } }),
+    statCard({ label: 'Time back', value: hoursBack(stats.minutesBackPerWeek), unit: 'h / wk', note: 'From automations you keep', tag: { text: 'estimate' } }),
+  );
+}
+
+interface StatCard {
+  label: string;
+  value: string;
+  unit?: string;
+  note: string;
+  tag?: { text: string; review?: boolean };
+}
+
+function statCard(card: StatCard): HTMLElement {
+  return h(
+    'div',
+    { class: 'ov-stat' },
+    h(
+      'div',
+      { class: 'ov-stat-head' },
+      h('span', { class: 'ov-stat-label' }, card.label),
+      card.tag ? h('span', { class: card.tag.review ? 'ov-stat-tag is-review' : 'ov-stat-tag' }, card.tag.text) : undefined,
     ),
     h(
       'div',
-      { class: 'overview-hero-side' },
+      { class: 'ov-stat-value-row' },
+      h('span', { class: 'ov-stat-value' }, card.value),
+      card.unit ? h('span', { class: 'ov-stat-unit' }, card.unit) : undefined,
+    ),
+    h('span', { class: 'ov-stat-note' }, card.note),
+  );
+}
+
+function waitingPanel(suggestions: readonly SuggestionView[]): HTMLElement {
+  return h(
+    'section',
+    { class: 'ov-card', 'data-testid': 'overview-waiting', 'aria-labelledby': 'waiting-title' },
+    h(
+      'div',
+      { class: 'ov-card-head' },
+      h('h2', { class: 'ov-card-title', id: 'waiting-title' }, 'Waiting for you'),
+      h('span', { class: 'ov-card-note' }, 'Patterns your twin found. Accepting one creates a draft — it runs nothing.'),
+    ),
+    suggestions.length === 0
+      ? emptyState('Nothing to review yet.', 'The twin needs about three days of repetition to notice a routine.')
+      : h('div', { class: 'ov-routine-list' }, ...suggestions.map(routineCard)),
+  );
+}
+
+function routineCard(item: SuggestionView): HTMLElement {
+  const acceptKey = `accept:${item.routineId}`;
+  const dismissKey = `dismiss:${item.routineId}`;
+  const busy = pending(acceptKey) || pending(dismissKey);
+  return h(
+    'article',
+    { class: 'ov-routine', 'data-testid': 'overview-suggestion' },
+    h(
+      'div',
+      { class: 'ov-routine-copy' },
+      h('h3', { class: 'ov-routine-name' }, item.name),
+      h('p', { class: 'ov-routine-evidence' }, routineEvidence(item.support, item.days, item.minutesPerWeek)),
+    ),
+    appChain(item.drafted),
+    h(
+      'div',
+      { class: 'ov-routine-foot' },
+      h('span', { class: 'ov-when mono' }, lastSeenLabel(item.lastSeenAt)),
+      h('span', { class: 'ov-grow', 'aria-hidden': 'true' }),
+      button('Not useful', {
+        variant: 'ghost',
+        disabled: busy,
+        onClick: () => void call(dismissKey, twin => twin.dismissRoutine(item.routineId)),
+      }),
+      button('Accept as draft', {
+        variant: 'primary',
+        disabled: busy,
+        onClick: () => void call(acceptKey, twin => twin.acceptRoutine(item.routineId)),
+      }),
+    ),
+  );
+}
+
+function appChain(steps: readonly DraftStep[]): HTMLElement {
+  return h(
+    'div',
+    { class: 'ov-apps' },
+    ...routineApps(steps).flatMap((step, index) => [
+      index > 0 ? h('span', { class: 'ov-app-arrow', 'aria-hidden': 'true' }, '→') : undefined,
       h(
         'span',
-        { class: `capture-pill capture-pill-${status.capture.state}`, 'data-testid': 'overview-capture-state' },
-        h('span', { class: `dot dot-${status.capture.state}`, 'aria-hidden': 'true' }),
-        captureTitle(status.capture.state),
+        { class: 'ov-app' },
+        h('span', { class: 'ov-app-mark', 'aria-hidden': 'true' }, step.app.charAt(0).toUpperCase()),
+        h('span', null, step.app),
+        step.alternatives > 0
+          ? h('span', { class: 'ov-app-more', title: `${plural(step.alternatives, 'other app')} seen here` }, `+${step.alternatives}`)
+          : undefined,
       ),
-      h(
-        'div',
-        { class: 'actions overview-hero-actions' },
-        button('Network ledger', { onClick: () => go('#/ledger') }),
-        primary,
-      ),
+    ]),
+  );
+}
+
+function routinesPanel(views: readonly AutomationView[], suggestionCount: number): HTMLElement {
+  if (views.length === 0) return noAutomationsCard(suggestionCount);
+  return h(
+    'section',
+    { class: 'ov-card', 'data-testid': 'overview-routines', 'aria-labelledby': 'routines-title' },
+    h(
+      'div',
+      { class: 'ov-card-head' },
+      h('h2', { class: 'ov-card-title', id: 'routines-title' }, 'Your automations'),
+      h('span', { class: 'ov-card-note' }, 'Accepted routines and their autonomy'),
+    ),
+    h('div', { class: 'ov-auto-list' }, ...views.map(routineRow)),
+  );
+}
+
+function noAutomationsCard(suggestionCount: number): HTMLElement {
+  return h(
+    'section',
+    { class: 'ov-card ov-empty-card', 'data-testid': 'overview-routines', 'aria-labelledby': 'auto-title' },
+    h(
+      'div',
+      { class: 'ov-empty-copy' },
+      h('h2', { class: 'ov-card-title', id: 'auto-title' }, 'No automations yet'),
+      h('p', { class: 'ov-card-note' }, 'Accepted routines land here as drafts at L2. Raise one to L3 to run it with one click.'),
+    ),
+    h(
+      'div',
+      { class: 'ov-empty-actions' },
+      suggestionCount > 0 ? button('Review suggestions', { onClick: () => go('#/suggestions') }) : undefined,
+      h('a', { class: 'ov-link', href: '#/automations' }, 'How levels work →'),
+    ),
+  );
+}
+
+function routineRow(view: AutomationView): HTMLElement {
+  const estimate = view.automation.estimate;
+  const level = view.state.level;
+  return h(
+    'div',
+    { class: 'ov-auto-row' },
+    h(
+      'div',
+      { class: 'ov-auto-head' },
+      h('a', { class: 'ov-auto-name', href: `#/automations/${encodeURIComponent(view.automation.id)}` }, view.automation.name),
+      h('span', { class: 'ov-auto-level' }, levelMeter(level), h('span', { class: 'mono small' }, levelLabel(level))),
+    ),
+    h(
+      'div',
+      { class: 'ov-auto-meta' },
+      h('span', { class: 'ov-auto-apps muted small' }, appsSummary(view)),
+      h('span', { class: 'mono small' }, estimate ? `${formatRate(estimate.occurrencesPerWeek)}× / wk` : '—'),
     ),
   );
 }
@@ -125,14 +340,17 @@ function learningPanel(status: TwinStatus): HTMLElement {
           ? 'Waiting for you'
           : 'On this device';
 
-  return panel(
-    { testid: 'overview-learning', extra: 'learning-panel', labelledBy: 'learning-title' },
+  return h(
+    'section',
+    { class: 'ov-card ov-learning', 'data-testid': 'overview-learning', 'aria-labelledby': 'learning-title' },
     h(
       'div',
-      { class: 'learning-head' },
-      h('div', { class: 'learning-copy' },
+      { class: 'ov-learning-head' },
+      h(
+        'div',
+        { class: 'ov-learning-copy' },
         h('span', { class: 'eyebrow' }, 'GETTING STARTED'),
-        h('h2', { class: 'panel-title', id: 'learning-title' }, heading),
+        h('h2', { class: 'ov-card-title', id: 'learning-title' }, heading),
         h('p', { class: 'muted' }, description),
       ),
       paused
@@ -145,13 +363,8 @@ function learningPanel(status: TwinStatus): HTMLElement {
     ),
     h(
       'div',
-      { class: 'learning-steps' },
-      learningStep(
-        '01',
-        'Capture',
-        captureDetail,
-        status.capture.state === 'capturing',
-      ),
+      { class: 'ov-steps' },
+      learningStep('01', 'Capture', captureDetail, status.capture.state === 'capturing'),
       learningStep('02', 'Repeat', 'Follow your normal app sequence', false),
       learningStep('03', 'Review', 'You decide what becomes an automation', false),
     ),
@@ -161,137 +374,32 @@ function learningPanel(status: TwinStatus): HTMLElement {
 function learningStep(number: string, title: string, detail: string, current: boolean): HTMLElement {
   return h(
     'div',
-    { class: current ? 'learning-step is-current' : 'learning-step' },
-    h('span', { class: 'learning-number mono' }, number),
-    h('span', { class: 'learning-step-copy' },
-      h('strong', null, title),
-      h('span', { class: 'muted small' }, detail),
-    ),
-  );
-}
-
-function statCard(label: string, value: string, note: string): HTMLElement {
-  return h(
-    'div',
-    { class: 'card stat' },
-    h('span', { class: 'stat-label' }, label),
-    h('span', { class: 'stat-value' }, value),
-    h('span', { class: 'stat-note' }, note),
-  );
-}
-
-function routinesPanel(views: readonly AutomationView[], suggestionCount: number): HTMLElement {
-  const header: Child = h(
-    'div',
-    { class: 'table-head' },
-    h('span', null, 'Routine'),
-    h('span', null, 'How often'),
-    h('span', null, 'Apps'),
-    h('span', null, 'Autonomy'),
-  );
-  return panel(
-    { testid: 'overview-routines', labelledBy: 'routines-title' },
-    panelHead('Your automations', 'Accepted routines and their autonomy', 'routines-title'),
-    views.length === 0
-      ? suggestionCount > 0
-        ? emptyState(
-            'Turn a suggestion into a draft.',
-            `${plural(suggestionCount, 'routine')} ready for your review. Nothing runs until you raise its level.`,
-            button('Review suggestions', { variant: 'primary', onClick: () => go('#/suggestions') }),
-          )
-        : emptyState(
-            'No automations yet.',
-            'New patterns appear in Suggestions. Accepting one creates a draft here for you to review.',
-          )
-      : h('div', { class: 'table-scroll' }, h('div', { class: 'table' }, header, ...views.map(routineRow))),
-  );
-}
-
-function routineRow(view: AutomationView): HTMLElement {
-  const estimate = view.automation.estimate;
-  const level = view.state.level;
-  return h(
-    'div',
-    { class: 'table-row' },
-    h(
-      'a',
-      { class: 'row-link', href: `#/automations/${encodeURIComponent(view.automation.id)}` },
-      view.automation.name,
-    ),
-    h('span', { class: 'mono small' }, estimate ? `${formatRate(estimate.occurrencesPerWeek)}× / wk` : '—'),
-    h('span', { class: 'muted small' }, appsSummary(view)),
-    h('span', { class: 'autonomy' }, levelMeter(level), h('span', { class: 'mono small' }, levelLabel(level))),
-  );
-}
-
-const DAY_LABELS: readonly string[] = DAYS;
-
-/** Intensity buckets for the timing grid: 0 is empty, 3 is the busiest cell shown. */
-function heatLevels(activity: readonly (readonly number[])[]): { level: number; count: number }[][] {
-  const counts = DAY_LABELS.map((_, day) => HOURS.map(hour => activity[day]?.[hour] ?? 0));
-  const max = Math.max(0, ...counts.flat());
-  return counts.map(row =>
-    row.map(count => {
-      if (count <= 0 || max === 0) return { level: 0, count };
-      const ratio = count / max;
-      if (ratio <= 0.34) return { level: 1, count };
-      if (ratio <= 0.67) return { level: 2, count };
-      return { level: 3, count };
-    }),
-  );
-}
-
-function heatmapPanel(activity: number[][]): HTMLElement {
-  const rows = heatLevels(activity);
-  return panel({ testid: 'overview-heatmap', labelledBy: 'rhythm-title' },
-    h(
-      'div',
-      { class: 'panel-intro' },
-      h('h2', { class: 'panel-title', id: 'rhythm-title' }, 'When your routines happen'),
-      h('span', { class: 'panel-note' }, 'Patterns for timing suggestions. No focus or idle scoring.'),
-    ),
-    h(
-      'div',
-      { class: 'heat', role: 'img', 'aria-label': 'App switches by weekday and hour for the past four weeks' },
-      ...DAY_LABELS.map((day, r) =>
-        h(
-          'div',
-          { class: 'heat-row' },
-          h('span', { class: 'heat-day mono' }, day),
-          ...rows[r].map((cell, c) =>
-            h('span', {
-              class: `heat-cell heat-${cell.level}`,
-              title: `${day} ${HOURS[c]}:00 · ${cell.count} focus switches`,
-              'aria-hidden': 'true',
-            }),
-          ),
-        ),
-      ),
-    ),
-    h(
-      'div',
-      { class: 'heat-axis mono small' },
-      h('span', null, '08:00'),
-      h('span', null, '13:00'),
-      h('span', null, '18:00'),
-    ),
+    { class: current ? 'ov-step is-current' : 'ov-step' },
+    h('span', { class: 'ov-step-number mono' }, number),
+    h('span', { class: 'ov-step-copy' }, h('strong', null, title), h('span', { class: 'muted small' }, detail)),
   );
 }
 
 function usagePanel(usage: TwinStatus['usage']): HTMLElement {
   const top = [...usage].sort((a, b) => b.events - a.events).slice(0, 5);
-  return panel(
-    { testid: 'overview-usage', labelledBy: 'usage-title' },
-    panelHead('Apps you use', 'Top apps · switches from the past 7 days, patterns from the past 30', 'usage-title'),
+  return h(
+    'section',
+    { class: 'ov-card', 'data-testid': 'overview-usage', 'aria-labelledby': 'usage-title' },
+    h(
+      'div',
+      { class: 'ov-card-head' },
+      h('h2', { class: 'ov-card-title', id: 'usage-title' }, 'Apps you use'),
+      h('span', { class: 'ov-card-note' }, 'Top apps · switches from the past 7 days, patterns from the past 30'),
+    ),
     top.length === 0
       ? emptyState('No app activity yet.', 'Your app usage summary stays on this device.')
       : h(
           'div',
-          { class: 'usage-list' },
+          { class: 'ov-usage-list' },
           ...top.map(app => appLearningRow(app)),
           h(
             'p',
-            { class: 'muted small app-learning-note' },
+            { class: 'muted small ov-usage-note' },
             'This repetition-based learning score is not model confidence or task accuracy. At 80%, a pattern is ready for your review—not blanket app access. Sends and external writes still ask; unattended runs must pass each routine’s safety gate.',
           ),
         ),
@@ -303,21 +411,21 @@ function appLearningRow(app: TwinStatus['usage'][number]): HTMLElement {
   const hasPattern = app.patternCount > 0;
   const strongPattern = app.learningScore >= APP_PATTERN_REVIEW_THRESHOLD;
   const evidence = hasPattern
-    ? `${app.patternSupport} observations across ${app.patternDays} ${app.patternDays === 1 ? 'day' : 'days'} · ${plural(app.patternCount, 'pattern')}`
+    ? `${app.patternSupport} observations across ${plural(app.patternDays, 'day')} · ${plural(app.patternCount, 'pattern')}`
     : 'No repeated workflow pattern yet';
   return h(
     'div',
-    { class: 'usage-row app-learning-row' },
+    { class: 'ov-usage-row' },
     h(
       'div',
-      { class: 'usage-meta' },
-      h('span', { class: 'usage-app' }, app.app),
-      h('span', { class: 'mono small muted' }, plural(app.events, 'switch')),
+      { class: 'ov-usage-meta' },
+      h('span', { class: 'ov-usage-app' }, app.app),
+      h('span', { class: 'mono small muted' }, plural(app.events, 'switch', 'switches')),
     ),
     h(
       'div',
       {
-        class: `usage-bar app-learning-bar${strongPattern ? ' is-strong' : ''}`,
+        class: strongPattern ? 'ov-usage-bar is-strong' : 'ov-usage-bar',
         role: 'progressbar',
         'aria-label': `${app.app}: ${score}% repetition-based learning signal. This is not model confidence or automation success rate.`,
         'aria-valuemin': 0,
@@ -328,30 +436,82 @@ function appLearningRow(app: TwinStatus['usage'][number]): HTMLElement {
     ),
     h(
       'div',
-      { class: 'app-learning-foot' },
-      h('span', { class: 'mono small app-learning-score' }, `${percent(app.learningScore)} learning`),
-      h('span', { class: strongPattern ? 'small teal app-learning-status' : 'small muted app-learning-status' },
+      { class: 'ov-usage-foot' },
+      h('span', { class: 'mono small ov-usage-score' }, `${percent(app.learningScore)} learning`),
+      h(
+        'span',
+        { class: strongPattern ? 'small teal ov-usage-status' : 'small muted ov-usage-status' },
         strongPattern ? `Strong · ${evidence}` : evidence,
       ),
     ),
   );
 }
 
-function devicePanel(storageBytes: number, callsThisWeek: number): HTMLElement {
-  return panel({ testid: 'overview-device', labelledBy: 'device-title' },
-    h('h2', { class: 'panel-title', id: 'device-title' }, 'On this device'),
+function heatmapPanel(activity: number[][]): HTMLElement {
+  const rows = rhythmLevels(activity);
+  return h(
+    'section',
+    { class: 'ov-card', 'data-testid': 'overview-heatmap', 'aria-labelledby': 'rhythm-title' },
+    h(
+      'div',
+      { class: 'ov-card-intro' },
+      h('h2', { class: 'ov-card-title', id: 'rhythm-title' }, 'Your weekly rhythm'),
+      h('span', { class: 'ov-card-note' }, 'App switches by weekday and hour, past 4 weeks'),
+    ),
+    h(
+      'div',
+      { class: 'ov-rhythm', role: 'img', 'aria-label': 'App switches by weekday and hour, past four weeks' },
+      ...RHYTHM_DAYS.map((day, r) =>
+        h(
+          'div',
+          { class: 'ov-rhythm-row' },
+          h('span', { class: 'ov-rhythm-day mono' }, day),
+          ...rows[r].map((cell, c) =>
+            h('span', {
+              class: `ov-rhythm-cell ov-cell-${cell.level}`,
+              title: `${day} ${RHYTHM_HOURS[c]}:00 · ${plural(cell.count, 'switch', 'switches')}`,
+              'aria-hidden': 'true',
+            }),
+          ),
+        ),
+      ),
+      h(
+        'div',
+        { class: 'ov-rhythm-axis mono' },
+        h('span', { class: 'ov-axis-start' }, '08:00'),
+        h('span', { class: 'ov-axis-middle' }, '13:00'),
+        h('span', { class: 'ov-axis-end' }, '18'),
+      ),
+    ),
+    h(
+      'div',
+      { class: 'ov-legend' },
+      h('span', null, 'Less'),
+      ...[0, 1, 2, 3].map(level => h('span', { class: `ov-swatch ov-cell-${level}`, 'aria-hidden': 'true' })),
+      h('span', null, 'More'),
+      h('span', { class: 'ov-legend-note' }, 'Timing only, no focus scoring'),
+    ),
+  );
+}
+
+function devicePanel(status: TwinStatus, callsThisWeek: number): HTMLElement {
+  return h(
+    'section',
+    { class: 'ov-card ov-device', 'data-testid': 'overview-device', 'aria-labelledby': 'device-title' },
+    h('h2', { class: 'ov-card-title', id: 'device-title' }, 'On this device'),
     h(
       'dl',
-      { class: 'facts' },
-      fact('Twin store', `Encrypted · ${formatBytes(storageBytes)}`),
-      fact('Key held by', 'You · OS keychain'),
-      fact('Raw events kept', '90 days'),
-      fact(
-        'Network calls this week',
-        h('a', { href: '#/ledger' }, String(callsThisWeek)),
-      ),
-      fact('Shared with employer', 'Nothing (personal mode)'),
+      { class: 'ov-facts' },
+      deviceFact('Twin store', `Encrypted · ${formatBytes(status.storageBytes)}`),
+      deviceFact('Key held by', 'You · OS keychain'),
+      deviceFact('Raw events kept', plural(status.retentionDays, 'day')),
+      deviceFact('Network calls this week', h('a', { href: '#/ledger' }, String(callsThisWeek))),
+      deviceFact('Shared with employer', 'Nothing'),
     ),
-    h('a', { class: 'manage-data-link', href: '#/settings' }, 'Manage privacy and data in Settings →'),
+    h('a', { class: 'ov-device-link', href: '#/settings' }, 'Manage privacy and data →'),
   );
+}
+
+function deviceFact(label: string, value: Child): HTMLElement {
+  return h('div', { class: 'ov-fact' }, h('dt', null, label), h('dd', null, value));
 }

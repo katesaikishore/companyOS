@@ -1,1 +1,825 @@
 /* Overview page. Styles for this page only. Colours come from tokens.css. */
+
+/* The page is a container, so the layout reads its own width rather than the window's. */
+.ov-page {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-width: 0;
+  container-type: inline-size;
+}
+
+/* Top bar: the breadcrumb, then the capture state and the encryption pill. */
+
+.ov-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.ov-crumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.ov-crumb-current {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.ov-top-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.ov-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--ink-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.ov-capture-paused {
+  border-color: var(--warn-bg);
+  background: var(--warn-bg);
+  color: var(--warn-ink);
+}
+
+/* Hero: the dark rail card with the title, the lede, the actions and the autonomy ladder. */
+
+.ov-hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 32px;
+  padding: 36px 40px;
+  border-radius: 20px;
+  background: var(--rail-bg);
+  color: var(--rail-ink);
+  overflow: hidden;
+}
+
+.ov-hero-copy {
+  display: flex;
+  flex: 1 1 380px;
+  flex-direction: column;
+  justify-content: center;
+  gap: 16px;
+  min-width: 0;
+}
+
+.ov-eyebrow {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  color: var(--rail-accent);
+}
+
+.ov-title {
+  margin: 0;
+  font-size: clamp(30px, 3.6vw, 44px);
+  font-weight: 600;
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+  overflow-wrap: anywhere;
+}
+
+.ov-lede {
+  max-width: 520px;
+  font-size: 16px;
+  color: var(--rail-muted);
+}
+
+.ov-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.btn.ov-cta {
+  min-height: 48px;
+  padding: 0 22px;
+  border-color: var(--rail-accent);
+  border-radius: 12px;
+  background: var(--rail-accent);
+  color: var(--rail-bg);
+  font-weight: 600;
+}
+
+.btn.ov-cta-quiet {
+  min-height: 48px;
+  padding: 0 20px;
+  border-color: var(--rail-line);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--rail-ink);
+  font-weight: 500;
+}
+
+.ov-ladder {
+  display: flex;
+  flex: 1 1 320px;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  padding: 20px 22px;
+  border: 1px solid var(--rail-line);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--rail-bg), var(--rail-ink) 6%);
+}
+
+.ov-ladder-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ov-ladder-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.ov-ladder-tag {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--rail-muted);
+  text-align: right;
+}
+
+.ov-ladder-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ov-ladder-step {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 30px;
+}
+
+.ov-ladder-code,
+.ov-ladder-count {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--rail-muted);
+}
+
+.ov-ladder-count {
+  min-width: 16px;
+  text-align: right;
+}
+
+.ov-ladder-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ov-ladder-name {
+  font-size: 13px;
+  color: var(--rail-muted);
+}
+
+.ov-ladder-track {
+  display: block;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--rail-line);
+}
+
+.ov-ladder-fill {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--rail-accent);
+}
+
+.ov-ladder-step.is-active .ov-ladder-code,
+.ov-ladder-step.is-active .ov-ladder-count {
+  color: var(--rail-accent);
+}
+
+.ov-ladder-step.is-active .ov-ladder-name {
+  color: var(--rail-ink);
+}
+
+/* Summary figures: two across on a narrow page, four across on a wide one. */
+
+.ov-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.ov-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 20px 18px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--card);
+}
+
+.ov-stat-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 10px;
+}
+
+.ov-stat-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.ov-stat-tag {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--neutral-soft);
+  color: var(--ink-2);
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.ov-stat-tag.is-review {
+  background: var(--warn-bg);
+  color: var(--warn-ink);
+}
+
+.ov-stat-value-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.ov-stat-value {
+  font-size: 40px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-stat-unit {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.ov-stat-note {
+  font-size: 13px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* The two columns below the summary. They stack when the page is narrow. */
+
+.ov-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 24px;
+}
+
+.ov-main,
+.ov-side {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-width: 0;
+}
+
+@container (min-width: 820px) {
+  .ov-stats {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .ov-split {
+    grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  }
+}
+
+/* Cards share one shape. */
+
+.ov-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--card);
+}
+
+.ov-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 16px;
+}
+
+.ov-card-intro {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ov-card-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+
+.ov-card-note {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* Waiting for you: one card per suggestion. */
+
+.ov-routine-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ov-routine {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--inset);
+}
+
+.ov-routine-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ov-routine-name {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.ov-routine-evidence {
+  font-size: 13px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.ov-apps {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.ov-app {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 12px 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.ov-app-mark {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--accent-soft-2);
+  color: var(--accent-ink);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.ov-app-more {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.ov-app-arrow {
+  color: var(--muted);
+}
+
+.ov-routine-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--divider);
+}
+
+.ov-when {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.ov-grow {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* No automations yet, and the automations list. */
+
+.ov-empty-card {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px 20px;
+}
+
+.ov-empty-copy {
+  display: flex;
+  flex: 1 1 260px;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ov-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+}
+
+.ov-link {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-text);
+  text-decoration: none;
+}
+
+.ov-link:hover {
+  text-decoration: underline;
+}
+
+.ov-auto-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.ov-auto-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--divider);
+}
+
+.ov-auto-row:last-child {
+  border-bottom: 0;
+}
+
+.ov-auto-head,
+.ov-auto-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 16px;
+  min-width: 0;
+}
+
+.ov-auto-name {
+  min-width: 0;
+  color: var(--ink);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+
+.ov-auto-name:hover {
+  text-decoration: underline;
+}
+
+.ov-auto-level {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+}
+
+.ov-auto-apps {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Getting started: shown only until the first routine is learned. */
+
+.ov-learning {
+  gap: 18px;
+  border-color: var(--accent-soft-2);
+  background: var(--accent-tint);
+}
+
+.ov-learning-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px 20px;
+}
+
+.ov-learning-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 680px;
+  min-width: 0;
+}
+
+.ov-learning-copy .eyebrow {
+  color: var(--accent-text);
+}
+
+.ov-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr));
+  gap: 10px;
+}
+
+.ov-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  min-width: 0;
+  min-height: 70px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+}
+
+.ov-step.is-current {
+  border-color: var(--accent-heat);
+  box-shadow: inset 0 0 0 1px var(--accent-heat);
+}
+
+.ov-step-number {
+  padding-top: 1px;
+  color: var(--accent-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ov-step-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  font-size: 13px;
+}
+
+/* Apps you use, with the learning-score disclaimer. */
+
+.ov-usage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ov-usage-row {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+
+.ov-usage-meta,
+.ov-usage-foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ov-usage-app {
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ov-usage-bar {
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--divider);
+}
+
+.ov-usage-bar > span {
+  display: block;
+  height: 100%;
+  min-width: 3px;
+  border-radius: inherit;
+  background: var(--accent-soft-2);
+}
+
+.ov-usage-bar.is-strong > span {
+  background: var(--accent);
+}
+
+.ov-usage-score {
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.ov-usage-status {
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.ov-usage-note {
+  margin-top: 4px;
+  line-height: 1.45;
+}
+
+/* Your weekly rhythm: the weekday rows and hour columns. The day label takes the first 34px column. */
+
+.ov-rhythm {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.ov-rhythm-row,
+.ov-rhythm-axis {
+  display: grid;
+  grid-template-columns: 34px repeat(11, minmax(0, 1fr));
+  align-items: center;
+  gap: 5px;
+}
+
+.ov-rhythm-day {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.ov-rhythm-cell {
+  display: block;
+  aspect-ratio: 1;
+  border-radius: 5px;
+}
+
+.ov-rhythm-axis {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.ov-axis-start {
+  grid-column: 2 / span 5;
+}
+
+.ov-axis-middle {
+  grid-column: 7 / span 5;
+}
+
+.ov-axis-end {
+  grid-column: 12;
+  text-align: right;
+}
+
+.ov-cell-0 {
+  background: var(--heat-0);
+}
+
+.ov-cell-1 {
+  background: var(--accent-soft-2);
+}
+
+.ov-cell-2 {
+  background: var(--accent-heat);
+}
+
+.ov-cell-3 {
+  background: var(--accent);
+}
+
+.ov-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.ov-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+.ov-legend-note {
+  margin-left: auto;
+}
+
+/* On this device: the privacy facts, on a tinted card. */
+
+.ov-device {
+  gap: 14px;
+  border-color: var(--accent-soft-2);
+  background: var(--accent-tint);
+}
+
+.ov-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.ov-fact {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ov-fact dt {
+  flex-shrink: 0;
+  color: var(--accent-ink);
+}
+
+.ov-fact dd {
+  min-width: 0;
+  margin: 0;
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.ov-device-link {
+  align-self: flex-start;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-text);
+  text-decoration: none;
+}
+
+.ov-device-link:hover {
+  text-decoration: underline;
+}
