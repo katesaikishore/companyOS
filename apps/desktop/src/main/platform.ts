@@ -6,6 +6,7 @@ import {
   openableFilePath,
   parseWebAddress,
   windowsSendKeys,
+  xdotoolChord,
   type Executor,
   type FileStat,
 } from '@companyos/twin-core';
@@ -265,6 +266,26 @@ const linuxX11: Platform = {
       return false;
     }
   },
+  /**
+   * Brings the app forward, then checks that the active window is one of that app's windows before it sends the keys. If
+   * the check fails, nothing is sent. The keys go through XTEST, the same path as xdotool's own key command, which did not
+   * crash the test apps in the checks that were run. The agent-desktop CLI's press did, so it is not used here.
+   */
+  async pressShortcut(app, shortcut) {
+    const chord = xdotoolChord(shortcut);
+    if (!chord) return false;
+    try {
+      const pattern = `^${escapeRegex(app)}$`;
+      await run('xdotool', ['search', '--onlyvisible', '--class', pattern, 'windowactivate', '--sync']);
+      const active = await run('xdotool', ['getactivewindow']);
+      const ours = (await run('xdotool', ['search', '--onlyvisible', '--class', pattern])).split(/\s+/);
+      if (!active || !ours.includes(active)) return false;
+      await run('xdotool', ['key', '--clearmodifiers', chord]);
+      return true;
+    } catch {
+      return false;
+    }
+  },
 };
 
 async function hasXdotool(): Promise<boolean> {
@@ -278,8 +299,8 @@ async function hasXdotool(): Promise<boolean> {
 
 /**
  * The runner's executor for one platform. An optional step is offered only where the adapter has it, so the runner
- * blocks the rest before anyone is asked. Pressing a shortcut is offered on macOS and Windows. Linux has no adapter yet,
- * so the runner blocks that step there before anyone is asked.
+ * blocks the rest before anyone is asked. Pressing a shortcut is offered on macOS, on Windows and on X11 through xdotool.
+ * Elsewhere, such as Wayland, the runner blocks that step before anyone is asked.
  */
 export function executorFor(platform: Platform): Executor {
   return {

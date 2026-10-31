@@ -120,3 +120,48 @@ export function windowsSendKeys(chord: string): string | undefined {
   const prefix = [...new Set(parts.modifiers.map(modifier => WINDOWS_MODIFIERS[modifier]))].join('');
   return `${prefix}${key}`;
 }
+
+/**
+ * xdotool keysym names for the named keys. "delete" is BackSpace, as on the Mac, because the key the Mac labels Delete
+ * deletes backwards.
+ */
+const XDO_KEYS: Readonly<Record<string, string>> = {
+  return: 'Return',
+  tab: 'Tab',
+  space: 'space',
+  delete: 'BackSpace',
+  escape: 'Escape',
+  left: 'Left',
+  right: 'Right',
+  down: 'Down',
+  up: 'Up',
+  home: 'Home',
+  end: 'End',
+  pageup: 'Page_Up',
+  pagedown: 'Page_Down',
+  ...Object.fromEntries(Array.from({ length: 12 }, (_, index) => [`f${index + 1}`, `F${index + 1}`])),
+};
+
+/**
+ * xdotool modifier names. "cmd" is the primary modifier, so on Linux it is Control, as it is on Windows. Control is
+ * written once even when both "cmd" and "ctrl" are given.
+ */
+const XDO_MODIFIERS: Readonly<Record<ChordModifier, string>> = {
+  cmd: 'ctrl',
+  ctrl: 'ctrl',
+  alt: 'alt',
+  shift: 'shift',
+};
+
+/**
+ * The xdotool key string for a chord, such as "ctrl+shift+k" for cmd+shift+k, or undefined when the chord is not allowed.
+ * It is sent as one argument to xdotool, never through a shell.
+ */
+export function xdotoolChord(chord: string): string | undefined {
+  const parts = chordParts(chord);
+  if (!parts) return undefined;
+  const key = LETTER_OR_DIGIT.test(parts.key) ? parts.key : XDO_KEYS[parts.key];
+  if (key === undefined) return undefined;
+  const modifiers = [...new Set(parts.modifiers.map(modifier => XDO_MODIFIERS[modifier]))];
+  return [...modifiers, key].join('+');
+}
