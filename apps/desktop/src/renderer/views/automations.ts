@@ -236,7 +236,8 @@ function resultStrip(result: StoredRun): HTMLElement {
         h(
           'div',
           { class: 'run-step mono' },
-          `${index + 1}. ${step.op} ${step.app} · ${step.outcome}${step.reason ? ` — ${step.reason}` : ''}`,
+          // The executor's own refusal, when it gave one, is more specific than the generic reason.
+          `${index + 1}. ${step.op} ${step.app} · ${step.outcome}${(step.failureReason ?? step.reason) ? ` — ${step.failureReason ?? step.reason}` : ''}`,
         ),
       ),
     ),

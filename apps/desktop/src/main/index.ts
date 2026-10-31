@@ -136,7 +136,7 @@ function registerIpc(): void {
       defaultId: 1,
       cancelId: 1,
       message: 'The export is not encrypted',
-      detail: 'It includes every recorded app switch with timestamps, URL shapes, your settings, and any handoff records saved by an earlier version, with their replies. Keep it somewhere private, and do not put it in a synced folder.',
+      detail: 'It includes every recorded app switch with timestamps, URL shapes, your settings, any agent-desktop program path, and any handoff records saved by an earlier version, with their replies. Keep it somewhere private, and do not put it in a synced folder.',
     };
     const parent = parentWindow();
     const warned = parent ? await dialog.showMessageBox(parent, warning) : await dialog.showMessageBox(warning);

@@ -88,6 +88,8 @@ export const TwinConfigSchema = z
       .array(z.object({ id: z.string().max(80), sha256: z.string().length(64), bytes: z.number().int().nonnegative(), installedAt: z.number() }).strict())
       .max(20),
     dismissedRoutineIds: z.array(z.string().max(40)).max(500),
+    /** Optional agent-desktop program for the focus and key steps. Blank keeps the built-in adapters. The app does not bundle it. */
+    agentDesktopPath: z.string().trim().max(512).default(''),
   })
   .strict();
 export type TwinConfig = z.infer<typeof TwinConfigSchema>;
@@ -116,4 +118,5 @@ export const DEFAULT_CONFIG: TwinConfig = {
   automationsEnabled: true,
   installedModels: [],
   dismissedRoutineIds: [],
+  agentDesktopPath: '',
 };

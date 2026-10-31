@@ -6,7 +6,9 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   AutomationSchema,
   EncryptedStore,
+  StepRefusedError,
   TwinAgent,
+  recordRun,
   runAutomation,
   type Automation,
   type Executor,
@@ -204,6 +206,50 @@ describe('open_file', () => {
   });
 });
 
+describe('an executor that blocks its own focus and key steps', () => {
+  const blockedFor = (reason: string | undefined): Executor => ({
+    focusApp: async () => true,
+    frontmostApp: async () => 'microsoft excel',
+    pressShortcut: async () => true,
+    blockedReason: () => reason,
+  });
+
+  it('blocks a key press with its own reason, before anyone is asked', async () => {
+    const approve = vi.fn(async () => true);
+    const result = await runAutomation(
+      automation([CHORD]),
+      { mode: 'supervised', policy: ctx(), approve, settleMs: 0 },
+      blockedFor('The agent-desktop program is not set.'),
+    );
+    expect(result.status).toBe('blocked');
+    expect(result.steps[0].reason).toBe('The agent-desktop program is not set.');
+    expect(approve).not.toHaveBeenCalled();
+  });
+
+  it('blocks a focus step with its own reason, and runs nothing', async () => {
+    const focusApp = vi.fn(async () => true);
+    const result = await runAutomation(
+      automation([{ op: 'focus_app', app: 'microsoft excel' }]),
+      { mode: 'supervised', policy: ctx(), settleMs: 0 },
+      { focusApp, frontmostApp: async () => undefined, blockedReason: () => 'The agent-desktop program is not set.' },
+    );
+    expect(result.status).toBe('blocked');
+    expect(result.steps[0].reason).toBe('The agent-desktop program is not set.');
+    expect(focusApp).not.toHaveBeenCalled();
+  });
+
+  it('runs the steps as usual when the executor reports no block', async () => {
+    const approve = vi.fn(async () => true);
+    const result = await runAutomation(
+      automation([CHORD]),
+      { mode: 'supervised', policy: ctx(), approve, settleMs: 0 },
+      blockedFor(undefined),
+    );
+    expect(result.status).toBe('completed');
+    expect(approve).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('press_shortcut', () => {
   it('is blocked on a system with no key adapter, before anyone is asked', async () => {
     const executor: Executor = { focusApp: async () => true, frontmostApp: async () => 'microsoft excel' };
@@ -292,6 +338,108 @@ describe('press_shortcut', () => {
     );
     expect(result.status).toBe('blocked');
     expect(calls).toEqual([]);
+  });
+});
+
+describe('a refusal the executor explains', () => {
+  const FOCUS: Step = { op: 'focus_app', app: 'microsoft excel' };
+  const WHY = 'More than one window of this app is open. Choose a window, then try again.';
+  const request = { mode: 'supervised' as const, policy: ctx(), approve: async () => true, settleMs: 0 };
+
+  it('keeps the message of a StepRefusedError from a focus as failureReason, and the generic reason stays', async () => {
+    const { executor } = fakeDesktop();
+    const refusing: Executor = {
+      ...executor,
+      focusApp: async () => {
+        throw new StepRefusedError(WHY);
+      },
+    };
+    const result = await runAutomation(automation([FOCUS]), request, refusing);
+    // A refusal means nothing was done, so the run is blocked rather than failed. A failed run lowers the level.
+    expect(result.status).toBe('blocked');
+    expect(result.steps[0]).toEqual({
+      index: 0,
+      op: 'focus_app',
+      app: 'microsoft excel',
+      outcome: 'blocked',
+      reason: 'The app could not be focused.',
+      failureReason: WHY,
+    });
+  });
+
+  it('keeps the message of a StepRefusedError from a press as failureReason, and the run is blocked', async () => {
+    const { executor } = fakeDesktop();
+    const refusing: Executor = {
+      ...executor,
+      pressShortcut: async () => {
+        throw new StepRefusedError(WHY);
+      },
+    };
+    const result = await runAutomation(automation([CHORD]), request, refusing);
+    expect(result.status).toBe('blocked');
+    expect(result.steps[0]).toMatchObject({ outcome: 'blocked', reason: 'The shortcut could not be pressed.', failureReason: WHY });
+  });
+
+  it('does not lower the level when a run is blocked by a refusal, but does when the step fails', async () => {
+    const { executor } = fakeDesktop();
+    const refusing: Executor = {
+      ...executor,
+      focusApp: async () => {
+        throw new StepRefusedError(WHY);
+      },
+    };
+    const blocked = await runAutomation(automation([FOCUS]), request, refusing);
+    const run = { ts: 1, mode: 'unattended' as const, level: 4 as const, postconditionsPassed: 0, postconditionsFailed: 0, reverted: false };
+    const state = { automationId: 'a', level: 4 as const, effects: [], runs: [] };
+    expect(recordRun(state, { ...run, status: blocked.status }).level).toBe(4);
+    expect(recordRun(state, { ...run, status: 'failed' }).level).toBe(3);
+  });
+
+  it('is a plain Error whose message is the refusal', () => {
+    const error = new StepRefusedError(WHY);
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toBe(WHY);
+  });
+
+  it('does not keep the text of any other thrown error, and sets no failureReason field', async () => {
+    const { executor } = fakeDesktop();
+    const throwsPlain: Executor = {
+      ...executor,
+      focusApp: async () => {
+        throw new Error('/Users/me/secret-path osascript');
+      },
+    };
+    const focus = await runAutomation(automation([FOCUS]), request, throwsPlain);
+    expect(focus.steps[0]).toEqual({
+      index: 0,
+      op: 'focus_app',
+      app: 'microsoft excel',
+      outcome: 'failed',
+      reason: 'The app could not be focused.',
+    });
+    expect(focus.steps[0]).not.toHaveProperty('failureReason');
+    expect(JSON.stringify(focus)).not.toMatch(/secret-path/);
+
+    const throwsPress: Executor = {
+      ...executor,
+      pressShortcut: async () => {
+        throw new Error('osascript: keystroke text');
+      },
+    };
+    const press = await runAutomation(automation([CHORD]), request, throwsPress);
+    expect(press.steps[0]).not.toHaveProperty('failureReason');
+  });
+
+  it('sets no failureReason when the executor returns false, or when the step succeeds', async () => {
+    const { executor } = fakeDesktop();
+    const returnsFalse: Executor = { ...executor, focusApp: async () => false };
+    const failed = await runAutomation(automation([FOCUS]), request, returnsFalse);
+    expect(failed.steps[0]).not.toHaveProperty('failureReason');
+    expect(failed.steps[0].reason).toBe('The app could not be focused.');
+
+    const done = await runAutomation(automation([FOCUS]), request, executor);
+    expect(done.status).toBe('completed');
+    expect(done.steps[0]).not.toHaveProperty('failureReason');
   });
 });
 

@@ -2,7 +2,7 @@ import type { TwinConfig, TwinStatus } from '@companyos/twin-core';
 import { h, type Child } from '../dom.js';
 import { button, chip, exclusionEditor, toggleRow } from '../components/ui.js';
 import { formatBytes } from '../format.js';
-import { act, bridge, confirmDeleteAll, pending, saveConfig, setNotice } from '../store.js';
+import { act, bridge, confirmDeleteAll, pending, saveConfig, setNotice, state } from '../store.js';
 import { openSetup } from './setup.js';
 
 type Theme = TwinConfig['theme'];
@@ -254,6 +254,47 @@ function automationsPanel(config: TwinConfig): HTMLElement {
         note: 'Local and reversible steps only. Needs the highest level set to 4.',
         checked: config.allowUnattended,
         onChange: checked => void saveConfig('unattended', { allowUnattended: checked }),
+      }),
+    ),
+    agentDesktopBlock(config.agentDesktopPath),
+  );
+}
+
+/** The optional agent-desktop program for focus and key steps. Blank keeps the built-in adapters. */
+function agentDesktopBlock(path: string): HTMLElement {
+  const key = 'agent-desktop-settings';
+  const program = h('input', {
+    class: 'input mono',
+    type: 'text',
+    maxlength: 512,
+    autocomplete: 'off',
+    spellcheck: false,
+    value: path,
+    placeholder: 'Leave empty to use the built-in adapters',
+    'aria-label': 'Agent-desktop program path',
+    'data-testid': 'settings-agent-desktop-path',
+    oninput: () => state.dirty.add(key),
+  });
+  return block(
+    h('label', { class: 'settings-field' }, h('span', { class: 'settings-field-label' }, 'Agent-desktop program'), program),
+    h(
+      'p',
+      { class: 'settings-note' },
+      'Optional, and not bundled with companyOS. Set the absolute path of an installed program to run focus and key steps through it. A path that is not an existing file blocks those two steps, and the run says why.',
+    ),
+    h(
+      'div',
+      { class: 'actions' },
+      button('Save program path', {
+        variant: 'primary',
+        testid: 'settings-agent-desktop-save',
+        disabled: pending(key),
+        onClick: () => {
+          state.dirty.delete(key);
+          void act(key, async () => {
+            await bridge().updateConfig({ agentDesktopPath: program.value.trim() });
+          });
+        },
       }),
     ),
   );
