@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   AutomationSchema,
   EncryptedStore,
+  StepRefusedError,
   TwinAgent,
   runAutomation,
   type Automation,
@@ -336,6 +337,92 @@ describe('press_shortcut', () => {
     );
     expect(result.status).toBe('blocked');
     expect(calls).toEqual([]);
+  });
+});
+
+describe('a refusal the executor explains', () => {
+  const FOCUS: Step = { op: 'focus_app', app: 'microsoft excel' };
+  const WHY = 'More than one window of this app is open. Choose a window, then try again.';
+  const request = { mode: 'supervised' as const, policy: ctx(), approve: async () => true, settleMs: 0 };
+
+  it('keeps the message of a StepRefusedError from a focus as failureReason, and the generic reason stays', async () => {
+    const { executor } = fakeDesktop();
+    const refusing: Executor = {
+      ...executor,
+      focusApp: async () => {
+        throw new StepRefusedError(WHY);
+      },
+    };
+    const result = await runAutomation(automation([FOCUS]), request, refusing);
+    expect(result.status).toBe('failed');
+    expect(result.steps[0]).toEqual({
+      index: 0,
+      op: 'focus_app',
+      app: 'microsoft excel',
+      outcome: 'failed',
+      reason: 'The app could not be focused.',
+      failureReason: WHY,
+    });
+  });
+
+  it('keeps the message of a StepRefusedError from a press as failureReason', async () => {
+    const { executor } = fakeDesktop();
+    const refusing: Executor = {
+      ...executor,
+      pressShortcut: async () => {
+        throw new StepRefusedError(WHY);
+      },
+    };
+    const result = await runAutomation(automation([CHORD]), request, refusing);
+    expect(result.status).toBe('failed');
+    expect(result.steps[0]).toMatchObject({ outcome: 'failed', reason: 'The shortcut could not be pressed.', failureReason: WHY });
+  });
+
+  it('is a plain Error whose message is the refusal', () => {
+    const error = new StepRefusedError(WHY);
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toBe(WHY);
+  });
+
+  it('does not keep the text of any other thrown error, and sets no failureReason field', async () => {
+    const { executor } = fakeDesktop();
+    const throwsPlain: Executor = {
+      ...executor,
+      focusApp: async () => {
+        throw new Error('/Users/me/secret-path osascript');
+      },
+    };
+    const focus = await runAutomation(automation([FOCUS]), request, throwsPlain);
+    expect(focus.steps[0]).toEqual({
+      index: 0,
+      op: 'focus_app',
+      app: 'microsoft excel',
+      outcome: 'failed',
+      reason: 'The app could not be focused.',
+    });
+    expect(focus.steps[0]).not.toHaveProperty('failureReason');
+    expect(JSON.stringify(focus)).not.toMatch(/secret-path/);
+
+    const throwsPress: Executor = {
+      ...executor,
+      pressShortcut: async () => {
+        throw new Error('osascript: keystroke text');
+      },
+    };
+    const press = await runAutomation(automation([CHORD]), request, throwsPress);
+    expect(press.steps[0]).not.toHaveProperty('failureReason');
+  });
+
+  it('sets no failureReason when the executor returns false, or when the step succeeds', async () => {
+    const { executor } = fakeDesktop();
+    const returnsFalse: Executor = { ...executor, focusApp: async () => false };
+    const failed = await runAutomation(automation([FOCUS]), request, returnsFalse);
+    expect(failed.steps[0]).not.toHaveProperty('failureReason');
+    expect(failed.steps[0].reason).toBe('The app could not be focused.');
+
+    const done = await runAutomation(automation([FOCUS]), request, executor);
+    expect(done.status).toBe('completed');
+    expect(done.steps[0]).not.toHaveProperty('failureReason');
   });
 });
 

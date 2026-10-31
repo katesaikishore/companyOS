@@ -4,11 +4,23 @@ import { evaluateStep, type Decision, type PolicyContext } from './policy';
 import type { AutonomyLevel } from './types';
 
 /**
+ * Thrown by an executor to say why it refused a focus or key step, in words that are safe to show. The runner keeps
+ * this message on the step record as failureReason. Any other thrown error is an ordinary failure, and its text is not kept.
+ */
+export class StepRefusedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'StepRefusedError';
+  }
+}
+
+/**
  * The only side-effecting surface the runner touches. Tests supply a fake; the desktop app supplies the OS.
  * The three optional methods are steps an adapter may not support. A missing method blocks that step before anyone
  * is asked. A block is not a failure, so it does not demote the automation.
  */
 export interface Executor {
+  /** Brings the named application forward. It may throw a StepRefusedError to say why it refused. */
   focusApp(app: string): Promise<boolean>;
   frontmostApp(): Promise<string | undefined>;
   /** Opens an allowed http or https address, in canonical form, in the named browser. */
@@ -18,7 +30,8 @@ export interface Executor {
   /**
    * Presses a checked key chord in the named application. The adapter must bring that application forward and send the
    * keys only once it is in front, and return false otherwise. The runner cannot check this itself: the approval dialog
-   * takes focus, so a check made before approval would be wrong by the time the keys are sent.
+   * takes focus, so a check made before approval would be wrong by the time the keys are sent. It may throw a
+   * StepRefusedError to say why it refused.
    */
   pressShortcut?(app: string, shortcut: string): Promise<boolean>;
   /**
@@ -39,6 +52,8 @@ export interface StepRecord {
   app: string;
   outcome: StepOutcome;
   reason: string;
+  /** Why the executor refused the step, when it said so with a StepRefusedError. Absent for every other failure. */
+  failureReason?: string;
 }
 
 export interface RunResult {
@@ -92,23 +107,34 @@ function unsupportedReason(step: Step, executor: Executor): string | undefined {
   return undefined;
 }
 
+/** The message of a refusal the executor chose to show, or undefined for any other thrown error. */
+function refusalMessage(error: unknown): string | undefined {
+  return error instanceof StepRefusedError ? error.message : undefined;
+}
+
+/** The outcome of one open or key step, and the refusal text when the executor gave one. */
+interface Performed {
+  ok: boolean;
+  failureReason?: string;
+}
+
 /** Carries out one open or key step. A thrown error is an ordinary failure, as with focusApp. */
-async function perform(step: Step, executor: Executor): Promise<boolean> {
+async function perform(step: Step, executor: Executor): Promise<Performed> {
   try {
     switch (step.op) {
       case 'open_url': {
         const url = parseWebAddress(step.url);
-        return url !== undefined && (await executor.openUrl?.(step.app, url.href)) === true;
+        return { ok: url !== undefined && (await executor.openUrl?.(step.app, url.href)) === true };
       }
       case 'open_file':
-        return (await executor.openFile?.(step.app, step.path)) === true;
+        return { ok: (await executor.openFile?.(step.app, step.path)) === true };
       case 'press_shortcut':
-        return (await executor.pressShortcut?.(step.app, step.shortcut)) === true;
+        return { ok: (await executor.pressShortcut?.(step.app, step.shortcut)) === true };
       default:
-        return false;
+        return { ok: false };
     }
-  } catch {
-    return false;
+  } catch (error) {
+    return { ok: false, failureReason: refusalMessage(error) };
   }
 }
 
@@ -149,8 +175,15 @@ export async function runAutomation(automation: Automation, request: RunRequest,
   });
 
   for (const [index, step] of resolved.entries()) {
-    const record = (outcome: StepOutcome, reason: string): void => {
-      steps.push({ index, op: step.op, app: step.app, outcome, reason });
+    const record = (outcome: StepOutcome, reason: string, failureReason?: string): void => {
+      steps.push({
+        index,
+        op: step.op,
+        app: step.app,
+        outcome,
+        reason,
+        ...(failureReason === undefined ? {} : { failureReason }),
+      });
     };
 
     if (request.mode === 'dry_run') {
@@ -196,13 +229,15 @@ export async function runAutomation(automation: Automation, request: RunRequest,
 
     if (step.op === 'focus_app') {
       let ok = false;
+      let failureReason: string | undefined;
       try {
         ok = await executor.focusApp(step.app);
-      } catch {
-        ok = false; // A thrown error is an ordinary failure. Its text may contain paths or scripts, so it is not kept.
+      } catch (error) {
+        // A thrown error is an ordinary failure. Its text may contain paths or scripts, so only a StepRefusedError keeps it.
+        failureReason = refusalMessage(error);
       }
       if (!ok) {
-        record('failed', 'The app could not be focused.');
+        record('failed', 'The app could not be focused.', failureReason);
         return finish('failed');
       }
       record('executed', decision.reason);
@@ -211,8 +246,9 @@ export async function runAutomation(automation: Automation, request: RunRequest,
 
     if (step.op === 'open_url' || step.op === 'open_file' || step.op === 'press_shortcut') {
       // One action, then its postcondition: the expected app is in front once the action has run.
-      if (!(await perform(step, executor))) {
-        record('failed', FAILED_REASON[step.op]);
+      const performed = await perform(step, executor);
+      if (!performed.ok) {
+        record('failed', FAILED_REASON[step.op], performed.failureReason);
         return finish('failed');
       }
       if (await settlesInFront(executor, step.app, request.settleMs ?? DEFAULT_SETTLE_MS)) {

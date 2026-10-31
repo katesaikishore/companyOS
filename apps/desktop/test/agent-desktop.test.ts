@@ -2,7 +2,7 @@ import { appendFileSync, chmodSync, existsSync, mkdtempSync, readFileSync, rmSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import type { Executor } from '@companyos/twin-core';
+import { AutomationSchema, StepRefusedError, runAutomation, type Executor } from '@companyos/twin-core';
 import {
   agentDesktopProblem,
   focusWithAgentDesktop,
@@ -18,15 +18,22 @@ import {
  * A stand-in for the agent-desktop program. Each start appends its argument list, as one JSON line, to the file named by
  * FAKE_AD_LOG, so a test can tell whether anything started. FAKE_AD_MODE "hang" never exits, and "flood" writes far more
  * than the output cap. "ambiguous" prints the AMBIGUOUS_TARGET envelope and exits 1. "ambiguous-split" sends the same
- * envelope in two pieces. "other-error" exits 1 with a different code whose message mentions the code. Otherwise it
- * exits with the status in FAKE_AD_EXIT, which defaults to 0.
+ * envelope in two pieces. "other-error" exits 1 with a different code whose message mentions the code. "windows" answers
+ * list-windows with a JSON envelope whose data holds FAKE_AD_WINDOWS windows, or fails with status 2 when that is "fail",
+ * or prints text that is not JSON when that is "garbage". Other calls in that mode exit 0. Otherwise it exits with the
+ * status in FAKE_AD_EXIT, which defaults to 0.
  */
 const FAKE_PROGRAM = [
   `#!${process.execPath}`,
   "const { appendFileSync } = require('node:fs');",
   "appendFileSync(process.env.FAKE_AD_LOG, JSON.stringify(process.argv.slice(2)) + '\\n');",
   "const mode = process.env.FAKE_AD_MODE || 'exit';",
-  "if (mode === 'hang') setInterval(() => {}, 1000);",
+  "const windows = process.env.FAKE_AD_WINDOWS || '0';",
+  "if (mode === 'windows' && process.argv[2] === 'list-windows') {",
+  "  if (windows === 'fail') process.exitCode = 2;",
+  "  else if (windows === 'garbage') process.stdout.write('not json');",
+  "  else process.stdout.write(JSON.stringify({ ok: true, data: Array.from({ length: Number(windows) }, (_, i) => ({ id: 'w-' + i })) }));",
+  "} else if (mode === 'hang') setInterval(() => {}, 1000);",
   "else if (mode === 'flood') process.stdout.write('x'.repeat(200000));",
   "else if (mode === 'ambiguous') { process.stdout.write(JSON.stringify({ ok: false, error: { code: 'AMBIGUOUS_TARGET', message: 'two windows match' } })); process.exitCode = 1; }",
   "else if (mode === 'ambiguous-split') { process.stdout.write('{\"ok\":false,\"error\":{\"code\":\"AMBIGUOUS_'); setTimeout(() => { process.stdout.write('TARGET\",\"message\":\"two windows match\"}}'); process.exitCode = 1; }, 100); }",
@@ -35,7 +42,7 @@ const FAKE_PROGRAM = [
   '',
 ].join('\n');
 
-const FAKE_KEYS = ['FAKE_AD_LOG', 'FAKE_AD_MODE', 'FAKE_AD_EXIT'];
+const FAKE_KEYS = ['FAKE_AD_LOG', 'FAKE_AD_MODE', 'FAKE_AD_EXIT', 'FAKE_AD_WINDOWS'];
 
 let folder: string;
 let program: string;
@@ -57,7 +64,13 @@ afterEach(() => {
 });
 
 /** Points the fake at a new start log and sets how it behaves. Each option not given is cleared. Returns the log's path. */
-function useFake(options: { mode?: 'hang' | 'flood' | 'ambiguous' | 'ambiguous-split' | 'other-error'; exit?: number } = {}): string {
+function useFake(
+  options: {
+    mode?: 'hang' | 'flood' | 'ambiguous' | 'ambiguous-split' | 'other-error' | 'windows';
+    exit?: number;
+    windows?: string;
+  } = {},
+): string {
   logCount++;
   const log = join(folder, `starts-${logCount}.log`);
   process.env.FAKE_AD_LOG = log;
@@ -65,6 +78,8 @@ function useFake(options: { mode?: 'hang' | 'flood' | 'ambiguous' | 'ambiguous-s
   else process.env.FAKE_AD_MODE = options.mode;
   if (options.exit === undefined) delete process.env.FAKE_AD_EXIT;
   else process.env.FAKE_AD_EXIT = String(options.exit);
+  if (options.windows === undefined) delete process.env.FAKE_AD_WINDOWS;
+  else process.env.FAKE_AD_WINDOWS = options.windows;
   return log;
 }
 
@@ -164,8 +179,11 @@ describe('a good call', () => {
     const record = vi.fn<(entry: HandsRecord) => void>();
     expect(await focusWithAgentDesktop({ binary: program, record }, 'Microsoft Excel')).toEqual({ ok: true });
     expect(await pressWithAgentDesktop({ binary: program, record }, 'Microsoft Excel', 'cmd+shift+k')).toEqual({ ok: true });
+    // Each focus by name is preceded by the window count. The count is not recorded.
     expect(starts(log)).toEqual([
+      ['list-windows', '--app', 'Microsoft Excel'],
       ['focus-window', '--app', 'Microsoft Excel'],
+      ['list-windows', '--app', 'Microsoft Excel'],
       ['focus-window', '--app', 'Microsoft Excel'],
       ['press', 'cmd+shift+k', '--app', 'Microsoft Excel'],
     ]);
@@ -227,7 +245,11 @@ describe('a window target', () => {
       failure: 'ambiguous',
       reason: 'More than one window of this app is open. Choose a window, then try again.',
     });
-    expect(starts(log)).toHaveLength(1);
+    // The window count fails in this mode, so the focus runs and reports the ambiguity itself.
+    expect(starts(log)).toEqual([
+      ['list-windows', '--app', 'Microsoft Excel'],
+      ['focus-window', '--app', 'Microsoft Excel'],
+    ]);
     expect(record).toHaveBeenCalledTimes(1);
     const entry = record.mock.calls[0][0];
     expect(entry).toEqual({ step: 'focus_app', exit: 'ambiguous', durationMs: expect.any(Number) });
@@ -254,7 +276,10 @@ describe('a failed call', () => {
     const log = useFake({ exit: 3 });
     const record = vi.fn<(entry: HandsRecord) => void>();
     expect(await focusWithAgentDesktop({ binary: program, record }, 'Microsoft Excel')).toMatchObject({ ok: false, failure: 'exit' });
-    expect(starts(log)).toHaveLength(1);
+    expect(starts(log)).toEqual([
+      ['list-windows', '--app', 'Microsoft Excel'],
+      ['focus-window', '--app', 'Microsoft Excel'],
+    ]);
     expect(record).toHaveBeenCalledTimes(1);
     const entry = record.mock.calls[0][0];
     expect(entry).toEqual({ step: 'focus_app', exit: 3, durationMs: expect.any(Number) });
@@ -289,7 +314,10 @@ describe('a failed call', () => {
     expect(result).toMatchObject({ ok: false, failure: 'timeout' });
     expect(Date.now() - started).toBeLessThan(5_000);
     expect(record).toHaveBeenCalledWith({ step: 'focus_app', exit: 'timeout', durationMs: expect.any(Number) });
-    expect(starts(log)).toHaveLength(1);
+    expect(starts(log)).toEqual([
+      ['list-windows', '--app', 'Microsoft Excel'],
+      ['focus-window', '--app', 'Microsoft Excel'],
+    ]);
   });
 
   it('stops a program that writes more than the output cap', async () => {
@@ -319,7 +347,7 @@ describe('an executor with a usable path', () => {
     expect(await executor.focusApp('Microsoft Excel')).toBe(true);
     expect(await executor.pressShortcut?.('Microsoft Excel', 'cmd+shift+k')).toBe(true);
     expect(await executor.frontmostApp()).toBe('microsoft excel');
-    expect(starts(log).map(args => args[0])).toEqual(['focus-window', 'focus-window', 'press']);
+    expect(starts(log).map(args => args[0])).toEqual(['list-windows', 'focus-window', 'list-windows', 'focus-window', 'press']);
   });
 
   it('keeps key presses on Linux with the built-in adapter, even when the path is set, and still focuses through the program', async () => {
@@ -341,6 +369,147 @@ describe('an executor with a usable path', () => {
     expect(builtInPresses).toBe(1);
     expect(starts(log)).toEqual([]);
     expect(await executor.focusApp('Microsoft Excel')).toBe(true);
-    expect(starts(log).map(args => args[0])).toEqual(['focus-window']);
+    expect(starts(log).map(args => args[0])).toEqual(['list-windows', 'focus-window']);
+  });
+});
+
+const SEVERAL = 'More than one window of this app is open. Choose a window, then try again.';
+
+describe('a focus by name when the app has several windows', () => {
+  it('starts no focus-window call, and records the refused focus as ambiguous', async () => {
+    const log = useFake({ mode: 'windows', windows: '2' });
+    const record = vi.fn<(entry: HandsRecord) => void>();
+    expect(await focusWithAgentDesktop({ binary: program, record }, 'Microsoft Excel')).toEqual({
+      ok: false,
+      failure: 'ambiguous',
+      reason: SEVERAL,
+    });
+    expect(starts(log)).toEqual([['list-windows', '--app', 'Microsoft Excel']]);
+    expect(record).toHaveBeenCalledTimes(1);
+    const entry = record.mock.calls[0][0];
+    expect(entry).toEqual({ step: 'focus_app', exit: 'ambiguous', durationMs: expect.any(Number) });
+    expect(Object.keys(entry).sort()).toEqual(['durationMs', 'exit', 'step']);
+  });
+
+  it('refuses a press by name the same way, before any focus or press call, and records it under the press step', async () => {
+    const log = useFake({ mode: 'windows', windows: '3' });
+    const record = vi.fn<(entry: HandsRecord) => void>();
+    expect(await pressWithAgentDesktop({ binary: program, record }, 'Microsoft Excel', 'cmd+shift+k')).toEqual({
+      ok: false,
+      failure: 'ambiguous',
+      reason: SEVERAL,
+    });
+    expect(starts(log)).toEqual([['list-windows', '--app', 'Microsoft Excel']]);
+    expect(record).toHaveBeenCalledTimes(1);
+    expect(record).toHaveBeenCalledWith({ step: 'press_shortcut', exit: 'ambiguous', durationMs: expect.any(Number) });
+  });
+
+  it('allows the focus when the app has one window', async () => {
+    const log = useFake({ mode: 'windows', windows: '1' });
+    const record = vi.fn<(entry: HandsRecord) => void>();
+    expect(await focusWithAgentDesktop({ binary: program, record }, 'Microsoft Excel')).toEqual({ ok: true });
+    expect(starts(log)).toEqual([
+      ['list-windows', '--app', 'Microsoft Excel'],
+      ['focus-window', '--app', 'Microsoft Excel'],
+    ]);
+    expect(record.mock.calls.map(([entry]) => [entry.step, entry.exit])).toEqual([['focus_app', 0]]);
+  });
+
+  it('allows a press by name when the app has one window', async () => {
+    const log = useFake({ mode: 'windows', windows: '1' });
+    expect(await pressWithAgentDesktop({ binary: program }, 'Microsoft Excel', 'cmd+shift+k')).toEqual({ ok: true });
+    expect(starts(log).map(args => args[0])).toEqual(['list-windows', 'focus-window', 'press']);
+  });
+
+  it('lets the focus run when the window count is zero', async () => {
+    const log = useFake({ mode: 'windows', windows: '0' });
+    expect(await focusWithAgentDesktop({ binary: program }, 'Microsoft Excel')).toEqual({ ok: true });
+    expect(starts(log).map(args => args[0])).toEqual(['list-windows', 'focus-window']);
+  });
+
+  it('lets the focus run and report its own error when the window list call fails or cannot be read', async () => {
+    for (const windows of ['fail', 'garbage']) {
+      const log = useFake({ mode: 'windows', windows });
+      expect(await focusWithAgentDesktop({ binary: program }, 'Microsoft Excel')).toEqual({ ok: true });
+      expect(starts(log).map(args => args[0])).toEqual(['list-windows', 'focus-window']);
+    }
+  });
+
+  it('does not run the window count for a focus or press that names a window', async () => {
+    const log = useFake({ mode: 'windows', windows: '2' });
+    const WINDOW = 'w-1.0-org-a11y-atspi-accessible-2';
+    expect(await focusWithAgentDesktop({ binary: program }, 'Microsoft Excel', WINDOW)).toEqual({ ok: true });
+    expect(await pressWithAgentDesktop({ binary: program }, 'Microsoft Excel', 'cmd+shift+k', WINDOW)).toEqual({ ok: true });
+    // A press always focuses first, so the window ID reaches focus-window twice, and no list-windows call is made.
+    expect(starts(log).map(args => args[0])).toEqual(['focus-window', 'focus-window', 'press']);
+  });
+
+  it('keeps the window list out of the record and the result', async () => {
+    useFake({ mode: 'windows', windows: '2' });
+    const record = vi.fn<(entry: HandsRecord) => void>();
+    const result = await focusWithAgentDesktop({ binary: program, record }, 'Microsoft Excel');
+    expect(JSON.stringify([result, record.mock.calls])).not.toMatch(/w-0|w-1|"data"/);
+  });
+});
+
+describe('the executor carries the refusal to the runner', () => {
+  const base: Executor = {
+    focusApp: async () => {
+      throw new Error('the built-in focus must not run');
+    },
+    frontmostApp: async () => undefined,
+  };
+
+  it('throws a StepRefusedError whose message is the reason, for a focus and for a press', async () => {
+    const log = useFake({ mode: 'windows', windows: '2' });
+    const executor = handsExecutor(base, { binary: program }, 'darwin');
+    await expect(executor.focusApp('Microsoft Excel')).rejects.toBeInstanceOf(StepRefusedError);
+    await expect(executor.focusApp('Microsoft Excel')).rejects.toThrow(SEVERAL);
+    await expect(executor.pressShortcut?.('Microsoft Excel', 'cmd+shift+k')).rejects.toThrow(SEVERAL);
+    // Two focus calls and one press, each stopped at the window count before any focus-window or press call.
+    expect(starts(log)).toEqual([
+      ['list-windows', '--app', 'Microsoft Excel'],
+      ['list-windows', '--app', 'Microsoft Excel'],
+      ['list-windows', '--app', 'Microsoft Excel'],
+    ]);
+  });
+
+  it('returns false, and does not throw, for every other failure', async () => {
+    useFake({ mode: 'windows', windows: '1', exit: 3 });
+    const executor = handsExecutor(base, { binary: program }, 'darwin');
+    expect(await executor.focusApp('Microsoft Excel')).toBe(false);
+    expect(await executor.pressShortcut?.('Microsoft Excel', 'cmd+shift+k')).toBe(false);
+    const missing = handsExecutor(base, { binary: join(folder, 'missing') }, 'darwin');
+    expect(await missing.focusApp('Microsoft Excel')).toBe(false);
+  });
+
+  it('shows the reason on the step record when the runner runs a focus against several windows', async () => {
+    const log = useFake({ mode: 'windows', windows: '2' });
+    const executor = handsExecutor(base, { binary: program }, 'darwin');
+    const automation = AutomationSchema.parse({
+      id: 'auto_test',
+      name: 'Test',
+      version: 2,
+      routineId: 'routine_test',
+      params: [],
+      steps: [{ op: 'focus_app', app: 'Microsoft Excel' }],
+    });
+    const result = await runAutomation(
+      automation,
+      {
+        mode: 'supervised',
+        policy: { level: 3, maxLevel: 4, unattended: false, excludedApps: [] },
+        approve: async () => true,
+        settleMs: 0,
+      },
+      executor,
+    );
+    expect(result.status).toBe('failed');
+    expect(result.steps[0]).toMatchObject({
+      outcome: 'failed',
+      reason: 'The app could not be focused.',
+      failureReason: SEVERAL,
+    });
+    expect(starts(log)).toEqual([['list-windows', '--app', 'Microsoft Excel']]);
   });
 });
