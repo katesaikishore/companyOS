@@ -1,0 +1,93 @@
+name: adapters
+
+# Runs the macOS and Windows adapters from apps/desktop/src/main/platform.ts, and the agent-desktop CLI, on real hosted
+# runners. It records what happens. It does not pass or fail on what the adapters do: a call that returns false is data.
+# See scripts/adapter-smoke and docs/research/adapter-smoke-results.md.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - apps/desktop/src/main/platform.ts
+      - packages/core/src/keys.ts
+      - .github/workflows/adapters.yml
+      - scripts/adapter-smoke/**
+  push:
+    branches: [adapter-smoke-ci]
+    paths:
+      - apps/desktop/src/main/platform.ts
+      - packages/core/src/keys.ts
+      - .github/workflows/adapters.yml
+      - scripts/adapter-smoke/**
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: smoke (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      # Only platform.ts and the core package are used here, so the Electron binary is not needed.
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      ADAPTER_SMOKE_OUT: ${{ github.workspace }}/adapter-smoke-out
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build the core package and the desktop main process
+        run: |
+          npm run build -w @companyos/twin-core
+          npm run build -w @companyos/desktop
+
+      - name: Install agent-desktop 1.0.2
+        run: |
+          npm i -g agent-desktop@1.0.2
+          echo "AGENT_DESKTOP_ROOT=$(npm root -g)" >> "$GITHUB_ENV"
+
+      - name: Adapter smoke (platform.ts against a real app)
+        id: smoke
+        continue-on-error: true
+        run: node scripts/adapter-smoke/smoke.mjs
+
+      - name: agent-desktop smoke
+        id: agent_desktop
+        continue-on-error: true
+        run: node scripts/adapter-smoke/agent-desktop.mjs
+
+      - name: Summary
+        if: always()
+        run: node scripts/adapter-smoke/summary.mjs
+
+      - name: Full JSON in the log
+        if: always()
+        run: |
+          for f in adapter-smoke-out/*.json; do
+            echo "::group::$f"
+            cat "$f"
+            echo "::endgroup::"
+          done
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: adapter-smoke-${{ matrix.os }}
+          path: adapter-smoke-out/
+          if-no-files-found: warn
