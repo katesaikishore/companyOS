@@ -1,0 +1,16 @@
+---
+title: "App readiness"
+description: "How much of each app's work could run on its own over the last seven days, and why"
+---
+
+The App readiness page shows how much of each app's switches could run on its own. It covers the last seven days and is worked out by fixed rules. No model is consulted, and no confidence score is estimated.
+
+Every switch falls into one of three groups:
+
+- **Automatable.** A routine covers the switch, and every routine covering it has only local, reversible steps.
+- **Needs approval.** A routine covers the switch, and one of its steps is mail or chat. Those steps always ask, so the routine is not automatable.
+- **Not yet.** No repeated sequence covers the switch.
+
+Each app row shows its split and the routines it appears in. Selecting an app shows its routines and, once an automation exists for it, that automation's promotion gate. The percentages for each app add up to 100.
+
+The page is a planning view. It does not change what the twin runs. Only automations you accept can run, and only at the level you allow.

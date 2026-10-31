@@ -1,0 +1,43 @@
+---
+title: "OpenMausBot handoffs"
+description: "How the twin hands a routine to OpenMausBot, what it sends, and how to read the replies"
+---
+
+OpenMausBot is an external command-line tool for delegating work to agents. companyOS can hand a routine's brief to it, but only when you approve.
+
+## When a handoff happens
+
+A handoff starts only when you press **Send task** in the confirmation dialog. Cancelling sends nothing. The dialog shows:
+
+- the command that will run, and the lead bot or room that receives the task,
+- the full prompt,
+- a notice that OpenMausBot uses its own models, connected apps and accounts, and that companyOS automation settings do not control its agents.
+
+## What it sends
+
+The prompt carries the routine's brief, its name, the sequence of apps it follows and its cadence, when known. It does not carry activity history, screenshots, window contents, or any companyOS credentials.
+
+## How it runs
+
+The twin runs the OpenMausBot command with `--wait job`, and it waits up to 30 minutes on this device. It does not answer approvals: `--on-input exit` means any question from the agent ends the local wait, and the reply and the approval happen in OpenMausBot.
+
+## Reading the replies
+
+The Agent harness page lists each handoff, grouped by routine, with its state:
+
+| State | Meaning |
+| --- | --- |
+| sending | The command is running. |
+| completed, idle, needs-input | The job reported that state. Open it in OpenMausBot. |
+| failed, stalled, timed-out, cancelled | The job reported that state, or the local wait ended. |
+| unknown | The handoff closed without a reply. The job may already exist, so check OpenMausBot before you send the same task again. |
+
+When companyOS wrote the summary itself, the page says so. That happens when the command could not run, gave no reply, or its output was too large or unreadable.
+
+## Storage
+
+Handoffs are kept on this device for 90 days, or until you delete everything. An export includes them, and it is written unencrypted.
+
+## Status
+
+The current tests run the handoff against a fake command-line tool. The real OpenMausBot command has not been run from companyOS yet.

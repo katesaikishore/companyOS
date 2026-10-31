@@ -1,0 +1,35 @@
+---
+title: "How it works"
+description: "From capture to a routine you can run: what the twin records, how it finds patterns, and where it stops"
+---
+
+## 1. Capture
+
+The twin polls the operating system every few seconds and records the name of the app in front, its window class, and whether you are idle. It records nothing else about the app.
+
+- **Pause** stops recording until you resume. Locking the screen pauses it too, and it resumes at unlock unless you paused it yourself.
+- **Exclusions** tell the twin never to record an app. Excluding an app removes its recent events. Handoffs you already sent keep the app name until they expire or you delete everything.
+- **Browser capture** is off by default. When it is on, Chrome and Edge report only the host and a short path shape of the active tab. Titles, query strings and fragments are dropped, and private windows are never reported. It works on macOS and Linux only.
+
+## 2. Segment and mine
+
+Events are grouped into stretches of work, separated by idle time. Routines are repeated app sequences inside those stretches. The twin looks at the last 30 days, and a routine needs at least three occurrences on at least three different days before it is suggested.
+
+Routine detection is rule-based. No model is consulted to decide what counts as a routine.
+
+## 3. Name
+
+Each routine gets a rule-based name. Once a chat model is installed, a background worker can name routines instead, and the rule-based name is the fallback. Names are kept in memory only. The naming path has not been checked with a real model file yet, because the tests use a fake worker.
+
+## 4. Draft, check and run
+
+- Accepting a suggestion creates a **draft** at level 2. Drafts can be dry-run, which shows what each step would do without touching anything.
+- At level 3 you start each run, from the tray offer or with **Run now**.
+- Every step is checked by a local policy before it runs. Steps that focus mail or chat, or open a link, file or shortcut, ask you first.
+- At level 4, with the unattended switch on, a routine made only of local, reversible steps can run on its own when its app comes to the front. Anything else still asks you, or does not run.
+
+See [Automations](/automations) for the levels and the promotion gate.
+
+## What it does not do
+
+Typing, clicking and sending are not built, and neither is level 5. The twin does not read screenshots, keystrokes, page text or window titles at any point.

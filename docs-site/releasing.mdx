@@ -1,0 +1,33 @@
+---
+title: "Releasing"
+description: "How a version becomes installers, and what macOS needs before a build can ship"
+---
+
+A release is a version tag. The tag must match `apps/desktop/package.json`, so `v0.1.0` builds version `0.1.0`.
+
+## How it runs
+
+Pushing a tag such as `v0.1.0` starts `.github/workflows/release.yml`. The workflow checks the tag against the version, then builds the installers on Ubuntu, macOS and Windows. The installers and their update files are uploaded as workflow artifacts.
+
+## macOS
+
+The macOS build is for Apple silicon (arm64). It runs in release mode (`COMPANYOS_RELEASE=1`), and that mode refuses to build without these secrets:
+
+- `CSC_LINK` and `CSC_KEY_PASSWORD`: a Developer ID Application certificate, as a `.p12` file or its base64 text, and its password.
+- `APPLE_API_KEY_P8`, `APPLE_API_KEY_ID` and `APPLE_API_ISSUER`: an App Store Connect API key. The issuer ID is needed for a team key.
+
+Electron Builder signs the app with the hardened runtime and notarises it. `scripts/package.mjs` then checks the signature, the hardened runtime, the notarisation ticket and the Gatekeeper assessment, and it notarises and staples the disk image. A failed check fails the build.
+
+To build a signed release on your own Mac, set `CSC_NAME` to the name of the Developer ID Application identity in your keychain, and set the three `APPLE_API_*` variables to the key's path, key ID and issuer ID. Then run `COMPANYOS_RELEASE=1 npm run dist`.
+
+## Windows
+
+Installers are unsigned until `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD` are set. Until then SmartScreen warns about them.
+
+## Linux
+
+The build produces a `.deb` and an `.rpm`. They are unsigned.
+
+## After the build
+
+The workflow uploads the installers as artifacts. Creating a GitHub Release from them is a separate step, and the workflow does not do it yet.

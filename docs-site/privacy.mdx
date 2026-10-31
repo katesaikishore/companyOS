@@ -1,0 +1,40 @@
+---
+title: "Privacy and data"
+description: "What companyOS Twin records, where it is kept, what leaves the device, and how to remove it"
+---
+
+Your activity is stored on this device and nowhere else. Apart from the calls listed below, the code makes no network requests.
+
+## What is recorded
+
+- The name of the app in front, its window type, and whether you are idle.
+- With browser capture on, which host and path shape the active tab used. Titles and query strings are dropped. Private and incognito windows are never reported.
+
+It never records window titles, page text, typed text, the clipboard, screenshots or keystrokes.
+
+## Where it is kept
+
+- One encrypted database (SQLCipher). Its 32-byte key is sealed by the operating system's keychain.
+- If the keychain cannot protect the key, the app does not start, rather than storing data unprotected.
+- Raw events and handoffs are kept for 90 days, then removed. Routines and automations are kept until you remove them.
+
+## What leaves the device
+
+- **Approved handoffs.** The brief, routine name, app sequence and cadence, sent to OpenMausBot only after you press Send task.
+- **Model downloads.** Only when you install a model. The download comes from Hugging Face hosts, and its SHA-256 digest is checked before the model is used.
+- **Update checks.** Only in a packaged build with an HTTPS update feed set. No feed is configured yet.
+
+Update files downloaded automatically after a check are not listed in the network ledger. The model and update hosts see the connection, including your IP address, but they receive no activity data.
+
+## The network ledger
+
+The ledger lists every model download and update check the device made, as it was sent. It is on the Network ledger page.
+
+## Export and delete
+
+- **Export** writes a plain JSON file, after a warning that it is unencrypted. It includes handoffs and their replies.
+- **Delete everything** removes the database, the data key and the installed model files, and cancels any download in progress. An export you saved elsewhere is yours, and it is not touched.
+
+## Excluded apps
+
+An excluded app is not recorded from then on, and its recent events are removed. Handoffs you already sent still name the app until they expire or you delete everything.

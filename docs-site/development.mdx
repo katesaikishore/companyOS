@@ -1,0 +1,46 @@
+---
+title: "Development"
+description: "The repository layout, the commands, and the test suites"
+---
+
+## Layout
+
+- `packages/core`: the twin engine: redaction, the store, segmentation, mining, automations, policy, autonomy and naming.
+- `apps/desktop`: the Electron app. `src/main` is the main process, `src/renderer` is the interface, and `test/e2e.cjs` is the end-to-end script.
+- `apps/browser-ext`: the Chrome and Edge extension and its native messaging host.
+- `tests/privacy`: the planted-canary suite, which checks that nothing private reaches an output.
+- `scripts/measure`: a CPU and memory sampler for the resource budgets.
+- `docs`: the plan and research notes. `docs-site` is this documentation.
+
+## Commands
+
+You need Node.js 22 or later.
+
+```bash
+npm ci
+npm run typecheck
+npm test
+npm run test:privacy
+npm run build
+npm start
+```
+
+`npm run dist:dir` builds an unpacked app for the current system. `npm run dist` builds the installers. `npm run measure` runs the sampler against the built app.
+
+## End-to-end tests
+
+The end-to-end script launches the built app through Electron and drives it with Playwright. It covers setup, the overview, suggestions, automations, the tray, the network ledger, and the responsive layout from 640 to 1920 pixels wide, including a live resize.
+
+Playwright is not a dependency of the repository, so install it outside the tree:
+
+```bash
+npm run build
+npm install --no-save playwright
+NODE_PATH=$(npm root)/node_modules node apps/desktop/test/e2e.cjs
+```
+
+The script uses a temporary data folder, and it needs network access to huggingface.co to download the embedding model.
+
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every push and pull request. It runs the typecheck, the unit tests, the privacy suite, the build and an unpacked package on Ubuntu, macOS and Windows. The end-to-end script runs on Linux under a virtual display.

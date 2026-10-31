@@ -1,0 +1,45 @@
+---
+title: "Automations and autonomy"
+description: "The levels an automation moves through, the conditions for running on its own, and what each step can do"
+---
+
+An automation is an accepted routine. It moves through levels, and it only gains autonomy when it has earned it.
+
+| Level | Name | What it means |
+| --- | --- | --- |
+| 2 | Draft | Accepted routines start here. You can dry-run them. Nothing runs for real. |
+| 3 | One-click | You start each run yourself, from the tray offer or with Run now. Steps that send or write ask again. |
+| 4 | Unattended | With the unattended switch on in Settings, a routine made only of local, reversible steps can run when its app comes to the front. |
+
+Level 5 is not built. Only the promotion step raises an automation to level 4, and only when every condition below holds.
+
+## The promotion gate
+
+The gate has eight conditions, and the automation's page shows each one:
+
+1. It has run at level 3.
+2. The unattended switch is on in Settings.
+3. Every effect of the routine is local and reversible.
+4. You have supervised at least 10 runs at level 3.
+5. It has at least 25 runs in the last 14 days.
+6. At least 99 percent of its checks passed in the last 14 days.
+7. None of its runs was reverted in the last 14 days.
+8. None of its runs failed in the last 14 days.
+
+If a check fails or a run is undone, the automation drops back to level 3 at once.
+
+## Steps
+
+| Step | Where it works |
+| --- | --- |
+| Focus an app | Everywhere app capture works: macOS, Windows, and Linux on X11 |
+| Check focus | Everywhere app capture works |
+| Open a link | macOS and Windows only |
+| Open a file | macOS and Windows only, and it asks each time |
+| Press a shortcut | Not available on any system yet, so it is always blocked |
+
+Typing, clicking and sending are not built.
+
+## Stop
+
+**Stop all automations** in the sidebar turns every automation off. The Settings switch that controls automations works the same way, and it does not stop tasks you have sent to OpenMausBot.

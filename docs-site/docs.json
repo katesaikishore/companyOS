@@ -1,0 +1,31 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "companyOS Twin",
+  "description": "Documentation for the companyOS Twin desktop app: a private twin that learns your repeated work on this device.",
+  "colors": {
+    "primary": "#0E6B5C",
+    "light": "#4FB8A4",
+    "dark": "#0E6B5C"
+  },
+  "navigation": {
+    "groups": [
+      {
+        "group": "Get started",
+        "pages": ["introduction", "quickstart", "install"]
+      },
+      {
+        "group": "Using the twin",
+        "pages": ["how-it-works", "automations", "app-readiness", "openmausbot"]
+      },
+      {
+        "group": "Privacy",
+        "pages": ["privacy"]
+      },
+      {
+        "group": "Building and releasing",
+        "pages": ["development", "releasing"]
+      }
+    ]
+  }
+}

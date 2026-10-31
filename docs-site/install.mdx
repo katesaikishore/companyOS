@@ -1,0 +1,34 @@
+---
+title: "Install"
+description: "Install companyOS Twin on macOS, Windows or Linux, or build it from source"
+---
+
+## macOS
+
+- **Architecture.** Builds are for Apple silicon (arm64) only. Intel Macs are not supported by the current builds.
+- **Download.** The installer is a `.dmg` on the GitHub Releases page. Open it and drag the app into Applications.
+- **Signing.** Release builds are signed with a Developer ID certificate and notarised by Apple, so macOS opens them without a warning. No signed release is published yet. Until one is, a build from source runs on your own Mac, but macOS may still warn about it.
+- **Permission.** On first capture macOS asks for Automation permission for System Events. The app uses it only to read the name of the app in front. Without it, app capture does not run.
+
+## Windows
+
+- **Architecture.** The installer is an NSIS `.exe` for 64-bit Windows.
+- **Signing.** Installers are not code-signed yet, so SmartScreen may warn. Choose **More info**, then **Run anyway**, only if you trust the download.
+- **Browser capture.** Not available on Windows yet, because the native messaging host is not registered there.
+
+## Linux
+
+- **Packages.** The build produces a `.deb` and an `.rpm`.
+- **Session.** It needs an X11 session with `DISPLAY` set, and `xdotool` installed. Wayland is not supported, so app capture does not run there.
+- **Keyring.** The app needs a keyring that Electron can use, such as GNOME Keyring or KWallet. Without one it does not start, because it cannot protect its data key.
+
+## Build from source
+
+You need Node.js 22 or later.
+
+```bash
+npm ci
+npm run dist:dir
+```
+
+`npm run dist:dir` builds an unpacked app for the current operating system in `apps/desktop/release`. `npm run dist` builds the installers. See [Development](/development) for the other commands.
