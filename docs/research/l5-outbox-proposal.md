@@ -1,6 +1,6 @@
 # Level 5 outbox: proposal
 
-Status: proposal only. No code. Written 2026-10-31 against `origin/main` (0b95130).
+Status: proposal only. No code. Written 2026-10-31 against `origin/main` (0b95130). Update: the OpenMausBot handoff named below was removed from the product the same day (plan D15), so those references are historical.
 
 Sources: `docs/plan/README.md` §2 (D11), §7.1–§7.5, §10 (Phase 2 and Phase 4), §13, §14, §16. `docs/research/automation-autonomy.md` §3 (autonomy levels), §4 (outbox and kill switch), §7 (v2). Code: `packages/core/src/policy.ts`, `packages/core/src/types.ts`, `packages/core/src/runner.ts`, `apps/desktop/src/main/index.ts`.
 

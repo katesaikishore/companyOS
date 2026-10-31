@@ -95,7 +95,7 @@ function rail(step: number): HTMLElement {
     h(
       'p',
       { class: 'rail-foot' },
-      'Your activity is captured, stored and analyzed on this device. Only handoffs you approve send any of it out, to OpenMausBot. You can pause, exclude or delete at any time.',
+      'Your activity is captured, stored and analyzed on this device. Nothing leaves the device except model and update requests, which carry no activity. You can pause, exclude or delete at any time.',
     ),
   );
 }

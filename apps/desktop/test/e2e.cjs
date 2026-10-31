@@ -272,7 +272,7 @@ async function main() {
       assert.ok(bottom <= limit, `${selector} sits below the fold: bottom ${bottom}px of ${limit}px`);
     }
     await shot(page, '07-automation-detail-light');
-    for (const name of ['Autonomy', 'Delegate to agents', 'Workflow', 'Autonomy']) {
+    for (const name of ['Autonomy', 'Workflow', 'Autonomy']) {
       await selectTab(page, name);
       await noDocumentScroll(page, `automation ${name} tab`);
     }
@@ -352,14 +352,9 @@ async function main() {
 
     // 11. The window has one fixed size. Every main route holds the checks in responsiveProblems at 900x600, and the
     // window still reports that it cannot be resized, maximised or made full screen.
-    const ROUTES = ['overview', 'suggestions', 'automations', 'readiness', 'harness', 'ledger', 'settings'];
+    const ROUTES = ['overview', 'suggestions', 'automations', 'readiness', 'ledger', 'settings'];
     for (const route of ROUTES) {
-      if (route === 'harness') {
-        // The harness has no sidebar link any more; it opens from an automation. Its route still has to lay out.
-        await page.evaluate(() => { location.hash = '#/harness'; });
-      } else {
-        await page.click(`[data-testid="nav-${route}"]`);
-      }
+      await page.click(`[data-testid="nav-${route}"]`);
       await page.waitForTimeout(250);
       await noDocumentScroll(page, `${route} route`);
       const problems = await responsiveProblems(page);

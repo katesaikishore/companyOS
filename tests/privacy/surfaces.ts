@@ -122,7 +122,7 @@ export function recordingFetch(outbound: string[], respond: (url: string) => Res
 /**
  * Refuses every network and process call the suite did not plan: the global fetch, the http, https, net and tls
  * connect functions, and child_process. Each attempt is written to the outbound log, marked UNEXPECTED, and fails.
- * The planned calls (the model download and the OpenMausBot CLI) go through their own recorders instead.
+ * The one planned call, the model download, goes through its own recorder instead. No process is planned.
  * Returns a function that puts the originals back.
  */
 export function refuseOutbound(outbound: string[]): () => void {

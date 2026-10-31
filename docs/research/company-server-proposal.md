@@ -142,7 +142,7 @@ Tests to add when the work starts: a release never contains a device identifier;
 
 - Any code, schema or test change. `packages/core` is not touched by this proposal.
 - Legal conclusions. The research track holds them.
-- OpenMausBot handoff, and any other delegation path.
+- Any delegation path. The OpenMausBot handoff was removed on 2026-10-31 (plan D15), so it is no longer a path to exclude.
 - The contents of the item dictionary.
 
 ## 7. Decisions needed from the owner

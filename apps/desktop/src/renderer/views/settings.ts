@@ -7,12 +7,11 @@ import { openSetup } from './setup.js';
 
 type Theme = TwinConfig['theme'];
 type InstalledModel = TwinStatus['config']['installedModels'][number];
-type SectionId = 'capture' | 'automations' | 'agents' | 'models' | 'appearance' | 'data';
+type SectionId = 'capture' | 'automations' | 'models' | 'appearance' | 'data';
 
 const SECTIONS: ReadonlyArray<{ id: SectionId; label: string }> = [
   { id: 'capture', label: 'Capture' },
   { id: 'automations', label: 'Automations' },
-  { id: 'agents', label: 'OpenMausBot agents' },
   { id: 'models', label: 'Models' },
   { id: 'appearance', label: 'Appearance' },
   { id: 'data', label: 'Your data' },
@@ -60,7 +59,6 @@ export function settingsView(status: TwinStatus): HTMLElement {
         { class: 'settings-card' },
         capturePanel(config.watchBrowsers, config.excludedApps, config.idleGapMs),
         automationsPanel(config),
-        openMausBotPanel(config),
         modelsPanel(status),
         appearancePanel(config.theme),
         dataPanel(),
@@ -169,72 +167,6 @@ function textBlock(title: string, note: string): HTMLElement {
   );
 }
 
-function openMausBotPanel(config: TwinConfig): HTMLElement {
-  const key = 'openmausbot-settings';
-  const command = h('input', {
-    class: 'input mono',
-    type: 'text',
-    maxlength: 512,
-    autocomplete: 'off',
-    spellcheck: false,
-    value: config.openMausBotCommand,
-    'aria-label': 'OpenMausBot CLI executable',
-    'data-testid': 'settings-openmausbot-command',
-    oninput: () => state.dirty.add(key),
-  });
-  const target = h('input', {
-    class: 'input',
-    type: 'text',
-    maxlength: 120,
-    autocomplete: 'off',
-    spellcheck: false,
-    value: config.openMausBotTarget,
-    placeholder: 'Existing lead bot or room',
-    'aria-label': 'OpenMausBot lead bot or room',
-    'data-testid': 'settings-openmausbot-target',
-    oninput: () => state.dirty.add(key),
-  });
-  return sectionCard(
-    {
-      id: 'agents',
-      testid: 'settings-openmausbot',
-      title: 'OpenMausBot agents',
-      note: 'Delegate a task from any accepted routine to its existing agent harness.',
-      stack: true,
-    },
-    h('label', { class: 'settings-field' }, h('span', { class: 'settings-field-label' }, 'CLI executable'), command),
-    h('label', { class: 'settings-field' }, h('span', { class: 'settings-field-label' }, 'Lead bot or room'), target),
-    h(
-      'p',
-      { class: 'settings-note' },
-      'Install with ',
-      h('code', { class: 'settings-code mono' }, 'npm install -g openmausbot'),
-      ' (Node.js 24+) and configure its models, lead bot or room, and connected apps in OpenMausBot. companyOS starts one job and waits for its nested agent tasks.',
-    ),
-    h(
-      'p',
-      { class: 'settings-note' },
-      'A handoff sends the task brief, routine name, app sequence and estimated cadence after a native confirmation. The prompt excludes activity history, screenshots, window contents and companyOS credentials. OpenMausBot may use its own configured credentials and permissions, outside companyOS autonomy controls. Handoffs are kept on this device for 90 days, or until you delete everything.',
-    ),
-    h(
-      'div',
-      { class: 'actions' },
-      button('Save OpenMausBot settings', {
-        variant: 'primary',
-        testid: 'settings-openmausbot-save',
-        disabled: pending(key),
-        onClick: () => {
-          state.dirty.delete(key);
-          void act(key, async () => {
-            await bridge().updateConfig({ openMausBotCommand: command.value.trim(), openMausBotTarget: target.value.trim() });
-          });
-        },
-      }),
-      h('a', { class: 'settings-link', href: '#/harness', 'data-testid': 'settings-open-harness' }, 'Open agent harness'),
-    ),
-  );
-}
-
 function appearancePanel(current: Theme): HTMLElement {
   return sectionCard(
     { id: 'appearance', testid: 'settings-appearance', title: 'Appearance' },
@@ -276,7 +208,7 @@ function capturePanel(watchBrowsers: boolean, excluded: readonly string[], idleG
     block(
       textBlock(
         'Excluded apps',
-        'The twin forgets anything it recorded from an excluded app and never records it again. Handoffs you already sent still name the app until they expire or you delete everything.',
+        'The twin forgets anything it recorded from an excluded app and never records it again. Handoff records saved by an earlier version may still name the app until they are removed after 90 days, or until you delete everything.',
       ),
       exclusionEditor('exclusions:settings', excluded, 'settings-exclusions', next =>
         void saveConfig('exclusions:settings', { excludedApps: next }),
@@ -297,7 +229,7 @@ function automationsPanel(config: TwinConfig): HTMLElement {
       toggleRow({
         testid: 'settings-automations-toggle',
         label: 'Automations on',
-        note: 'When off, no automation runs, on any level. It does not stop tasks you send to OpenMausBot.',
+        note: 'When off, no automation runs, on any level.',
         checked: config.automationsEnabled,
         onChange: checked => void saveConfig('automations', { automationsEnabled: checked }),
       }),

@@ -82,13 +82,3 @@ export function noticedPerWeek(perWeek: number): string {
   const rate = formatRate(perWeek);
   return Number(rate) === 1 ? 'Noticed about once a week.' : `Noticed ${rate} times a week.`;
 }
-
-/** The source of a summary: OpenMausBot's reply, or companyOS's own message when companyOS itself failed. */
-export function summarySourceLabel(localFailure: boolean): string {
-  return localFailure ? 'From companyOS' : 'From OpenMausBot';
-}
-
-/** A handoff state in words. Each state reads as itself, except unknown, which reads as a neutral status. */
-export function handoffStateLabel(state: string): string {
-  return state === 'unknown' ? 'Status unknown' : state;
-}

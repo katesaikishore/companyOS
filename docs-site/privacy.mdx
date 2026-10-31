@@ -16,11 +16,11 @@ It never records window titles, page text, typed text, the clipboard, screenshot
 
 - One encrypted database (SQLCipher). Its 32-byte key is sealed by the operating system's keychain.
 - If the keychain cannot protect the key, the app does not start, rather than storing data unprotected.
-- Raw events and handoffs are kept for 90 days, then removed. Routines and automations are kept until you remove them.
+- Raw events are kept for 90 days, then removed. Routines and automations are kept until you remove them.
+- Handoff records saved by an earlier version of the app are no longer read or shown. They are kept for 90 days from when they were sent, then removed. Delete everything removes them at once.
 
 ## What leaves the device
 
-- **Approved handoffs.** The brief, routine name, app sequence and cadence, sent to OpenMausBot only after you press Send task.
 - **Model downloads.** Only when you install a model. The download comes from Hugging Face hosts, and its SHA-256 digest is checked before the model is used.
 - **Update checks.** Only in a packaged build with an HTTPS update feed set. No feed is configured yet.
 
@@ -32,9 +32,9 @@ The ledger lists every model download and update check the device made, as it wa
 
 ## Export and delete
 
-- **Export** writes a plain JSON file, after a warning that it is unencrypted. It includes handoffs and their replies.
+- **Export** writes a plain JSON file, after a warning that it is unencrypted. It includes any handoff records saved by an earlier version, with their replies.
 - **Delete everything** removes the database, the data key and the installed model files, and cancels any download in progress. An export you saved elsewhere is yours, and it is not touched.
 
 ## Excluded apps
 
-An excluded app is not recorded from then on, and its recent events are removed. Handoffs you already sent still name the app until they expire or you delete everything.
+An excluded app is not recorded from then on, and its recent events are removed. Handoff records saved by an earlier version may still name the app until they are removed after 90 days, or until you delete everything.

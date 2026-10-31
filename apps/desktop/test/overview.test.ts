@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DAY_MS, handoffStateLabel, noticedPerWeek, summarySourceLabel, titleCase, titleCaseSequence } from '../src/renderer/format';
+import { DAY_MS, noticedPerWeek, titleCase, titleCaseSequence } from '../src/renderer/format';
 import {
   networkCallsThisWeek,
   networkSummary,
@@ -164,23 +164,6 @@ describe('noticedPerWeek', () => {
   it('gives any other rate in digits', () => {
     expect(noticedPerWeek(3)).toBe('Noticed 3 times a week.');
     expect(noticedPerWeek(0.5)).toBe('Noticed 0.5 times a week.');
-  });
-});
-
-describe('summarySourceLabel', () => {
-  it('names OpenMausBot when companyOS did not fail', () => {
-    expect(summarySourceLabel(false)).toBe('From OpenMausBot');
-  });
-
-  it('names companyOS when companyOS itself failed', () => {
-    expect(summarySourceLabel(true)).toBe('From companyOS');
-  });
-});
-
-describe('handoffStateLabel', () => {
-  it('reads a state as itself, and the unknown state as a status', () => {
-    expect(handoffStateLabel('completed')).toBe('completed');
-    expect(handoffStateLabel('unknown')).toBe('Status unknown');
   });
 });
 

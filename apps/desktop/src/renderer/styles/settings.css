@@ -231,51 +231,6 @@
   color: var(--muted);
 }
 
-/* OpenMausBot: form fields */
-
-.settings-view .settings-field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
-
-.settings-view .settings-field-label {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--ink-2);
-}
-
-.settings-view .settings-field .input {
-  flex: none;
-  width: 100%;
-  min-height: 36px;
-  font-size: 13px;
-}
-
-.settings-view .settings-code {
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: var(--inset);
-  color: var(--ink-2);
-  font-size: 12px;
-}
-
-.settings-view .settings-link {
-  display: inline-flex;
-  align-items: center;
-  min-height: 36px;
-  padding: 0 12px;
-  color: var(--accent-text);
-  font-size: 14px;
-  font-weight: 600;
-  text-decoration: none;
-}
-
-.settings-view .settings-link:hover {
-  text-decoration: underline;
-}
-
 /* Models */
 
 .settings-view .settings-row.settings-model {

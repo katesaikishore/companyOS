@@ -1518,41 +1518,6 @@ a {
   font-size: 14px;
 }
 
-.task-brief {
-  width: 100%;
-  min-height: 96px;
-  padding: 10px 12px;
-  resize: vertical;
-  line-height: 1.5;
-}
-
-.agent-task-result {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
-}
-
-.agent-task-result p {
-  margin: 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.agent-task-tree summary {
-  width: fit-content;
-  color: var(--accent);
-  cursor: pointer;
-  font-size: 13px;
-}
-
-.agent-task-tree .code-block {
-  max-height: 360px;
-  margin: 10px 0 0;
-  overflow: auto;
-}
-
 .model-list {
   display: flex;
   flex-direction: column;

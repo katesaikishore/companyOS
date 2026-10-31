@@ -4,7 +4,6 @@ import { shell } from './components/shell.js';
 import { openCommandPalette } from './commands.js';
 import { modelFraction, modelStateLabel } from './labels.js';
 import { automationDetailView, automationsView } from './views/automations.js';
-import { harnessView } from './views/harness.js';
 import { ledgerView } from './views/ledger.js';
 import { readinessView } from './views/readiness.js';
 import { overviewView } from './views/overview.js';
@@ -91,7 +90,7 @@ function signature(status: TwinStatus | undefined): string {
     pending: [...state.pending].sort(),
     wizard: [state.wizardForced, state.wizardStep, state.altOpen],
     setup: state.setup,
-    selection: [state.selectedSuggestion, state.selectedLedger, state.selectedHandoff, state.automationTab],
+    selection: [state.selectedSuggestion, state.selectedLedger, state.automationTab],
     runs: [...state.runResults.entries()],
   });
 }
@@ -123,8 +122,6 @@ function viewFor(status: TwinStatus, route: Route): HTMLElement {
       return ledgerView(status);
     case 'readiness':
       return readinessView(status, route.app);
-    case 'harness':
-      return harnessView(status);
     case 'settings':
       return settingsView(status);
     default:

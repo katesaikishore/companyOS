@@ -2,6 +2,8 @@
 
 This records what was finished, what was decided without waiting for the owner, and what still needs someone with access. Each decision names how to reverse it.
 
+Update, the same day: the OpenMausBot handoff described below was removed from the product (plan D15). Items about it are historical.
+
 Merged to `main` on 31 October: the 900 by 600 window work (through PR #3), and every finished backlog branch. On `main` the type-check, the unit suites (28 files), the privacy suite (39 tests), the build and the end-to-end run all pass.
 
 ## Status
