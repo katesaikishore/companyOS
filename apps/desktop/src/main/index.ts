@@ -162,6 +162,9 @@ function registerIpc(): void {
     return requireRuntime().delegateRoutine(automation, taskBrief);
   });
 
+  // The engine checks the decision's shape and that it still fits the day's tasks, so the page cannot store anything else.
+  handle(IPC.decideTask, decision => requireRuntime().decideTask(decision));
+
   handle(IPC.openMainWindow, route => {
     if (route !== undefined && (typeof route !== 'string' || !/^#\/[a-z0-9/-]{0,80}$/.test(route))) {
       throw new Error('Invalid route.');
@@ -178,7 +181,7 @@ function registerIpc(): void {
       defaultId: 1,
       cancelId: 1,
       message: 'The export is not encrypted',
-      detail: 'It includes every recorded app switch with timestamps, URL shapes, your settings, your OpenMausBot handoffs (briefs, replies, job trees, thread ids), and any configured OpenMausBot executable and target. Keep it somewhere private, and do not put it in a synced folder.',
+      detail: 'It includes every recorded app switch with timestamps, URL shapes, your settings, your OpenMausBot handoffs (briefs, replies, job trees, thread ids), your task decisions (confirmations, merges, splits and the names you gave tasks), and any configured OpenMausBot executable and target. Keep it somewhere private, and do not put it in a synced folder.',
     };
     const parent = parentWindow();
     const warned = parent ? await dialog.showMessageBox(parent, warning) : await dialog.showMessageBox(warning);
@@ -202,7 +205,7 @@ function registerIpc(): void {
       defaultId: 1,
       cancelId: 1,
       message: 'Delete everything the twin knows about you?',
-      detail: 'This removes all events, automations, the network ledger, OpenMausBot handoffs (briefs, replies, job trees, thread ids) and the installed models on this device. It cannot be undone.',
+      detail: 'This removes all events, automations, the network ledger, OpenMausBot handoffs (briefs, replies, job trees, thread ids), task decisions and the installed models on this device. It cannot be undone.',
     };
     const parent = parentWindow();
     const choice = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);

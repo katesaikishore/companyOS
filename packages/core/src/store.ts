@@ -3,7 +3,7 @@ import { createDecipheriv } from 'node:crypto';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-export const COLLECTIONS = ['events', 'ledger', 'automations', 'autonomy', 'settings', 'handoffs'] as const;
+export const COLLECTIONS = ['events', 'ledger', 'automations', 'autonomy', 'settings', 'handoffs', 'taskDecisions'] as const;
 export type Collection = (typeof COLLECTIONS)[number];
 
 const DATABASE_FILE = 'twin.db';

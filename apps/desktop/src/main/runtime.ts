@@ -215,6 +215,7 @@ export class TwinRuntime {
       readiness: this.agent.readiness(),
       habits: this.agent.habits(),
       handoffs: this.agent.handoffs(),
+      tasks: this.agent.dayTasks(),
       stats: {
         routinesLearned: suggestions.length + automations.length,
         waiting: suggestions.length + drafts,
@@ -256,6 +257,11 @@ export class TwinRuntime {
 
   dismissRoutine(routineId: string): void {
     this.agent.dismissRoutine(routineId);
+  }
+
+  /** Confirms, renames, merges or splits one of a day's tasks. The engine checks the decision before it is stored. */
+  decideTask(input: unknown): void {
+    this.agent.decideTask(input);
   }
 
   setLevel(automationId: string, level: AutonomyLevel): AutomationView {

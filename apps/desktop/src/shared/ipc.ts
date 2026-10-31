@@ -19,6 +19,7 @@ export const IPC = {
   revertLast: 'twin:revert-last',
   answerPendingRun: 'twin:answer-pending-run',
   delegateRoutine: 'twin:delegate-routine',
+  decideTask: 'twin:decide-task',
   exportData: 'twin:export-data',
   deleteAll: 'twin:delete-all',
   openMainWindow: 'twin:open-main-window',

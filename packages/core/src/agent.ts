@@ -4,7 +4,7 @@ import { openingApps } from './triggers';
 import { DEFAULT_MINING, mineRoutines, type Routine } from './mine';
 import { computeReadiness } from './readiness';
 import { habits as computeHabits, HABITS_WINDOW_DAYS } from './habits';
-import type { AppReadinessView, HabitsView } from './contract';
+import type { AppReadinessView, DayTasksView, HabitsView } from './contract';
 import { normalizeSignal } from './redact';
 import {
   promotionCheck,
@@ -20,6 +20,7 @@ import { runAutomation, type Executor, type RunMode, type RunRequest, type RunRe
 import { segment, type Segment } from './segment';
 import { EncryptedStore } from './store';
 import { HANDOFF_READ_LIMIT, HandoffSchema, UNKNOWN_HANDOFF_SUMMARY } from './handoff';
+import { dayKeyOf, decisionFits, parseTaskDecision, TaskDecisionSchema, tasksForDay, type TaskDecision } from './tasks';
 import type { HandoffView } from './contract';
 import type { InstalledModel, NetworkEntry } from './models/types';
 import {
@@ -352,6 +353,26 @@ export class TwinAgent {
     this.store.replaceAll('handoffs', next);
   }
 
+  /**
+   * The tasks of one local day, today by default: the rule-based grouping of the day's work with the person's decisions
+   * applied. Rebuilt from the stored events on each call, so only the decisions are kept.
+   */
+  dayTasks(day: string = dayKeyOf(this.now())): DayTasksView {
+    return tasksForDay(this.unexcludedEvents(), this.readTaskDecisions(), day, this.config.idleGapMs);
+  }
+
+  /**
+   * Records one decision about a day's tasks. It is checked against the tasks as they stand, so a decision that no longer
+   * fits (a task already merged away, say) is refused and nothing is stored. The record holds ids and the action only.
+   */
+  decideTask(input: unknown): void {
+    const decision = parseTaskDecision(input);
+    if (!decisionFits(this.unexcludedEvents(), this.readTaskDecisions(), this.config.idleGapMs, decision)) {
+      throw new Error('That change no longer fits the tasks for that day. Refresh the review and try again.');
+    }
+    this.store.append('taskDecisions', decision);
+  }
+
   /** The newest handoffs first. A read returns at most HANDOFF_READ_LIMIT, whatever limit is asked for. */
   handoffs(limit: number = HANDOFF_READ_LIMIT): HandoffView[] {
     const requested = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : HANDOFF_READ_LIMIT;
@@ -464,13 +485,13 @@ export class TwinAgent {
     return this.store.sizeBytes();
   }
 
-  /** Drops events and handoffs older than the retention window. Returns how many records were removed. */
+  /** Drops events, handoffs and task decisions older than the retention window. Returns how many records were removed. */
   prune(): number {
     const cutoff = this.now() - RETENTION_DAYS * DAY_MS;
     const all = this.store.readAll<TwinEvent>('events');
     const kept = all.filter(event => event.ts >= cutoff);
     if (kept.length !== all.length) this.store.replaceAll('events', kept);
-    return all.length - kept.length + this.pruneHandoffs(cutoff);
+    return all.length - kept.length + this.pruneHandoffs(cutoff) + this.pruneTaskDecisions(cutoff);
   }
 
   /** Everything the twin holds about the person, for the person. */
@@ -483,6 +504,7 @@ export class TwinAgent {
       autonomy: this.readStates(),
       network: this.networkLedger(),
       handoffs: this.readHandoffs(),
+      taskDecisions: this.readTaskDecisions(),
     };
   }
 
@@ -528,6 +550,31 @@ export class TwinAgent {
       const parsed = HandoffSchema.safeParse(record);
       return parsed.success ? [parsed.data] : [];
     });
+  }
+
+  /** Every stored event except those of an excluded app. Task names come only from these, as the other readings do. */
+  private unexcludedEvents(): TwinEvent[] {
+    return this.store.readAll<TwinEvent>('events').filter(event => !event.app || !isExcludedApp(event.app, this.config.excludedApps));
+  }
+
+  /** The stored task decisions that fit the schema. A row that does not parse is left out, as an unreadable handoff is. */
+  private readTaskDecisions(): TaskDecision[] {
+    return this.store.readAll<unknown>('taskDecisions').flatMap(record => {
+      const parsed = TaskDecisionSchema.safeParse(record);
+      return parsed.success ? [parsed.data] : [];
+    });
+  }
+
+  /** A decision is kept for as long as the events of its day are kept. Returns how many were removed. */
+  private pruneTaskDecisions(cutoff: number): number {
+    const cutoffDay = dayKeyOf(cutoff);
+    const rows = this.store.readAll<unknown>('taskDecisions');
+    const kept = rows.filter(row => {
+      const parsed = TaskDecisionSchema.safeParse(row);
+      return !parsed.success || parsed.data.day >= cutoffDay;
+    });
+    if (kept.length !== rows.length) this.store.replaceAll('taskDecisions', kept);
+    return rows.length - kept.length;
   }
 
   /**
