@@ -18,6 +18,7 @@ export * from './models';
 export * from './triggers';
 export * from './contract';
 export * from './readiness';
+export * from './habits';
 export * from './company';
 export * from './llm';
 export * from './ocel';

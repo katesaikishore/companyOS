@@ -3,7 +3,8 @@ import { isExcludedApp, normalizeAppName } from './classify';
 import { openingApps } from './triggers';
 import { DEFAULT_MINING, mineRoutines, type Routine } from './mine';
 import { computeReadiness } from './readiness';
-import type { AppReadinessView } from './contract';
+import { habits as computeHabits, HABITS_WINDOW_DAYS } from './habits';
+import type { AppReadinessView, HabitsView } from './contract';
 import { normalizeSignal } from './redact';
 import {
   promotionCheck,
@@ -319,6 +320,14 @@ export class TwinAgent {
       automations: this.automations(),
       dismissedRoutineIds: this.config.dismissedRoutineIds,
     });
+  }
+
+  /**
+   * How the person usually works, over the last four weeks. Rebuilt from the stored events on each call. Nothing is
+   * stored, so wipe and export need no change.
+   */
+  habits(): HabitsView {
+    return computeHabits(this.recentEvents(HABITS_WINDOW_DAYS), this.now(), this.config.idleGapMs);
   }
 
   /** Every network call the twin has made. Stored sealed, shown to the person. */
