@@ -109,8 +109,8 @@ a {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 28px;
-  padding: 24px 16px;
+  gap: 20px;
+  padding: 20px 16px;
   min-width: 0;
   background: var(--sidebar);
   border-right: 1px solid var(--border);

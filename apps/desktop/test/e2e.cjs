@@ -144,13 +144,18 @@ async function main() {
   const consoleErrors = [];
   try {
     const page = await mainPage(app);
+    const [defaultWidth, defaultHeight] = await app.evaluate(({ BrowserWindow }) => {
+      const main = BrowserWindow.getAllWindows().find(win => win.webContents.getURL().includes('/index.html'));
+      return main.getContentSize();
+    });
+    assert.ok(defaultWidth <= 1100 && defaultHeight <= 700, `the default window fits a 13-inch screen (${defaultWidth}x${defaultHeight})`);
     page.on('console', message => {
       if (message.type() === 'error') consoleErrors.push(message.text());
     });
     page.on('pageerror', error => consoleErrors.push(error.message));
     await app.evaluate(({ BrowserWindow }) => {
       const main = BrowserWindow.getAllWindows().find(win => win.webContents.getURL().includes('/index.html'));
-      main?.setContentSize(1200, 800);
+      main?.setContentSize(1100, 700);
     });
 
     // 1. A fresh install opens the setup wizard, not the app.
@@ -316,7 +321,12 @@ async function main() {
     for (const width of WIDTHS) {
       await setWindowSize(app, page, width, 600);
       for (const route of ROUTES) {
-        await page.click(`[data-testid="nav-${route}"]`);
+        if (route === 'harness') {
+          // The harness has no sidebar link any more; it opens from an automation. Its route still has to lay out.
+          await page.evaluate(() => { location.hash = '#/harness'; });
+        } else {
+          await page.click(`[data-testid="nav-${route}"]`);
+        }
         await page.waitForTimeout(250);
         const problems = await responsiveProblems(page);
         assert.deepEqual(problems, [], `${route} at ${width}px: ${problems.join('; ')}`);

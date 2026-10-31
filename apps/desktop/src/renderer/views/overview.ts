@@ -5,7 +5,6 @@ import { formatBytes, formatRate, percent, plural, titleCase, titleCaseSequence 
 import { appsSummary, captureTitle, LEVEL_NAMES, levelLabel } from '../labels.js';
 import {
   heroLede,
-  hoursBack,
   ladderCounts,
   lastSeenLabel,
   networkCallsThisWeek,
@@ -147,7 +146,6 @@ function statsRow(status: TwinStatus): HTMLElement {
       tag: stats.waiting > 0 ? { text: 'review', review: true } : undefined,
     }),
     statCard({ label: 'Unattended ready', value: String(stats.unattendedReady), note: 'Level 4 · local and reversible', tag: { text: 'gated' } }),
-    statCard({ label: 'Time back', value: hoursBack(stats.minutesBackPerWeek), unit: 'h / wk', note: 'From automations you keep', tag: { text: 'estimate' } }),
   );
 }
 

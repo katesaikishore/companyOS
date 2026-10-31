@@ -39,7 +39,6 @@ export function shell(status: TwinStatus, route: Route, content: Child): HTMLEle
       badge: `${status.readiness.automatablePct}%`,
       active: route.name === 'readiness',
     },
-    { label: 'Agent harness', href: '#/harness', testid: 'nav-harness', active: route.name === 'harness' },
     {
       label: 'Network ledger',
       href: '#/ledger',
@@ -129,7 +128,6 @@ function observingCard(status: TwinStatus): HTMLElement {
       h('span', { class: `dot dot-${captured}`, 'aria-hidden': 'true' }),
       h('strong', null, captureTitle(captured)),
     ),
-    h('p', { class: 'muted small' }, "Records app names, window types and, with browser capture on, each site's host. No screenshots, no keystrokes."),
     status.capture.detail ? h('p', { class: 'muted small' }, status.capture.detail) : undefined,
     button(
       paused ? 'Resume capture' : 'Pause capture',
