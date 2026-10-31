@@ -38,6 +38,7 @@ Runs and what each one was for:
 | 6 `41241927662` | push | Clean single-window TextEdit data. Found bug 2. |
 | 7 `41241931352` | pull_request | Same code as run 6. The tables below come from this run. |
 | 8 `41242508087` | pull_request | Fix for bug 2 in place. See "After the fix". |
+| 9 `41243038529` | pull_request | Started by pushing this results document while pull request 11 was open, on branch head `b9bbf4d`. No tables here come from it. |
 
 A pull-request run checks out the merge of the branch into `main`, so run 7 ran on commit `293d7b1`, not on the branch
 head `cbfd3ed`. The files under test are the same.
@@ -48,7 +49,7 @@ head `cbfd3ed`. The files under test are the same.
   Automation for `/usr/bin/osascript` and `/bin/bash` (`kTCCServiceAccessibility|/usr/bin/osascript|2|0`, where `2` is
   allowed). The first-run prompt, the denied state, and the error text for a denied call were never seen. The app's
   wording for those cases is unchecked.
-- **Windows ran elevated, as an administrator.** User `runneradmin`, session 2 on the console, 1024x768, no UAC. A normal
+- **Windows ran elevated, as an administrator.** User `runneradmin`, session 2 on the console, 1024x768. Whether UAC was on was not recorded. A normal
   user's SendKeys into an elevated window is the case the adapter comment warns about. It could not occur here.
 - **One machine type each.** macOS 26.6.2 on Apple Silicon (arm64). Windows Server 2025 Datacenter, build 26100, x64,
   Windows PowerShell 5.1. Intel Macs, older macOS, Windows 10, Windows 11 and Windows on Arm were not tested.
@@ -68,7 +69,7 @@ Times are minimum / median / maximum over the calls in that row.
 
 | Call | Result | Front app afterwards | Error text | Time |
 |---|---|---|---|---|
-| `frontmost()` | `Finder`, then `TextEdit` after it came forward | | none | 87 / 105 / 141 ms (8 calls) |
+| `frontmost()` | `Finder`, then `TextEdit` after it came forward | | none | 87 / 105 / 141 ms (8 calls, not counting the first one, made before the test app launched) |
 | `focus('Finder')` while TextEdit in front | `true` | Finder | none | 100 ms (1 call) |
 | `pressShortcut('TextEdit', 'cmd+a')`, Finder in front | `true` | TextEdit | none | 596 ms (1 call) |
 | `focus('TextEdit')`, Finder in front | `true` | TextEdit | none | 58 / 73 / 79 ms (3 calls) |
@@ -135,7 +136,7 @@ Notepad had one window. Source: run 7.
 
 | Call | Result | Front app afterwards | Error text | Time |
 |---|---|---|---|---|
-| `frontmost()` | `WindowsTerminal`, `mspaint`, `notepad`, each correct when read | | none | 365 / 529 / 1349 ms (8 calls) |
+| `frontmost()` | `WindowsTerminal`, `mspaint`, `notepad`, each correct when read | | none | 365 / 529 / 1349 ms (8 calls, not counting the first one, made before the test app launched; the `WindowsTerminal` result is from that first call) |
 | `focus('mspaint')` | `true` | mspaint | none | 362 ms (1 call) |
 | `pressShortcut('notepad', 'cmd+a')`, mspaint in front | `true` | notepad | none | 497 ms (1 call) |
 | `focus('notepad')`, Notepad **minimized** | **`false`** | mspaint | `powershell.exe exit 3` (AppActivate returned false). No other text. | 321 / 339 / 362 ms (3 calls) |
@@ -198,9 +199,10 @@ Key delivery, by the clipboard check:
 - **Cause.** The runner has a file named `notepad`, with no extension, at `C:\Program Files\Git\usr\bin\notepad`. That
   folder is on the PATH. The shell takes the bare name `notepad` to be that file, which has no program registered, so it
   asks which app to use. `Get-Command notepad -All` lists the extensionless file first.
-- **Variants run in runs 3, 4 and 7.** With the same `Start-Process` form as the adapter: `notepad.exe` opened Notepad
+- **Variants run in runs 3, 4, 6, 7 and 8.** With the same `Start-Process` form as the adapter: `notepad.exe` opened Notepad
   and showed no picker. The full path `C:\Windows\System32\notepad.exe` did the same. The bare name `notepad` showed
-  the picker in every run, from both the repository folder and `C:\Windows\Temp`. The call sometimes returned in about
+  the picker in runs 4, 6 and 7, from both the repository folder and `C:\Windows\Temp`. Run 3 cannot be read: a picker
+  left on screen by the earlier `openFile` call was already there, so `pickerShown` was true even after the `notepad.exe` variant. The call sometimes returned in about
   0.4 s and sometimes did not return within 8 s. So the working directory is not the cause.
 - **Fix.** `windowsProgram()` in `platform.ts` adds `.exe` to a bare name, and leaves a name with an extension or a path
   alone. It applies only to `openFile` and `openUrl`. Focus and press match on the process name and are unchanged.
