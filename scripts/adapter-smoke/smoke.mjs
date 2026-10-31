@@ -13,6 +13,7 @@ import {
   bringOtherForward,
   launchOtherApp,
   launchTestApp,
+  cleanStderr,
   readClipboard,
   round,
   runMeta,
@@ -54,7 +55,7 @@ cp.execFile = function observedExecFile(file, ...rest) {
         signal: error?.signal ?? null,
         timedOut: error?.killed === true,
         stdout: truncate(stdout ?? '', 1500),
-        stderr: truncate(stderr ?? '', 1500),
+        stderr: truncate(cleanStderr(stderr ?? ''), 1500),
         durationMs: round(performance.now() - started),
       });
       original(error, stdout, stderr);
@@ -181,6 +182,10 @@ try {
 
   // 6. Frontmost timing.
   for (let index = 1; index <= 3; index++) await step(`frontmost #${index}`, front);
+
+  // 7. openFile: opens the marker file again in the app, through the adapter's own launch command. Last, because it can
+  // add a second window.
+  await step(`openFile ${name} (adapter launch command)`, () => executor.openFile?.(name, launched.file), withApp);
 } catch (error) {
   report.fatal = { name: error?.name, message: truncate(error?.message ?? error, 1500) };
   console.log(`FATAL ${JSON.stringify(report.fatal)}`);

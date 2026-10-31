@@ -78,7 +78,12 @@ async function provenance(binary, packageDir) {
 function parseEnvelope(text) {
   try {
     const value = JSON.parse(text);
-    return { ok: value?.ok, errorCode: value?.error?.code ?? value?.code, errorMessage: value?.error?.message ?? value?.message };
+    return {
+      ok: value?.ok,
+      errorCode: value?.error?.code ?? value?.code,
+      errorMessage: value?.error?.message ?? value?.message,
+      windowCount: Array.isArray(value?.data) ? value.data.length : undefined,
+    };
   } catch {
     return undefined;
   }
@@ -143,19 +148,18 @@ try {
   other = await launchOtherApp();
   report.otherApp = other;
 
-  // Which name does the CLI know the app by? Probe a few and use the first one that lists a window.
-  const names = IS_MAC ? ['TextEdit'] : ['Notepad', 'notepad'];
-  let appName = names[0];
+  // Which name does the CLI know the app by? On Windows, list-apps shows names with .exe. A name that matches nothing
+  // still exits 0 with an empty list, so every candidate is tried and the first that lists a window is used.
+  const names = IS_MAC ? ['TextEdit'] : ['notepad.exe', 'Notepad', 'notepad'];
+  let appName;
   report.nameProbe = [];
   for (const candidate of names) {
     const probe = await capture(binary, ['list-windows', '--app', candidate], { env, timeoutMs: 30_000 });
     const envelope = parseEnvelope(probe.stdout);
     report.nameProbe.push({ candidate, exitCode: probe.exitCode, envelope, stdout: truncate(probe.stdout, 800), stderr: probe.stderr });
-    if (probe.exitCode === 0 && envelope?.ok !== false) {
-      appName = candidate;
-      break;
-    }
+    if (!appName && probe.exitCode === 0 && (envelope?.windowCount ?? 0) > 0) appName = candidate;
   }
+  appName ??= names[0];
   report.appName = appName;
 
   await timed('status', binary, ['status'], 5, env);

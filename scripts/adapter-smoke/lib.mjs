@@ -2,7 +2,7 @@
 // happened (exit code, signal, output, error text, time) and the scripts write those records out as JSON.
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { arch, release, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -21,6 +21,24 @@ export const round = value => Math.round(value * 10) / 10;
 export function truncate(text, limit = 3000) {
   const value = typeof text === 'string' ? text : String(text ?? '');
   return value.length > limit ? `${value.slice(0, limit)}...[${value.length - limit} more characters]` : value;
+}
+
+/**
+ * Windows PowerShell writes progress and errors to stderr as CLIXML when it runs with -EncodedCommand. The progress
+ * records are noise. Only the error strings are kept, decoded back to plain text. Other text is returned unchanged.
+ */
+export function cleanStderr(text) {
+  if (typeof text !== 'string' || !text.startsWith('#< CLIXML')) return text ?? '';
+  const decode = value =>
+    value
+      .replace(/_x000D__x000A_/g, '\n')
+      .replace(/_x000D_|_x000A_/g, '\n')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&amp;/g, '&');
+  return [...text.matchAll(/<S S="Error">([\s\S]*?)<\/S>/g)].map(match => decode(match[1])).join('').trim();
 }
 
 /** Long arguments (an inline script, an encoded command) are shortened so the log stays readable. */
@@ -53,7 +71,7 @@ export function capture(file, args = [], options = {}) {
         signal: error?.signal ?? null,
         timedOut: error?.killed === true,
         stdout: truncate(stdout ?? '', options.outputLimit ?? 3000),
-        stderr: truncate(stderr ?? '', options.outputLimit ?? 3000),
+        stderr: truncate(cleanStderr(stderr ?? ''), options.outputLimit ?? 3000),
         errorMessage: error ? truncate(error.message, 600) : undefined,
         durationMs: round(Number(process.hrtime.bigint() - started) / 1e6),
       });
@@ -161,6 +179,20 @@ export async function systemInfo() {
     checks.systemEventsCount = await capture('osascript', ['-e', 'tell application "System Events" to count processes'], { timeoutMs: 15_000 });
   } else if (IS_WIN) {
     checks.desktopInfo = await ps(WIN_INFO, {}, { timeoutMs: 30_000 });
+    checks.notepadLookup = await ps(
+      `
+$out = [ordered]@{}
+$out.system32 = Test-Path "$env:WINDIR\\System32\\notepad.exe"
+$out.windir = Test-Path "$env:WINDIR\\notepad.exe"
+$out.commands = @(Get-Command notepad* -All -ErrorAction SilentlyContinue | ForEach-Object { "$($_.CommandType): $($_.Source)" })
+$out.appPaths = (Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\notepad.exe' -ErrorAction SilentlyContinue).'(default)'
+$out.appx = @(Get-AppxPackage -Name '*Notepad*' -ErrorAction SilentlyContinue | ForEach-Object { $_.PackageFullName })
+$out.cwd = (Get-Location).Path
+$out | ConvertTo-Json -Compress
+`,
+      {},
+      { timeoutMs: 60_000 },
+    );
     checks.querySession = await capture('query', ['session']);
   }
   return checks;
@@ -210,8 +242,22 @@ $processId = [uint32]0
   );
 }
 
+/**
+ * TextEdit reopens the windows it had when it was last killed. A second script in the same job would then see two
+ * windows with the same title, so the saved state is removed before a launch and after a stop.
+ */
+function forgetTextEditState() {
+  if (!IS_MAC) return;
+  try {
+    rmSync(join(process.env.HOME ?? '', 'Library/Saved Application State/com.apple.TextEdit.savedState'), { recursive: true, force: true });
+  } catch {
+    // Best effort. A leftover window shows up in the window count the scripts record.
+  }
+}
+
 /** Starts the test app on a temp file that holds a known marker line. Waits for its process and a window. */
 export async function launchTestApp() {
+  forgetTextEditState();
   const dir = mkdtempSync(join(tmpdir(), 'twin-smoke-'));
   const file = join(dir, 'twin-smoke.txt');
   writeFileSync(file, `${MARKER}\n`);
@@ -220,7 +266,13 @@ export async function launchTestApp() {
   info.launch = IS_MAC
     ? await capture('open', ['-a', 'TextEdit', file])
     : await ps(
-        `$process = Start-Process -FilePath notepad -ArgumentList ('"' + $env:TWIN_FILE + '"') -PassThru\n$process.Id`,
+        `
+$exe = @("$env:WINDIR\\System32\\notepad.exe", "$env:WINDIR\\notepad.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $exe) { $found = Get-Command notepad.exe -ErrorAction SilentlyContinue | Select-Object -First 1; if ($found) { $exe = $found.Source } }
+if (-not $exe) { 'notepad.exe not found'; exit 5 }
+$process = Start-Process -FilePath $exe -ArgumentList ('"' + $env:TWIN_FILE + '"') -PassThru
+"$exe pid=$($process.Id)"
+`,
         { TWIN_FILE: file },
         { timeoutMs: 30_000 },
       );
@@ -292,9 +344,12 @@ if (-not $p) { 'no-window'; exit 2 }
 
 export async function stopApps(names) {
   if (IS_MAC) {
-    return Promise.all(names.filter(name => name !== 'Finder').map(name => capture('pkill', ['-x', name])));
+    const results = await Promise.all(names.filter(name => name !== 'Finder').map(name => capture('pkill', ['-x', name])));
+    await sleep(500);
+    forgetTextEditState();
+    return results;
   }
-  const list = names.map(name => `'${name}'`).join(',');
+  const list = [...names, 'OpenWith'].map(name => `'${name}'`).join(',');
   return [await ps(`Stop-Process -Name ${list} -Force -ErrorAction SilentlyContinue`, {}, { timeoutMs: 30_000 })];
 }
 
