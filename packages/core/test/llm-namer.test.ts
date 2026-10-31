@@ -82,7 +82,7 @@ describe('naming prompt', () => {
     }
 
     it('keeps the widest routine inside what the worker accepts', () => {
-      // 200 is the longest app name RawSignalSchema allows. Uncut, this prompt is about 6,100 characters.
+      // 200 is the longest app name RawSignalSchema allows. Uncut, this prompt is about 6,250 characters.
       const prompt = namingPrompt(widest(200));
       expect(prompt.length).toBeLessThan(MAX_WORKER_TEXT_CHARS / 2);
       expect(NAMING_SYSTEM_PROMPT.length).toBeLessThan(MAX_WORKER_TEXT_CHARS);

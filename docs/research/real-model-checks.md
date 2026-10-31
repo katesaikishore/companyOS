@@ -80,7 +80,8 @@ Final code, which runs the model on half the cores (2 of 4, see part F).
 | Limit in the namer | 20 s |
 
 Before the thread change the model used all 4 cores. On the same machine that gave 359 to 371 tokens/s for prompt
-processing, 17.5 to 20.9 tokens/s for generation, and 0.8 to 1.0 s per name when the machine was quiet. Using half
+processing, 17.5 to 20.9 tokens/s for generation, and 0.8 to 1.0 s per name when the machine was quiet. The part F table below was measured later with a different
+script and gave 0.50 to 0.85 s for the same setting, so read these as two separate measurements, not one range. Using half
 the cores costs about 25 percent in prompt processing and about 10 percent in generation, when quiet. In one of those
 earlier runs another job was running and the same calls took 6.9 to 8.8 s. That is the stall in part F.
 
@@ -189,7 +190,7 @@ busy machine the naming job would keep taking CPU from what the person is doing.
 
 The worker refuses a system text or prompt over 4,000 characters, and that refusal looks like a model failure.
 `namingPrompt` did not limit app names, which can be up to 200 characters, and a routine shows up to five apps in each
-of six steps. A routine with 130-character app names produced a 4,169-character prompt. The real worker refused it, and
+of six steps. A routine with 130-character app names produced a 4,149-character prompt. The real worker refused it, and
 `nameRoutine` returned `model_error`. In the naming job, `model_error` ends the pass and is retried the next minute, so
 that routine would come first every time and the routines after it would never be named.
 

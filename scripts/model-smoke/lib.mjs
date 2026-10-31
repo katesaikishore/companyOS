@@ -185,7 +185,7 @@ export function syntheticRoutines(count = 60, seed = 12345) {
 /**
  * The widest routine the engine can produce: six steps with five observed apps each, every app name 130 characters of
  * plain letters (a capture adapter may send up to 200). Before app names were cut for the prompt (MAX_APP_NAME_CHARS),
- * its prompt was 4,169 characters, over the 4,000 the worker accepts, so the worker refused it as if the model had failed.
+ * its prompt was 4,149 characters, over the 4,000 the worker accepts, so the worker refused it as if the model had failed.
  */
 export function widestRoutine() {
   const steps = Array.from({ length: 6 }, (_, step) => {
