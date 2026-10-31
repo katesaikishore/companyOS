@@ -90,6 +90,54 @@ async function noHorizontalOverflow(page, label) {
   assert.ok(overflow <= 0, `${label}: horizontal overflow of ${overflow}px`);
 }
 
+/** Resizes the main window's content area, and waits until the page reports the new width. */
+async function setWindowSize(app, page, width, height) {
+  await app.evaluate(({ BrowserWindow }, size) => {
+    const main = BrowserWindow.getAllWindows().find(win => win.webContents.getURL().includes('/index.html'));
+    main?.setContentSize(size.width, size.height);
+  }, { width, height });
+  await page.waitForFunction(target => window.innerWidth === target, width, { timeout: 10_000 });
+}
+
+/**
+ * The responsive checks, run on the current page at its current width. Returns the problems found, so an empty list
+ * means the layout holds: no sideways page scroll, every navigation link and the Stop all and capture controls inside
+ * the window, and nothing running past the window edge unless an ancestor scrolls or clips it.
+ */
+async function responsiveProblems(page) {
+  return page.evaluate(() => {
+    const problems = [];
+    const viewport = window.innerWidth;
+    const overflow = document.documentElement.scrollWidth - document.documentElement.clientWidth;
+    if (overflow > 0) problems.push(`the page scrolls sideways by ${overflow}px`);
+    for (const link of document.querySelectorAll('[data-testid^="nav-"]')) {
+      const box = link.getBoundingClientRect();
+      if (box.left < -1 || box.right > viewport + 1) problems.push(`${link.dataset.testid} is outside the window`);
+    }
+    for (const testid of ['stop-all', 'capture-toggle']) {
+      const element = document.querySelector(`[data-testid="${testid}"]`);
+      const box = element?.getBoundingClientRect();
+      if (!box || box.width === 0) problems.push(`${testid} is missing`);
+      else if (box.left < -1 || box.right > viewport + 1) problems.push(`${testid} is outside the window`);
+    }
+    const spills = [];
+    for (const element of document.querySelectorAll('main *')) {
+      const box = element.getBoundingClientRect();
+      if (box.width === 0 || box.right <= viewport + 1) continue;
+      let contained = false;
+      for (let node = element.parentElement; node && node !== document.body; node = node.parentElement) {
+        if (['auto', 'hidden', 'scroll'].includes(getComputedStyle(node).overflowX)) {
+          contained = true;
+          break;
+        }
+      }
+      if (!contained) spills.push(element.getAttribute('class') || element.tagName);
+    }
+    if (spills.length > 0) problems.push(`${spills.length} element(s) run past the window edge, for example ${spills.slice(0, 3).join(', ')}`);
+    return problems;
+  });
+}
+
 async function main() {
   const userDataDir = mkdtempSync(path.join(tmpdir(), 'companyos-e2e-'));
   const app = await launch(userDataDir);
@@ -261,20 +309,36 @@ async function main() {
     log('no repeat offer during the cooldown');
 
 
-    // 11. Layout at the minimum window size, every main route, no horizontal overflow.
-    await app.evaluate(({ BrowserWindow }) => {
-      const main = BrowserWindow.getAllWindows().find(win => win.webContents.getURL().includes('/index.html'));
-      main?.setContentSize(960, 640);
-    });
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    log('window state before layout check:', JSON.stringify(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map(win => ({ url: win.webContents.getURL(), size: win.getContentSize(), visible: win.isVisible(), focused: win.isFocused() })))), 'innerWidth', await page.evaluate(() => window.innerWidth));
-    await page.waitForFunction(() => window.innerWidth <= 960, null, { timeout: 10_000 });
-    assert.ok((await page.evaluate(() => window.innerWidth)) <= 960, 'window is at the minimum width');
-    for (const route of ['overview', 'suggestions', 'automations', 'ledger', 'settings']) {
-      await page.click(`[data-testid="nav-${route}"]`);
-      await page.waitForTimeout(300);
-      await noHorizontalOverflow(page, `${route} @960`);
+    // 11. Responsive layout. Every main route at each width holds the checks in responsiveProblems, and a live resize
+    // changes the shell layout at the breakpoint without a reload.
+    const WIDTHS = [640, 760, 900, 1024, 1280, 1600, 1920];
+    const ROUTES = ['overview', 'suggestions', 'automations', 'readiness', 'harness', 'ledger', 'settings'];
+    for (const width of WIDTHS) {
+      await setWindowSize(app, page, width, 600);
+      for (const route of ROUTES) {
+        await page.click(`[data-testid="nav-${route}"]`);
+        await page.waitForTimeout(250);
+        const problems = await responsiveProblems(page);
+        assert.deepEqual(problems, [], `${route} at ${width}px: ${problems.join('; ')}`);
+        if ([640, 1280, 1920].includes(width) && ['overview', 'readiness'].includes(route)) {
+          await page.screenshot({ path: path.join(SHOTS, `responsive-${width}-${route}.png`) });
+        }
+      }
+      log(`responsive: every main route holds at ${width}px`);
     }
+
+    await page.click('[data-testid="nav-overview"]');
+    await setWindowSize(app, page, 1280, 800);
+    const wideSidebar = await page.evaluate(() => document.querySelector('.sidebar').getBoundingClientRect().width);
+    assert.ok(wideSidebar >= 220 && wideSidebar <= 260, `the sidebar is a column at 1280px (${wideSidebar}px)`);
+    await setWindowSize(app, page, 640, 600);
+    const narrowSidebar = await page.evaluate(() => document.querySelector('.sidebar').getBoundingClientRect().width);
+    assert.ok(narrowSidebar >= 600, `the sidebar becomes a top header at 640px (${narrowSidebar}px)`);
+    assert.deepEqual(await responsiveProblems(page), [], 'the layout holds after the live resize to 640px');
+    await setWindowSize(app, page, 1920, 900);
+    const againSidebar = await page.evaluate(() => document.querySelector('.sidebar').getBoundingClientRect().width);
+    assert.ok(againSidebar >= 220 && againSidebar <= 260, `the sidebar is a column again at 1920px (${againSidebar}px)`);
+    log('live resize: the shell changes layout at the breakpoint, without a reload');
     await shot(page, '09-settings-min-width');
 
     assert.deepEqual(

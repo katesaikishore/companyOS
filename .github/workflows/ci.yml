@@ -56,4 +56,4 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb
-          xvfb-run -a node apps/desktop/test/e2e.cjs
+          xvfb-run -a -s "-screen 0 2560x1600x24" node apps/desktop/test/e2e.cjs

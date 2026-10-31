@@ -252,8 +252,8 @@ function createMainWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
-    minWidth: 960,
-    minHeight: 640,
+    minWidth: 640,
+    minHeight: 560,
     title: 'companyOS Twin',
     icon: join(BRAND_DIR, 'app-icon.png'),
     backgroundColor: '#F3F4F1',

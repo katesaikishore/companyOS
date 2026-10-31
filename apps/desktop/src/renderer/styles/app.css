@@ -2189,3 +2189,99 @@ a {
     padding: 16px 28px;
   }
 }
+
+/* Narrow windows: below 900px the sidebar becomes a top header. The brand and the command search share the first row,
+   the navigation wraps onto as many rows as it needs, and capture status and Stop all sit in the last row. Nothing
+   scrolls sideways, and Stop all never sits below the fold of a short window. */
+@media (max-width: 899px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sidebar {
+    position: static;
+    height: auto;
+    overflow: visible;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px 16px;
+    padding: 14px 20px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .brand {
+    flex: 0 0 auto;
+    padding: 0;
+  }
+
+  /* Order: brand and search share the first row, the navigation takes the next rows, then the capture card. */
+  .command-launch {
+    order: 0;
+    flex: 1 1 220px;
+    max-width: 360px;
+    margin-left: auto;
+    white-space: nowrap;
+  }
+
+  .nav {
+    order: 2;
+    flex: 1 1 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 2px 4px;
+  }
+
+  .nav-item {
+    flex: 0 0 auto;
+    min-height: 34px;
+    padding: 0 10px;
+  }
+
+  .sidebar-foot {
+    order: 3;
+    flex: 1 1 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    margin-top: 0;
+  }
+
+  /* The capture card keeps its text, and its pause button sits beside the text, so the header stays short. */
+  .observing {
+    flex: 1 1 340px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: 12px;
+    row-gap: 6px;
+    padding: 12px 14px;
+  }
+
+  .observing p {
+    font-size: 12px;
+    line-height: 1.4;
+  }
+
+  .observing > .btn-block {
+    grid-column: 2;
+    grid-row: 1 / span 3;
+    width: auto;
+    white-space: nowrap;
+  }
+
+  .sidebar-foot > .btn-block {
+    flex: 0 0 200px;
+    width: auto;
+  }
+
+  .main {
+    padding: 24px 20px 40px;
+  }
+
+  .page {
+    gap: 20px;
+  }
+}
