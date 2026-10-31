@@ -18,7 +18,7 @@ import {
   type PolicyContext,
   type TwinEvent,
 } from '../src';
-import { at, workdays } from './fixtures';
+import { at, siteWorkdays, workdays } from './fixtures';
 
 const EXCLUDED = ['1password'];
 const ctx = (overrides: Partial<PolicyContext> = {}): PolicyContext => ({
@@ -203,5 +203,34 @@ describe('long routine names', () => {
       agent.close();
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('compileRoutine with sites', () => {
+  it('compiles a site step to a focus and a check of its browser, and keeps the site out of the automation', () => {
+    const events: TwinEvent[] = siteWorkdays(4)
+      .map((signal, index) =>
+        normalizeSignal(signal, { excludedApps: EXCLUDED, watchBrowsers: true, newId: () => `e${index}` }),
+      )
+      .filter((event): event is TwinEvent => event !== null);
+    const routine = mineRoutines(segment(events, 60 * 60_000)).find(
+      candidate => candidate.steps[1].site === 'mail.google.com/mail',
+    );
+    if (!routine) throw new Error('fixture routine not found');
+
+    const automation = compileRoutine(routine);
+
+    expect(automation.params).toEqual([]);
+    expect(automation.steps.map(step => `${step.op} ${step.app}`)).toEqual([
+      'focus_app microsoft excel',
+      'check_focus microsoft excel',
+      'focus_app google chrome',
+      'check_focus google chrome',
+      'focus_app google chrome',
+      'check_focus google chrome',
+      'focus_app slack',
+      'check_focus slack',
+    ]);
+    expect(JSON.stringify(automation)).not.toMatch(/example\.com|google\.com/);
   });
 });

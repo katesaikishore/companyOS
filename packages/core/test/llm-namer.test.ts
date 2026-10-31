@@ -14,7 +14,7 @@ import {
   type Routine,
   type TwinEvent,
 } from '../src';
-import { SECRET_QUERY, workdays } from './fixtures';
+import { SECRET_QUERY, siteWorkdays, workdays } from './fixtures';
 
 /** Routines mined from the seeded working days, the same data the engine uses in the app. */
 function minedRoutines(days = 10): Routine[] {
@@ -173,5 +173,37 @@ describe('nameRoutine', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+/** Routines mined from the site fixture, whose browser steps each carry the site they visited. */
+function siteRoutine(): Routine {
+  const events = siteWorkdays(4)
+    .map(signal => normalizeSignal(signal, { excludedApps: DEFAULT_CONFIG.excludedApps, watchBrowsers: true }))
+    .filter((event): event is TwinEvent => event !== null);
+  const found = mineRoutines(segment(events, DEFAULT_CONFIG.idleGapMs)).find(candidate =>
+    candidate.steps.some(step => step.site !== undefined),
+  );
+  if (!found) throw new Error('The site fixtures should mine a routine with a site.');
+  return found;
+}
+
+describe('naming prompt with sites', () => {
+  it('never carries a site or a host, though the routine has them', () => {
+    const found = siteRoutine();
+    expect(found.steps.some(step => step.site !== undefined)).toBe(true);
+    const prompt = namingPrompt(found);
+    const siteText = ['mail.google.com', 'jira.example.com', 'docs.google.com', '.com', 'spreadsheets', '/mail', 'https'];
+    for (const text of siteText) expect(prompt).not.toContain(text);
+    expect(prompt).toContain('google chrome');
+  });
+
+  it('builds the same prompt whether or not the steps carry a site', () => {
+    const found = siteRoutine();
+    const withoutSites = {
+      ...found,
+      steps: found.steps.map(step => ({ ...step, site: undefined, urlTemplate: undefined })),
+    };
+    expect(namingPrompt(found)).toBe(namingPrompt(withoutSites));
   });
 });
