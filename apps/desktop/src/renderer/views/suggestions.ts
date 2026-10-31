@@ -4,6 +4,7 @@ import { button, chip, emptyState, pageHeader, panel } from '../components/ui.js
 import { plural, titleCase } from '../format.js';
 import { effectLabel, effectsAreLocal } from '../labels.js';
 import { call, pending } from '../store.js';
+import { appColour } from '../tones.js';
 
 export function suggestionsView(status: TwinStatus): HTMLElement {
   const list = status.suggestions;
@@ -144,7 +145,7 @@ function appMark(app: string): HTMLElement {
   return h(
     'span',
     { class: 'sg-app' },
-    h('span', { class: 'sg-app-mark', 'aria-hidden': 'true' }, name.charAt(0)),
+    h('span', { class: `sg-app-mark app-${appColour(app)}`, 'aria-hidden': 'true' }, name.charAt(0)),
     h('span', { class: 'sg-app-name' }, name),
   );
 }

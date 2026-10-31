@@ -101,8 +101,8 @@
   width: 20px;
   height: 20px;
   border-radius: 5px;
-  background: var(--ink-2);
-  color: var(--card);
+  background: var(--app);
+  color: var(--on-tone);
   font-size: 11px;
   font-weight: 600;
 }

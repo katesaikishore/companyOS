@@ -14,6 +14,7 @@ import {
   summaryLine,
 } from '../overview-model.js';
 import { call, pending } from '../store.js';
+import { appColour, type Tone } from '../tones.js';
 
 /** Apps shown as overlapping marks before the rest collapse into a count. */
 const MARKS_SHOWN = 3;
@@ -21,6 +22,17 @@ const MARKS_SHOWN = 3;
 const BAR_PX = 56;
 /** Shown on the signal, because the number is a repetition score and not a success rate. */
 const SIGNAL_NOTE = 'Repetition-based learning score. It is not model confidence or task accuracy.';
+
+const PULSE: Shape[] = [['path', { d: 'M3 12h4l3-7 4 14 3-7h4' }]];
+const INBOX: Shape[] = [
+  ['path', { d: 'M3 13h5l1.5 3h5l1.5-3h5' }],
+  ['path', { d: 'M5.5 5h13L21 13v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5z' }],
+];
+const BOLT: Shape[] = [['path', { d: 'M13 3 5 14h6l-1 7 8-11h-6z' }]];
+const CLOCK: Shape[] = [
+  ['circle', { cx: '12', cy: '12', r: '9' }],
+  ['path', { d: 'M12 7v5l3 2' }],
+];
 
 export function overviewView(status: TwinStatus): HTMLElement {
   const now = Date.now();
@@ -49,6 +61,7 @@ function overviewHeader(status: TwinStatus): HTMLElement {
 interface InboxTile {
   href: string;
   icon: Shape[];
+  tone: Tone;
   title: string;
   count: number;
   note: string;
@@ -64,6 +77,7 @@ function inboxTiles(status: TwinStatus): HTMLElement {
     inboxTile({
       href: '#/suggestions',
       icon: SUGGEST,
+      tone: 'orange',
       title: 'Suggestions',
       count: suggestions,
       note: suggestions > 0 ? plural(suggestions, 'new routine to review', 'new routines to review') : 'Nothing new',
@@ -71,6 +85,7 @@ function inboxTiles(status: TwinStatus): HTMLElement {
     inboxTile({
       href: '#/automations',
       icon: AUTOMATE,
+      tone: 'green',
       title: 'Automations',
       count: automations,
       note:
@@ -84,7 +99,7 @@ function inboxTiles(status: TwinStatus): HTMLElement {
 function inboxTile(tile: InboxTile): HTMLElement {
   return h(
     'a',
-    { class: 'ov-tile', href: tile.href },
+    { class: `ov-tile tone-${tile.tone}`, href: tile.href },
     h(
       'span',
       { class: 'ov-tile-icon' },
@@ -106,21 +121,33 @@ function statsRow(status: TwinStatus): HTMLElement {
   return h(
     'section',
     { class: 'ov-stats', 'data-testid': 'overview-stats', 'aria-label': 'Summary' },
-    statCard({ label: 'Routines learned', value: String(stats.routinesLearned), note: 'Detected or accepted' }),
+    statCard({
+      label: 'Routines learned',
+      value: String(stats.routinesLearned),
+      note: 'Detected or accepted',
+      icon: PULSE,
+      tone: 'blue',
+    }),
     statCard({
       label: 'Waiting for you',
+      icon: INBOX,
+      tone: 'orange',
       value: String(stats.waiting),
       note: 'Suggestions and drafts',
       tag: stats.waiting > 0 ? { text: 'review', warn: true } : undefined,
     }),
     statCard({
       label: 'Unattended ready',
+      icon: BOLT,
+      tone: 'green',
       value: String(stats.unattendedReady),
       note: 'Level 4 · local and reversible',
       tag: stats.unattendedReady === 0 ? { text: 'gated' } : undefined,
     }),
     statCard({
       label: 'Time back',
+      icon: CLOCK,
+      tone: 'purple',
       value: (stats.minutesBackPerWeek / 60).toFixed(1),
       unit: 'h / wk',
       note: 'From automations at level 3 or above',
@@ -134,19 +161,22 @@ interface StatCard {
   value: string;
   unit?: string;
   note: string;
+  icon: Shape[];
+  tone: Tone;
   tag?: { text: string; warn?: boolean };
 }
 
 function statCard(card: StatCard): HTMLElement {
   return h(
     'div',
-    { class: 'ov-stat' },
+    { class: `ov-stat tone-${card.tone}` },
     h(
       'div',
       { class: 'ov-stat-head' },
-      h('span', { class: 'ov-stat-label' }, card.label),
+      h('span', { class: 'ov-stat-icon' }, outlineIcon(16, card.icon)),
       card.tag ? h('span', { class: card.tag.warn ? 'ov-stat-tag is-warn' : 'ov-stat-tag' }, card.tag.text) : undefined,
     ),
+    h('span', { class: 'ov-stat-label' }, card.label),
     h(
       'div',
       { class: 'ov-stat-value-row' },
@@ -231,7 +261,7 @@ function waitingRow(item: SuggestionView): HTMLElement {
     h(
       'span',
       { class: 'ov-app-marks', 'aria-hidden': 'true' },
-      ...apps.slice(0, MARKS_SHOWN).map(app => h('span', { class: 'ov-app-mark' }, app.charAt(0))),
+      ...apps.slice(0, MARKS_SHOWN).map(app => h('span', { class: `ov-app-mark app-${appColour(app)}` }, app.charAt(0))),
       hidden > 0 ? h('span', { class: 'ov-app-more mono' }, `+${hidden}`) : undefined,
     ),
     h(

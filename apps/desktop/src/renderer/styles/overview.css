@@ -33,6 +33,7 @@
 
 .ov-pill svg {
   flex: 0 0 auto;
+  color: var(--green);
 }
 
 /* Summary figures: two across on a narrow page, four across once the page has room. */
@@ -54,6 +55,7 @@
   background: var(--card);
 }
 
+/* The icon tile, and the tag at the right of the same row, so every card's figure starts at the same height. */
 .ov-stat-head {
   display: flex;
   flex-wrap: wrap;
@@ -61,6 +63,7 @@
   justify-content: space-between;
   gap: 4px 8px;
   min-width: 0;
+  margin-bottom: 6px;
 }
 
 .ov-stat-label {
@@ -89,6 +92,19 @@
   align-items: baseline;
   gap: 4px;
   margin-top: 2px;
+}
+
+/* The figure's icon, on a tile in the card's colour. */
+.ov-stat-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--tone-hi), var(--tone));
+  color: var(--on-tone);
 }
 
 .ov-stat-value {
@@ -176,8 +192,8 @@
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  background: var(--page);
-  color: var(--ink-2);
+  background: linear-gradient(135deg, var(--tone-hi), var(--tone));
+  color: var(--on-tone);
 }
 
 .ov-tile-badge {
@@ -330,8 +346,8 @@
   height: 24px;
   margin-right: -6px;
   border-radius: 7px;
-  background: var(--ink-2);
-  color: var(--card);
+  background: var(--app);
+  color: var(--on-tone);
   font-size: 11px;
   font-weight: 600;
   box-shadow: 0 0 0 2px var(--card);
@@ -453,12 +469,12 @@
 
 .ov-strip-seg.is-download,
 .ov-swatch.is-download {
-  background: var(--accent);
+  background: var(--blue);
 }
 
 .ov-strip-seg.is-check,
 .ov-swatch.is-check {
-  background: var(--muted);
+  background: var(--purple-hi);
 }
 
 .ov-strip-axis {

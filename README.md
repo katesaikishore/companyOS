@@ -5,6 +5,10 @@ spreadsheet, then a document, then an editor, and offers to run that sequence fo
 draft. You run it with your approval, and it runs on its own only after it has earned that. Your activity is stored
 encrypted on your device. This is an early preview.
 
+[![A one-minute tour of companyOS Twin: the overview, a suggested routine, the autonomy ladder, app readiness, the network ledger and dark mode](docs/companyos-twin-film-poster.jpg)](docs/companyos-twin-film.mp4)
+
+A one-minute tour of the app, without sound, recorded with synthetic activity. Select the image to open the video.
+
 ![The companyOS Twin overview on a fixed 900 by 600 window, with synthetic activity](docs-site/images/overview.png)
 
 Documentation lives in [`docs-site`](docs-site), a Mintlify site that builds and validates locally. Publishing it needs

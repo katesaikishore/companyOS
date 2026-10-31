@@ -93,6 +93,57 @@
   --rail-accent: #5fc4ae;
 }
 
+/*
+ * Section colours, after the Microsoft 365 app palette. Each hue has a solid, a lighter start for the tile gradient,
+ * a soft tint for surfaces and an ink for text on that tint. The solid and its start are the same in both themes,
+ * so an icon tile looks the same in light and dark, the way an app icon does.
+ */
+:root {
+  --on-tone: #ffffff;
+
+  --blue: #0f6cbd;
+  --blue-hi: #47a3f3;
+  --blue-soft: #ebf3fc;
+  --blue-ink: #0e4f8f;
+
+  --green: #107c41;
+  --green-hi: #3cc07a;
+  --green-soft: #e9f5ee;
+  --green-ink: #0b5c30;
+
+  --orange: #e4570b;
+  --orange-hi: #ffa24a;
+  --orange-soft: #fdf0e6;
+  --orange-ink: #9a3c08;
+
+  --purple: #8136c4;
+  --purple-hi: #c07ae8;
+  --purple-soft: #f4ecfb;
+  --purple-ink: #5f2196;
+
+  --cyan: #03868a;
+  --cyan-hi: #2cc8c9;
+  --cyan-soft: #e5f5f5;
+  --cyan-ink: #035f62;
+
+  --steel: #5d6c74;
+  --steel-hi: #9aaab1;
+  --steel-soft: #eef1f2;
+  --steel-ink: #3f4b51;
+
+  /* App marks, flat in each app's brand colour as the design draws them. The same in both themes. */
+  --app-excel: #1d6f42;
+  --app-word: #2b579a;
+  --app-outlook: #0f5ca8;
+  --app-powerpoint: #b7472a;
+  --app-teams: #4b53bc;
+  --app-onenote: #7719aa;
+  --app-code: #1f6fb2;
+  --app-slack: #611f69;
+  --app-figma: #a23e1c;
+  --app-other: #3b4046;
+}
+
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
     color-scheme: dark;
@@ -154,6 +205,20 @@
     --twin-glow: #3c8a74;
     --twin-face: #0d1f1a;
     --tile-fill: #22262a;
+
+    /* Section colours: the tints and inks change, the solids stay. */
+    --blue-soft: #102a44;
+    --blue-ink: #8cc4f7;
+    --green-soft: #11301f;
+    --green-ink: #7fd8a6;
+    --orange-soft: #3a2112;
+    --orange-ink: #ffb278;
+    --purple-soft: #2c1a3e;
+    --purple-ink: #d4aaf5;
+    --cyan-soft: #0e2f31;
+    --cyan-ink: #79d9da;
+    --steel-soft: #262c2f;
+    --steel-ink: #b9c4c9;
   }
 }
 
@@ -217,4 +282,18 @@
   --twin-glow: #3c8a74;
   --twin-face: #0d1f1a;
   --tile-fill: #22262a;
+
+  /* Section colours: the tints and inks change, the solids stay. */
+  --blue-soft: #102a44;
+  --blue-ink: #8cc4f7;
+  --green-soft: #11301f;
+  --green-ink: #7fd8a6;
+  --orange-soft: #3a2112;
+  --orange-ink: #ffb278;
+  --purple-soft: #2c1a3e;
+  --purple-ink: #d4aaf5;
+  --cyan-soft: #0e2f31;
+  --cyan-ink: #79d9da;
+  --steel-soft: #262c2f;
+  --steel-ink: #b9c4c9;
 }

@@ -57,11 +57,11 @@
 }
 
 .readiness-ring-ask {
-  stroke: var(--rail-muted);
+  stroke: var(--orange-hi);
 }
 
 .readiness-ring-auto {
-  stroke: var(--rail-accent);
+  stroke: var(--green-hi);
 }
 
 .readiness-ring-value {
@@ -130,11 +130,11 @@
 }
 
 .readiness-swatch-auto {
-  background: var(--rail-accent);
+  background: var(--green-hi);
 }
 
 .readiness-swatch-ask {
-  background: var(--rail-muted);
+  background: var(--orange-hi);
 }
 
 .readiness-swatch-rest {
@@ -285,10 +285,9 @@
   justify-content: center;
   width: 28px;
   height: 28px;
-  border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--inset);
-  color: var(--ink-2);
+  background: var(--app);
+  color: var(--on-tone);
   font-size: 12px;
   font-weight: 600;
 }
@@ -322,11 +321,11 @@
 }
 
 .readiness-seg-auto {
-  background: var(--accent);
+  background: var(--green);
 }
 
 .readiness-seg-ask {
-  background: var(--muted);
+  background: var(--orange-hi);
 }
 
 .readiness-seg-rest {
@@ -419,7 +418,7 @@
 }
 
 .readiness-stat-auto dd {
-  color: var(--accent-ink);
+  color: var(--green-ink);
 }
 
 .readiness-stat-rest dd {
