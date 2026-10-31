@@ -24,3 +24,11 @@ function walk(folder) {
 
 mkdirSync(target, { recursive: true });
 walk(source);
+
+/** Plain CommonJS files in the main process that tsc does not compile (src/main/import-module.cjs). */
+const mainSource = join(root, 'src', 'main');
+const mainTarget = join(root, 'dist', 'main');
+mkdirSync(mainTarget, { recursive: true });
+for (const name of readdirSync(mainSource).filter(file => file.endsWith('.cjs'))) {
+  copyFileSync(join(mainSource, name), join(mainTarget, name));
+}

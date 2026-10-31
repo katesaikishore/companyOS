@@ -1,12 +1,13 @@
-import type { HardwareProfile, ModelFit, ModelSpec, SetupPlan, TwinStatus } from '@companyos/twin-core';
+import type { HardwareProfile, LayaBundleView, ModelFit, ModelSpec, SetupPlan, TwinStatus } from '@companyos/twin-core';
 import { h, type Child } from '../dom.js';
 import { twinCompanion } from '../components/companion.js';
 import { button, chip, exclusionEditor, fact, logo, progressBar, toggleRow } from '../components/ui.js';
-import { formatBytes } from '../format.js';
-import { browserCaptureNote, fitLabel, modelFraction, modelState, modelStateLabel } from '../labels.js';
+import { formatBytes, formatDecimalBytes } from '../format.js';
+import { browserCaptureNote, fitLabel, layaFraction, layaState, layaStateLabel, modelFraction, modelState, modelStateLabel } from '../labels.js';
 import { act, bridge, call, errorText, go, pending, requestRender, saveConfig, state } from '../store.js';
 
-const TITLES = ['Welcome', 'What companyOS can see', 'Your device and models', 'Start observing'];
+const TITLES = ['Welcome', 'What companyOS can see', 'Your device and models', 'Decision model (optional)', 'Start observing'];
+const LAST_STEP = TITLES.length;
 
 /** Opens the wizard at a step. The step-3 device check runs when that step is shown. */
 export function openSetup(step: number): void {
@@ -15,7 +16,7 @@ export function openSetup(step: number): void {
 }
 
 export function goStep(step: number): void {
-  state.wizardStep = Math.min(4, Math.max(1, step));
+  state.wizardStep = Math.min(LAST_STEP, Math.max(1, step));
   state.altOpen = false;
   if (state.wizardStep === 3) void loadPlan();
   requestRender();
@@ -101,11 +102,12 @@ function rail(step: number): HTMLElement {
 }
 
 function stepBody(step: number, status: TwinStatus): HTMLElement {
-  const content = step === 1 ? welcome() : step === 2 ? permissions(status) : step === 3 ? devices(status) : finish(status);
+  const content =
+    step === 1 ? welcome() : step === 2 ? permissions(status) : step === 3 ? devices(status) : step === 4 ? decisionModel(status) : finish(status);
   return h(
     'div',
     { class: 'setup-step', 'data-testid': 'setup-step', 'data-step': String(step) },
-    h('span', { class: 'mono small muted' }, `Step ${step} of 4`),
+    h('span', { class: 'mono small muted' }, `Step ${step} of ${LAST_STEP}`),
     h('h1', { class: 'setup-title' }, TITLES[step - 1] ?? ''),
     ...content,
   );
@@ -373,6 +375,99 @@ function alternativeRow(fit: ModelFit, plan: SetupPlan, status: TwinStatus): HTM
   );
 }
 
+/**
+ * The optional decision-model download (Laya). It is offered once, with its size and what it is for. Skipping it, or
+ * not finishing it, changes nothing today, because no part of the app asks it for a decision yet.
+ */
+function decisionModel(status: TwinStatus): Child[] {
+  const laya = status.laya;
+  return [
+    h(
+      'p',
+      { class: 'lede' },
+      `An optional small model that answers choice, score and yes/no questions on this device. It is about ${formatDecimalBytes(laya.totalBytes)}, and the twin works without it.`,
+    ),
+    h('p', { class: 'muted small', 'data-testid': 'setup-laya-note' }, 'This version only downloads and checks it. Nothing uses it yet, so skipping it changes nothing today.'),
+    layaCard(laya),
+  ];
+}
+
+function layaCard(laya: LayaBundleView): HTMLElement {
+  const current = layaState(laya);
+  const downloading = current === 'downloading';
+  const hardware = state.setup.hardware;
+  const diskNote = `Needs about ${formatDecimalBytes(laya.requiredFreeBytes)} of free disk space${
+    hardware ? `. This device has ${formatDecimalBytes(hardware.freeDiskBytes)} free` : ''
+  }.`;
+  const startLabel = laya.hasPartial ? 'Resume download' : current === 'failed' ? 'Try again' : `Download (about ${formatDecimalBytes(laya.totalBytes)})`;
+  return h(
+    'article',
+    { class: 'model-card', 'data-testid': 'setup-laya', 'data-state': current },
+    h(
+      'div',
+      { class: 'model-head' },
+      h('div', null, h('span', { class: 'eyebrow' }, 'Decision model'), h('h3', { class: 'model-name' }, 'Laya')),
+      h('span', { class: 'model-status mono small', 'data-label-laya': 'true', 'data-testid': 'laya-status' }, layaStateLabel(laya)),
+    ),
+    h('p', { class: 'mono small muted' }, `ONNX · ${formatDecimalBytes(laya.totalBytes)} · 5 files`),
+    h('p', { class: 'muted small' }, 'Picks between options in one pass. It does not write text or take actions, and the approval steps stay as they are.'),
+    h(
+      'dl',
+      { class: 'facts' },
+      fact('Licence', 'Apache-2.0'),
+      fact('Source', `huggingface.co · ${laya.repo}`),
+      fact('Checked', 'SHA-256 of each file, from a fixed commit'),
+    ),
+    downloading
+      ? progressBar(layaFraction(laya), { 'data-testid': 'laya-progress', 'data-progress-laya': 'true' })
+      : undefined,
+    current === 'failed' && laya.message
+      ? h('div', { class: 'box box-warn', 'data-testid': 'laya-error' }, h('span', { class: 'box-body' }, laya.message))
+      : undefined,
+    current === 'unsupported'
+      ? h('p', { class: 'muted small', 'data-testid': 'laya-unsupported' }, 'Not available on this system. Its runtime has no build for it.')
+      : h('p', { class: 'muted small' }, laya.hasPartial && !downloading
+          ? 'What was downloaded is kept. Resume continues from it, or delete it.'
+          : diskNote),
+    h(
+      'div',
+      { class: 'model-actions' },
+      downloading
+        ? button('Cancel', { variant: 'secondary', testid: 'laya-cancel', onClick: () => void call('laya-cancel', twin => twin.cancelLaya()) })
+        : undefined,
+      current === 'not_installed' || current === 'cancelled' || current === 'failed'
+        ? button(startLabel, {
+            variant: 'secondary',
+            testid: 'laya-install',
+            disabled: pending('laya-install'),
+            onClick: () => void call('laya-install', twin => twin.installLaya()),
+          })
+        : undefined,
+      !downloading && (current === 'installed' || laya.hasPartial)
+        ? button(current === 'installed' ? 'Remove' : 'Delete partial download', {
+            variant: 'ghost',
+            testid: 'laya-remove',
+            disabled: pending('laya-remove'),
+            onClick: () => void call('laya-remove', twin => twin.removeLaya()),
+          })
+        : undefined,
+    ),
+  );
+}
+
+function layaSummary(laya: LayaBundleView): string {
+  switch (layaState(laya)) {
+    case 'installed':
+      return 'Installed, not used yet';
+    case 'downloading':
+      return 'Downloading';
+    case 'unsupported':
+      return 'Not available, rules are used';
+    default:
+      return laya.hasPartial ? 'Partly downloaded, rules are used' : 'Not installed, rules are used';
+  }
+}
+
 function finish(status: TwinStatus): Child[] {
   const captured = status.capture.state;
   const captureValue = captured === 'paused' ? 'paused' : captured === 'unsupported' ? 'not available' : 'on';
@@ -383,6 +478,7 @@ function finish(status: TwinStatus): Child[] {
       { class: 'summary-list' },
       summaryRow('Encryption key', 'Held by the OS keychain'),
       summaryRow('Models installed', String(status.config.installedModels.length)),
+      summaryRow('Decision model', layaSummary(status.laya)),
       summaryRow('Capture', captureValue),
     ),
   ];
@@ -397,7 +493,7 @@ function footer(step: number, status: TwinStatus): HTMLElement {
   const left: Child[] = [button('Back', { testid: 'setup-back', disabled: step === 1, onClick: () => goStep(step - 1) })];
   if (completed) left.push(button('Close setup', { variant: 'ghost', testid: 'setup-close', onClick: closeSetup }));
 
-  if (step === 4) {
+  if (step === LAST_STEP) {
     return h(
       'footer',
       { class: 'setup-foot' },
@@ -422,6 +518,14 @@ function footer(step: number, status: TwinStatus): HTMLElement {
   if (step === 3) {
     right.push(h('span', { class: 'muted small' }, 'You can install a model later in Settings.'));
     right.push(button('Skip for now', { variant: 'ghost', testid: 'setup-skip', onClick: () => goStep(4) }));
+  }
+  if (step === 4) {
+    const layaCurrent = layaState(status.laya);
+    if (layaCurrent === 'downloading') right.push(h('span', { class: 'muted small' }, 'The download keeps going if you continue.'));
+    else if (layaCurrent !== 'installed') {
+      right.push(h('span', { class: 'muted small' }, 'You can download it later from Settings.'));
+      right.push(button('Skip, use rules', { variant: 'ghost', testid: 'setup-laya-skip', onClick: () => goStep(step + 1) }));
+    }
   }
   right.push(
     button(step === 3 && noChat ? 'Continue without a model' : 'Continue', {

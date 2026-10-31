@@ -2,6 +2,7 @@ import type { TwinConfig, TwinStatus } from '@companyos/twin-core';
 import { h, type Child } from '../dom.js';
 import { button, chip, exclusionEditor, toggleRow } from '../components/ui.js';
 import { formatBytes } from '../format.js';
+import { layaState, layaStateLabel } from '../labels.js';
 import { act, bridge, confirmDeleteAll, pending, saveConfig, setNotice, state } from '../store.js';
 import { openSetup } from './setup.js';
 
@@ -330,14 +331,42 @@ function modelsPanel(status: TwinStatus): HTMLElement {
     installed.length === 0
       ? row(h('p', { class: 'muted small' }, 'No models installed. The twin uses simple rule-based labels until you install one.'))
       : installed.map(model => modelRow(model)),
+    layaRow(status.laya),
     row(
       h(
         'div',
         { class: 'actions', 'data-testid': 'settings-setup' },
         button('Choose models again', { onClick: () => void openSetup(3) }),
+        button('Decision model', { testid: 'settings-laya-setup', onClick: () => void openSetup(4) }),
         button('Run setup again', { onClick: () => void openSetup(1) }),
       ),
     ),
+  );
+}
+
+/** The optional decision model. Its row is always shown, so a partial download is never hidden from the person who owns the disk. */
+function layaRow(laya: TwinStatus['laya']): HTMLElement {
+  const current = layaState(laya);
+  const removable = current === 'installed' || laya.hasPartial;
+  return h(
+    'div',
+    { class: 'settings-row settings-model', 'data-testid': 'settings-laya', 'data-state': current },
+    h(
+      'div',
+      { class: 'settings-model-main' },
+      h('span', { class: 'mono settings-model-id' }, 'laya-onnx (decision model, not used yet)'),
+      h('span', { class: 'settings-row-note mono', 'data-label-laya': 'true' }, layaStateLabel(laya)),
+    ),
+    current === 'downloading'
+      ? button('Cancel', { testid: 'settings-laya-cancel', onClick: () => void act('laya-cancel', () => bridge().cancelLaya()) })
+      : undefined,
+    removable && current !== 'downloading'
+      ? button(current === 'installed' ? 'Remove' : 'Delete partial download', {
+          testid: 'settings-laya-remove',
+          disabled: pending('laya-remove'),
+          onClick: () => void act('laya-remove', () => bridge().removeLaya()),
+        })
+      : undefined,
   );
 }
 

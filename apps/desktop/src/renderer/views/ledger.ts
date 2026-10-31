@@ -14,9 +14,10 @@ function purposeLabel(entry: NetworkEntry): string {
   return entry.purpose === 'model_download' ? 'Model download' : 'Update check';
 }
 
-/** The item a call fetched: the model for a download, the channel file for an update check. */
+/** The item a call fetched: the file of a multi-file download, the model for a single-file one, the channel file for an update check. */
 function itemText(entry: NetworkEntry): string {
-  return `${entry.host} · ${entry.modelId ?? entry.path}`;
+  const item = entry.file ?? entry.modelId ?? entry.path;
+  return `${entry.host} · ${item}`;
 }
 
 /** Plain words for the outcome, verification and failure state of one call. */
@@ -147,6 +148,7 @@ function detailPanel(entry: NetworkEntry): HTMLElement {
       'dl',
       { class: 'ledger-facts' },
       fact('Purpose', purposeLabel(entry)),
+      entry.file ? fact('File', entry.file, true) : undefined,
       fact('When', formatWhen(entry.ts)),
       fact('Bytes', formatBytes(entry.bytes), true),
       fact('Checked', checkedText(entry)),
