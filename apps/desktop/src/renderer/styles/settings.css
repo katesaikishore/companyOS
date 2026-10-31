@@ -23,7 +23,7 @@
 }
 
 .settings-view .settings-nav-item {
-  min-height: 34px;
+  min-height: 38px;
   padding: 0 12px;
   border: 1px solid transparent;
   border-radius: 9px;
@@ -48,7 +48,7 @@
   box-shadow: var(--shadow);
 }
 
-@container settings (min-width: 720px) {
+@container settings (min-width: 560px) {
   .settings-view .settings-layout {
     flex-direction: row;
     align-items: flex-start;
@@ -183,11 +183,16 @@
   font-size: 12px;
 }
 
+.settings-view .excl-remove {
+  min-width: 28px;
+  min-height: 28px;
+}
+
 /* Automations: level choice */
 
 .settings-view .settings-levels {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 8px;
 }
 
@@ -291,19 +296,21 @@
 
 .settings-view .settings-themes {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
 
 .settings-view .settings-theme {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   min-height: 44px;
-  padding: 0 14px;
+  padding: 10px;
   border: 1px solid var(--border-strong);
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--card);
   color: var(--ink);
   font: inherit;
-  font-weight: 500;
   text-align: left;
   cursor: pointer;
 }
@@ -311,5 +318,29 @@
 .settings-view .settings-theme.is-on {
   border-color: var(--ink);
   box-shadow: inset 0 0 0 1px var(--ink);
+}
+
+.settings-view .settings-theme-label {
+  font-size: 13px;
   font-weight: 600;
+}
+
+/* The swatches use fixed colours, so each preview looks the same in either theme. */
+.settings-view .settings-theme-swatch {
+  display: block;
+  height: 64px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.settings-view .settings-theme-swatch.is-light {
+  background: var(--rail-ink);
+}
+
+.settings-view .settings-theme-swatch.is-dark {
+  background: var(--rail-bg);
+}
+
+.settings-view .settings-theme-swatch.is-system {
+  background: linear-gradient(135deg, var(--rail-ink) 50%, var(--rail-bg) 50%);
 }

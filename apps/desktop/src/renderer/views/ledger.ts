@@ -49,14 +49,14 @@ export function ledgerView(status: TwinStatus): HTMLElement {
     { class: 'stack ledger-view', 'data-testid': 'view-ledger' },
     pageHeader(
       'Network ledger',
-      'Every model download and update check this device made, exactly as sent. No twin data leaves in these calls. OpenMausBot handoffs are listed on the Agent harness page.',
+      'Every model download and update check this device made, with the fields the ledger recorded. No twin data leaves in these calls. OpenMausBot handoffs are listed on the Agent harness page.',
     ),
     h(
       'section',
       { class: 'tiles ledger-summary', 'aria-label': 'Ledger summary' },
       tile('count', 'Calls so far', String(entries.length), 'Model downloads and update checks only'),
       tile('hosts', 'Allowed hosts', 'huggingface.co · *.hf.co', 'and the update feed, when one is set'),
-      tile('clear', 'Personal data sent', 'Nothing', 'GET requests with no body. Hosts still see your IP address.'),
+      tile('clear', 'Personal data sent', 'Nothing', 'GET requests with no body. Hosts see your IP address, which this ledger does not record.'),
     ),
     selected
       ? h('div', { class: 'ledger-split' }, requestsPanel(entries, selected), detailPanel(selected))
@@ -128,10 +128,10 @@ function ledgerRow(entry: NetworkEntry, selected: boolean): HTMLElement {
 
 function detailPanel(entry: NetworkEntry): HTMLElement {
   const lines = [
-    'Method: GET',
+    `GET ${entry.path}`,
     `Host: ${entry.host}`,
-    `Path: ${entry.path}`,
     `Purpose: ${purposeLabel(entry)}`,
+    'Method: GET',
     'Body: none',
   ];
   return panel(
@@ -148,10 +148,8 @@ function detailPanel(entry: NetworkEntry): HTMLElement {
       { class: 'ledger-facts' },
       fact('Purpose', purposeLabel(entry)),
       fact('When', formatWhen(entry.ts)),
-      entry.modelId !== undefined && fact('Model', entry.modelId),
       fact('Bytes', formatBytes(entry.bytes), true),
       fact('Checked', checkedText(entry)),
-      fact('Result', outcomeText(entry)),
     ),
   );
 }

@@ -1,6 +1,6 @@
-/* Suggestions screen. Styles for its view in views/suggestions.ts only. Shared classes (btn, chip, panel, box, page-head, empty) come from app.css. Colours come from tokens.css only. */
+/* Suggestions screen. Styles for its view in views/suggestions.ts only. Shared classes (btn, chip, panel, page-head, empty) come from app.css. Colours come from tokens.css only. */
 
-/* The page column is the container, so the two columns stack when the column is narrow, whatever the window size. */
+/* The page column is the container, so the cards stack when the column is narrow, whatever the window size. */
 .sg-view {
   gap: 16px;
   container-type: inline-size;
@@ -17,57 +17,32 @@
   white-space: nowrap;
 }
 
-.sg-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  align-items: start;
-  gap: 16px;
-  min-width: 0;
-}
-
-.sg-side {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-}
-
-/* Narrow: the cards sit side by side in as many columns as fit. */
+/* One card per row when the column is narrow. Wide enough, two cards sit side by side, as the design has them. */
 .sg-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr));
-  gap: 10px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  align-items: stretch;
   min-width: 0;
-}
-
-.sg-note {
-  padding: 0 4px;
-  line-height: 1.5;
 }
 
 .sg-card {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  width: 100%;
   min-width: 0;
-  padding: 14px 16px;
+  overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 14px;
   background: var(--card);
   color: var(--ink);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
 }
 
-.sg-card:hover {
-  border-color: var(--border-strong);
-}
-
-.sg-card.is-selected {
-  padding: 13px 15px;
-  border: 2px solid var(--ink);
+.sg-card-head {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--divider);
 }
 
 .sg-card-top {
@@ -83,13 +58,13 @@
   border-radius: 999px;
   background: var(--accent-soft);
   color: var(--accent-ink);
-  font-size: 12px;
+  font-size: 11px;
   white-space: nowrap;
 }
 
 .sg-name {
-  display: block;
-  font-size: 15px;
+  margin: 0;
+  font-size: 17px;
   font-weight: 600;
   letter-spacing: -0.01em;
   overflow-wrap: anywhere;
@@ -144,7 +119,7 @@
 
 .sg-figures {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   min-width: 0;
 }
@@ -167,38 +142,12 @@
   overflow-wrap: anywhere;
 }
 
-.sg-detail {
-  gap: 0;
-  padding: 0;
-  border-radius: 14px;
-}
-
-.sg-detail-head {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 20px 22px 18px;
-  border-bottom: 1px solid var(--divider);
-}
-
-.sg-detail-title {
-  font-size: 17px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  overflow-wrap: anywhere;
-}
-
-.sg-detail-lede {
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--muted);
-}
-
 .sg-body {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 16px 22px;
+  gap: 14px;
+  padding: 14px 20px;
 }
 
 .sg-section {
@@ -209,6 +158,7 @@
 }
 
 .sg-label {
+  margin: 0;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -219,6 +169,9 @@
 .sg-steps {
   display: flex;
   flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .sg-step {
@@ -226,8 +179,8 @@
   grid-template-columns: 24px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
-  min-height: 36px;
-  padding: 6px 0;
+  min-height: 32px;
+  padding: 4px 0;
   border-bottom: 1px solid var(--divider);
 }
 
@@ -237,9 +190,6 @@
 }
 
 .sg-step-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
   min-width: 0;
   font-size: 13px;
   overflow-wrap: anywhere;
@@ -283,7 +233,17 @@
 }
 
 .sg-touch {
-  gap: 4px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+.sg-touch-ask {
+  background: var(--warn-bg);
 }
 
 .sg-touch-clear {
@@ -294,26 +254,23 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px 16px;
-  padding: 14px 22px;
+  gap: 10px 8px;
+  padding: 12px 20px;
   border-top: 1px solid var(--divider);
-  border-radius: 0 0 14px 14px;
   background: var(--inset);
 }
 
 .sg-foot-text {
-  flex: 1 1 220px;
+  flex: 1 1 160px;
   min-width: 0;
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: 11px;
   color: var(--muted);
 }
 
-.sg-foot-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-left: auto;
+.sg-foot .btn:not(.btn-small) {
+  min-height: 36px;
+  border-radius: 9px;
+  font-size: 13px;
 }
 
 .sg-empty {
@@ -349,13 +306,9 @@
   text-decoration: none;
 }
 
-/* Wide page column: the list sits beside the detail. Below this width they stack. */
-@container sg-view (min-width: 720px) {
-  .sg-layout {
-    grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
-  }
-
+/* Wide page column: two cards side by side. Below this width they stack. */
+@container sg-view (min-width: 560px) {
   .sg-list {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

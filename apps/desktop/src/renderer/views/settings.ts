@@ -26,8 +26,8 @@ const THEMES: Array<{ value: Theme; label: string; testid: string }> = [
 ];
 
 const LEVELS: Array<{ value: 3 | 4; label: string; note?: string }> = [
-  { value: 3, label: 'Level 3 · Run with you' },
-  { value: 4, label: 'Level 4 · On its own', note: 'Only after the promotion gate passes' },
+  { value: 3, label: 'Level 3 · Run with you', note: 'One click per run' },
+  { value: 4, label: 'Level 4 · On its own', note: 'Only after the gate passes' },
 ];
 
 /** A section counts as the one being read once its top has moved above this line, in pixels. */
@@ -253,7 +253,8 @@ function appearancePanel(current: Theme): HTMLElement {
               'data-testid': option.testid,
               onclick: () => void saveConfig('theme', { theme: option.value }),
             },
-            option.label,
+            h('span', { class: `settings-theme-swatch is-${option.value}`, 'aria-hidden': 'true' }),
+            h('span', { class: 'settings-theme-label' }, option.label),
           ),
         ),
       ),
@@ -263,7 +264,7 @@ function appearancePanel(current: Theme): HTMLElement {
 
 function capturePanel(watchBrowsers: boolean, excluded: readonly string[], idleGapMs: number, bridgeSupported: boolean): HTMLElement {
   return sectionCard(
-    { id: 'capture', testid: 'settings-capture', title: 'Capture', note: 'App names and timing only.' },
+    { id: 'capture', testid: 'settings-capture', title: 'Capture', note: 'App names and timing only. No titles, keystrokes or screenshots.' },
     row(
       toggleRow({
         testid: 'settings-browsers',

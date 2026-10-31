@@ -122,12 +122,6 @@
   background: var(--accent);
 }
 
-.auto-item-meta {
-  font-size: 11px;
-  color: var(--muted);
-  overflow-wrap: anywhere;
-}
-
 /* Detail: header, ladder, tabs */
 
 .auto-detail {
@@ -243,7 +237,7 @@
 }
 
 .auto-rung.is-next {
-  color: var(--ink);
+  color: var(--muted);
 }
 
 .auto-rung.is-locked {
@@ -292,9 +286,11 @@
   min-width: 0;
 }
 
+/* app.css also styles .auto-card for an older screen; the gap is reset here so these cards stack without extra space. */
 .auto-card {
   display: flex;
   flex-direction: column;
+  gap: 0;
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--border);
@@ -319,6 +315,7 @@
 }
 
 .auto-card-title {
+  margin: 0;
   font-size: 13px;
   font-weight: 600;
   overflow-wrap: anywhere;
@@ -355,7 +352,7 @@
 
 .auto-step {
   display: grid;
-  grid-template-columns: 26px 84px minmax(0, 1fr) auto;
+  grid-template-columns: 26px 84px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
   min-height: 40px;
@@ -429,21 +426,18 @@
   overflow-wrap: anywhere;
 }
 
-.auto-run-mode,
-.auto-run-checks,
-.auto-run-undone {
-  font-size: 11px;
-  overflow-wrap: anywhere;
-}
-
 .auto-run-outcome {
   font-size: 12px;
-  font-weight: 500;
-  color: var(--accent-ink);
+  color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 .auto-run-outcome.is-bad {
   color: var(--danger);
+}
+
+.auto-run-undone {
+  font-size: 11px;
 }
 
 /* Promotion gate */
@@ -457,19 +451,13 @@
 }
 
 .auto-gate-row {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-height: 36px;
-  padding: 9px 14px;
-  border-bottom: 1px solid var(--divider);
-}
-
-.auto-gate-line {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
+  min-height: 36px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--divider);
   font-size: 13px;
 }
 
@@ -483,10 +471,6 @@
   font-size: 12px;
   color: var(--muted);
   text-align: right;
-}
-
-.auto-gate-row .progress {
-  margin-left: 28px;
 }
 
 .auto-gate-mark {
@@ -504,13 +488,6 @@
 
 .auto-gate-mark.is-met {
   background: var(--accent);
-}
-
-.auto-gate-rule {
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--divider);
-  font-size: 11px;
-  line-height: 1.4;
 }
 
 .auto-reasons {
@@ -565,18 +542,9 @@
   overflow-wrap: anywhere;
 }
 
-.auto-floor-mark {
+.auto-floor-icon {
   flex-shrink: 0;
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-  background: var(--warn-ink);
-}
-
-.auto-floor-note {
-  padding: 10px 14px;
-  font-size: 11px;
-  line-height: 1.4;
+  color: var(--warn-ink);
 }
 
 /* Delegate a task tree */
@@ -644,7 +612,7 @@
   .auto-list {
     flex: 0 0 auto;
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
     width: 100%;
   }
 

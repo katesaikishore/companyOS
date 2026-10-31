@@ -3,7 +3,7 @@
 
 .ledger-view {
   container: ledger / inline-size;
-  --ledger-cols: 112px minmax(0, 1fr) 84px 150px;
+  --ledger-cols: 112px minmax(0, 1fr) 84px 136px;
   gap: 16px;
 }
 
@@ -29,6 +29,7 @@
   font-weight: 600;
   line-height: 1.2;
   letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
 }
 
 .ledger-view .ledger-tile.is-hosts .ledger-tile-value {

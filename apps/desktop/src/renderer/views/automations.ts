@@ -1,8 +1,8 @@
 import type { AgentDelegationResult, AutomationView, AutonomyLevel, GateRequirement, HandoffView, Param, RunRecord, RunResult, Step, TwinStatus } from '@companyos/twin-core';
 import { h, type Child } from '../dom.js';
-import { button, emptyState, levelMeter, pageHeader, panel, progressBar } from '../components/ui.js';
-import { formatRate, formatWhen, handoffStateLabel, noticedPerWeek, percent, plural, summarySourceLabel } from '../format.js';
-import { GATE, LEVEL_NAMES, levelLabel, passRate, runOutcomeLabel, stepDetail, stepTitle } from '../labels.js';
+import { button, emptyState, levelMeter, pageHeader, panel } from '../components/ui.js';
+import { formatRate, formatWhen, handoffStateLabel, noticedPerWeek, plural, summarySourceLabel, titleCase } from '../format.js';
+import { LEVEL_NAMES, levelLabel, paramFor, runOutcomeLabel, stepDetail, stepTitle } from '../labels.js';
 import { call, go, pending, requestRender, setNotice, state } from '../store.js';
 
 type AutomationTab = 'workflow' | 'autonomy' | 'delegate';
@@ -17,6 +17,8 @@ const TABS: readonly { id: AutomationTab; label: string }[] = [
 const ASKS_FIRST = ['Steps that focus mail or chat', 'Steps that open a link, file or shortcut'] as const;
 
 const RUN_HINT_ID = 'automation-run-hint';
+
+const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 
 /** The tab the detail shows. It lives here, not in the store, so a refresh of the status keeps the tab the person chose. */
 let activeTab: AutomationTab = 'workflow';
@@ -72,8 +74,6 @@ function routineList(views: readonly AutomationView[], selectedId: string | unde
 function routineLink(view: AutomationView, current: boolean): HTMLElement {
   const { automation } = view;
   const level = view.state.level;
-  const runs = view.state.runs;
-  const rate = passRate(runs);
   return h(
     'a',
     {
@@ -90,7 +90,6 @@ function routineLink(view: AutomationView, current: boolean): HTMLElement {
       levelMeter(level),
       h('span', { class: 'mono', 'data-testid': 'automation-level' }, levelLabel(level)),
     ),
-    h('span', { class: 'auto-item-meta mono' }, plural(runs.length, 'run'), ' · ', rate === undefined ? 'no checks yet' : `${percent(rate)} checks passed`),
   );
 }
 
@@ -375,18 +374,18 @@ function ladderCells(view: AutomationView): LadderCell[] {
   });
 }
 
+/** The design marks only the current level, the locked top level and an eligible promotion. Other rungs show their code alone. */
 function ladderLabel(cell: LadderCell): string {
   switch (cell.tone) {
-    case 'passed':
-      return `${cell.code} · passed`;
     case 'now':
       return `${cell.code} · now`;
     case 'eligible':
       return `${cell.code} · eligible`;
     case 'locked':
-      return `${cell.code} · not in this version`;
+      return `${cell.code} · locked`;
+    case 'passed':
     case 'next':
-      return `${cell.code} · not yet`;
+      return cell.code;
   }
 }
 
@@ -453,8 +452,9 @@ function workflowPanel(view: AutomationView): HTMLElement {
 }
 
 function workflowRow(step: Step, index: number, params: readonly Param[]): HTMLElement {
-  const isAct = step.op !== 'check_focus';
   const detail = stepDetail(step, params);
+  // A fixed app reads in title case, as the design shows it. A parameter's label is already a sentence, so it is left as it is.
+  const title = step.op === 'focus_app' && !paramFor(step, params) ? titleCase(step.app) : stepTitle(step, params);
   return h(
     'li',
     { class: 'auto-step' },
@@ -463,10 +463,9 @@ function workflowRow(step: Step, index: number, params: readonly Param[]): HTMLE
     h(
       'span',
       { class: 'auto-step-app' },
-      h('span', null, stepTitle(step, params)),
+      h('span', null, title),
       detail ? h('span', { class: 'auto-step-detail mono muted' }, detail) : undefined,
     ),
-    h('span', { class: isAct ? 'kind kind-act' : 'kind kind-check' }, isAct ? 'act' : 'check'),
   );
 }
 
@@ -494,14 +493,13 @@ function runRow(id: string, run: RunRecord, newest: boolean): HTMLElement {
     : run.reverted
       ? h('span', { class: 'auto-run-undone muted' }, 'Undone')
       : undefined;
+  const outcome = checks > 0 ? `${runOutcomeLabel(run)} · ${run.postconditionsPassed}/${checks}` : runOutcomeLabel(run);
   return h(
     'li',
     { class: 'auto-run' },
     h('span', { class: `auto-run-dot is-${tone}`, 'aria-hidden': 'true' }),
     h('span', { class: 'auto-run-when mono' }, formatWhen(run.ts)),
-    h('span', { class: 'auto-run-mode mono muted' }, run.mode),
-    h('span', { class: `auto-run-outcome is-${tone}` }, runOutcomeLabel(run)),
-    h('span', { class: 'auto-run-checks mono muted' }, checks > 0 ? `${run.postconditionsPassed}/${checks} checks` : 'no checks'),
+    h('span', { class: `auto-run-outcome mono is-${tone}` }, outcome),
     action,
   );
 }
@@ -521,13 +519,6 @@ function gatePanel(view: AutomationView): HTMLElement {
     reached
       ? h('p', { class: 'auto-empty muted' }, 'This automation is already at L4.')
       : h('ul', { class: 'auto-gate' }, ...promotion.requirements.map(gateRow)),
-    reached
-      ? undefined
-      : h(
-          'p',
-          { class: 'auto-gate-rule muted' },
-          `All ${promotion.requirements.length} conditions must hold. Runs, checks and undos count the last ${GATE.windowDays} days; supervised runs count all history.`,
-        ),
     promotion.eligible || reached
       ? undefined
       : h(
@@ -553,14 +544,9 @@ function gateRow(requirement: GateRequirement): HTMLElement {
   return h(
     'li',
     { class: 'auto-gate-row' },
-    h(
-      'div',
-      { class: 'auto-gate-line' },
-      h('span', { class: requirement.met ? 'auto-gate-mark is-met' : 'auto-gate-mark', 'aria-hidden': 'true' }, requirement.met ? '✓' : ''),
-      h('span', { class: 'auto-gate-label' }, h('span', { class: 'auto-sr' }, requirement.met ? 'Met: ' : 'Not met: '), requirement.label),
-      h('span', { class: 'auto-gate-value mono' }, requirement.value),
-    ),
-    requirement.progress === undefined ? undefined : progressBar(requirement.progress),
+    h('span', { class: requirement.met ? 'auto-gate-mark is-met' : 'auto-gate-mark', 'aria-hidden': 'true' }, requirement.met ? '✓' : ''),
+    h('span', { class: 'auto-gate-label' }, h('span', { class: 'auto-sr' }, requirement.met ? 'Met: ' : 'Not met: '), requirement.label),
+    h('span', { class: 'auto-gate-value mono' }, requirement.value),
   );
 }
 
@@ -573,7 +559,33 @@ function floorPanel(): HTMLElement {
       h('h3', { class: 'auto-card-title', id: 'floor-title' }, 'Asks first when supervised'),
       h('span', { class: 'auto-card-note' }, 'Checked by a local policy engine before every step.'),
     ),
-    h('ul', { class: 'auto-floor' }, ...ASKS_FIRST.map(item => h('li', { class: 'auto-floor-item' }, h('span', { class: 'auto-floor-mark', 'aria-hidden': 'true' }), h('span', null, item)))),
-    h('p', { class: 'auto-floor-note muted' }, 'Unattended runs never run these steps: they are refused, not asked.'),
+    h('ul', { class: 'auto-floor' }, ...ASKS_FIRST.map(item => h('li', { class: 'auto-floor-item' }, lockIcon(), h('span', null, item)))),
   );
+}
+
+function svgElement(tag: string, attributes: Record<string, string>): SVGElement {
+  const element = document.createElementNS(SVG_NAMESPACE, tag);
+  for (const [name, value] of Object.entries(attributes)) element.setAttribute(name, value);
+  return element;
+}
+
+/** The padlock beside each step that asks first. Its colour comes from CSS, so both themes follow. */
+function lockIcon(): SVGSVGElement {
+  const icon = svgElement('svg', {
+    class: 'auto-floor-icon',
+    width: '14',
+    height: '14',
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    'stroke-width': '2',
+    'stroke-linecap': 'round',
+    'stroke-linejoin': 'round',
+    'aria-hidden': 'true',
+  }) as SVGSVGElement;
+  icon.append(
+    svgElement('rect', { x: '5', y: '11', width: '14', height: '10', rx: '2' }),
+    svgElement('path', { d: 'M8 11V8a4 4 0 0 1 8 0v3' }),
+  );
+  return icon;
 }
