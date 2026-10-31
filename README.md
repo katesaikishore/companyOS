@@ -121,3 +121,7 @@ secrets, and it fails without them: `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_API_K
   MVP, so check this README for the current status first.
 - [`docs/research/`](docs/research/): research notes on automation and autonomy, OS capture, prior art, privacy and
   law, and understanding and ML.
+
+## License
+
+companyOS is licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
