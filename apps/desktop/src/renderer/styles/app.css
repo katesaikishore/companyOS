@@ -73,6 +73,64 @@ a {
   color: var(--danger);
 }
 
+/* Section colours. A tone class sets the four tone properties, and a component inside it reads them. */
+
+.tone-blue {
+  --tone: var(--blue);
+  --tone-hi: var(--blue-hi);
+  --tone-soft: var(--blue-soft);
+  --tone-ink: var(--blue-ink);
+}
+
+.tone-green {
+  --tone: var(--green);
+  --tone-hi: var(--green-hi);
+  --tone-soft: var(--green-soft);
+  --tone-ink: var(--green-ink);
+}
+
+.tone-orange {
+  --tone: var(--orange);
+  --tone-hi: var(--orange-hi);
+  --tone-soft: var(--orange-soft);
+  --tone-ink: var(--orange-ink);
+}
+
+.tone-purple {
+  --tone: var(--purple);
+  --tone-hi: var(--purple-hi);
+  --tone-soft: var(--purple-soft);
+  --tone-ink: var(--purple-ink);
+}
+
+.tone-indigo {
+  --tone: var(--indigo);
+  --tone-hi: var(--indigo-hi);
+  --tone-soft: var(--indigo-soft);
+  --tone-ink: var(--indigo-ink);
+}
+
+.tone-cyan {
+  --tone: var(--cyan);
+  --tone-hi: var(--cyan-hi);
+  --tone-soft: var(--cyan-soft);
+  --tone-ink: var(--cyan-ink);
+}
+
+.tone-berry {
+  --tone: var(--berry);
+  --tone-hi: var(--berry-hi);
+  --tone-soft: var(--berry-soft);
+  --tone-ink: var(--berry-ink);
+}
+
+.tone-steel {
+  --tone: var(--steel);
+  --tone-hi: var(--steel-hi);
+  --tone-soft: var(--steel-soft);
+  --tone-ink: var(--steel-ink);
+}
+
 .stack {
   display: flex;
   flex-direction: column;
@@ -167,6 +225,7 @@ a {
   gap: 10px;
   min-height: var(--nav-row);
   padding: 0 10px;
+  position: relative;
   border-radius: 9px;
   color: var(--ink-2);
   text-decoration: none;
@@ -178,11 +237,35 @@ a {
   color: var(--ink);
 }
 
+/* The current page takes its section's tint, with a short bar in the section colour at the left edge. */
 .nav-item.is-active {
-  background: var(--nav-active);
+  background: var(--tone-soft);
   color: var(--ink);
   font-weight: 600;
-  box-shadow: 0 0 0 1px var(--border);
+}
+
+.nav-item.is-active::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 3px;
+  height: 16px;
+  border-radius: 3px;
+  background: var(--tone);
+  transform: translateY(-50%);
+}
+
+.nav-tile {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: linear-gradient(135deg, var(--tone-hi), var(--tone));
+  color: var(--on-tone);
 }
 
 .nav-icon {
@@ -192,10 +275,6 @@ a {
 .nav-label {
   flex: 1;
   min-width: 0;
-}
-
-.nav-item.is-active .nav-icon {
-  color: var(--accent);
 }
 
 .nav-count {
@@ -211,8 +290,8 @@ a {
   height: 18px;
   padding: 0 5px;
   border-radius: 999px;
-  background: var(--accent);
-  color: var(--on-accent);
+  background: var(--tone);
+  color: var(--on-tone);
 }
 
 .command-launch {
