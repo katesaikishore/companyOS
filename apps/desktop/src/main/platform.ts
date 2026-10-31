@@ -6,6 +6,7 @@ import {
   openableFilePath,
   parseWebAddress,
   windowsSendKeys,
+  xdotoolChord,
   type Executor,
   type FileStat,
 } from '@companyos/twin-core';
@@ -249,13 +250,46 @@ function escapeRegex(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/**
+ * The class name in an xprop WM_CLASS line, such as: WM_CLASS(STRING) = "instance", "Class". xprop writes a quote or a
+ * backslash as a backslash escape, and a byte outside ASCII as a three-digit octal escape. The escapes are decoded to
+ * bytes, and the bytes are read as UTF-8. A line with one string has an instance name only, so it has no class.
+ */
+export function wmClassName(line: string): string | undefined {
+  const quoted = [...line.matchAll(/"((?:[^"\\]|\\.)*)"/g)];
+  if (quoted.length < 2) return undefined;
+  const chars = Array.from(quoted[1][1]);
+  const bytes: number[] = [];
+  for (let i = 0; i < chars.length; i++) {
+    if (chars[i] !== '\\') {
+      bytes.push(...Buffer.from(chars[i], 'utf8'));
+      continue;
+    }
+    const octal = chars.slice(i + 1, i + 4).join('');
+    if (/^[0-7]{3}$/.test(octal)) {
+      bytes.push(parseInt(octal, 8));
+      i += 3;
+    } else {
+      bytes.push(...Buffer.from(chars[i + 1] ?? '', 'utf8'));
+      i += 1;
+    }
+  }
+  return Buffer.from(bytes).toString('utf8') || undefined;
+}
+
 const linuxX11: Platform = {
   name: 'linux-x11',
   pollMs: 3000,
   async frontmost() {
-    const windowId = await run('xdotool', ['getactivewindow']);
-    const className = await run('xdotool', ['getwindowclassname', windowId]);
-    return className || undefined;
+    // xdotool on Ubuntu 24.04 has no getwindowclassname, so the class is read from the window's WM_CLASS property. A
+    // failed lookup means no app is in front, so it is reported as undefined rather than thrown.
+    try {
+      const windowId = await run('xdotool', ['getactivewindow']);
+      if (!windowId) return undefined;
+      return wmClassName(await run('xprop', ['-id', windowId, 'WM_CLASS']));
+    } catch {
+      return undefined;
+    }
   },
   async focus(app) {
     try {
@@ -265,11 +299,33 @@ const linuxX11: Platform = {
       return false;
     }
   },
+  /**
+   * Brings the app forward, then checks that the active window is one of that app's windows before it sends the keys. If
+   * the check fails, nothing is sent. The keys go through XTEST, the same path as xdotool's own key command, which did not
+   * crash the test apps in the checks that were run. The agent-desktop CLI's press did, so it is not used here.
+   */
+  async pressShortcut(app, shortcut) {
+    const chord = xdotoolChord(shortcut);
+    if (!chord) return false;
+    try {
+      const pattern = `^${escapeRegex(app)}$`;
+      await run('xdotool', ['search', '--onlyvisible', '--class', pattern, 'windowactivate', '--sync']);
+      const active = await run('xdotool', ['getactivewindow']);
+      const ours = (await run('xdotool', ['search', '--onlyvisible', '--class', pattern])).split(/\s+/);
+      if (!active || !ours.includes(active)) return false;
+      await run('xdotool', ['key', '--clearmodifiers', chord]);
+      return true;
+    } catch {
+      return false;
+    }
+  },
 };
 
-async function hasXdotool(): Promise<boolean> {
+/** True when both X11 tools are installed: xdotool for windows and keys, and xprop (from x11-utils) for the class name. */
+async function hasX11Tools(): Promise<boolean> {
   try {
     await run('xdotool', ['version']);
+    await run('xprop', ['-version']);
     return true;
   } catch {
     return false;
@@ -278,8 +334,8 @@ async function hasXdotool(): Promise<boolean> {
 
 /**
  * The runner's executor for one platform. An optional step is offered only where the adapter has it, so the runner
- * blocks the rest before anyone is asked. Pressing a shortcut is offered on macOS and Windows. Linux has no adapter yet,
- * so the runner blocks that step there before anyone is asked.
+ * blocks the rest before anyone is asked. Pressing a shortcut is offered on macOS, on Windows and on X11 through xdotool.
+ * Elsewhere, such as Wayland, the runner blocks that step before anyone is asked.
  */
 export function executorFor(platform: Platform): Executor {
   return {
@@ -334,8 +390,8 @@ export async function choosePlatform(): Promise<PlatformChoice> {
       return { detail: 'Wayland: app capture needs a compositor extension and is not available yet.' };
     }
     if (!process.env.DISPLAY) return { detail: 'No display found.' };
-    if (await hasXdotool()) return { platform: linuxX11, detail: 'X11 through xdotool' };
-    return { detail: 'Install xdotool to enable app capture on X11.' };
+    if (await hasX11Tools()) return { platform: linuxX11, detail: 'X11 through xdotool and xprop' };
+    return { detail: 'Install xdotool and x11-utils (xprop) to enable app capture on X11.' };
   }
   return { detail: `Unsupported platform: ${process.platform}` };
 }

@@ -43,9 +43,11 @@ the owner's Mintlify account.
   model is downloaded but never loaded. Naming with a real chat model has not been checked, because the tests use a fake
   worker.
 - **Steps** are limited. Focusing an app and checking focus work wherever app capture works. Opening a link or a file
-  works on macOS and Windows only, and a file asks each time. Pressing keys works on macOS and Windows, whose adapters
-  are not yet tested on a real machine, and is blocked on Linux. An optional agent-desktop "hands" executor can run focus
-  and key steps instead. It is off by default, it needs a program path set in Settings, and the program is not bundled.
+  works on macOS and Windows only, and a file asks each time. Pressing a shortcut works on macOS and Windows, whose
+  adapters are not yet tested on a real machine, and on X11 through xdotool. It brings the app forward and sends nothing
+  unless the app is in front. Wayland blocks it. An optional agent-desktop "hands" executor can run focus steps everywhere
+  and key steps on macOS and Windows. It is off by default, it needs a program path set in Settings, and the program is
+  not bundled.
   Typing, clicking and sending are not built. Level 5 is not built.
 - **Platforms.** Wayland has no app capture, and Linux cannot open links or files. Windows has no browser capture.
   Intel Macs are not supported by the current builds, which are for Apple silicon.
@@ -62,7 +64,7 @@ published. The [Install](docs-site/install.mdx) page has the details for each pl
 
 - **macOS:** an Apple silicon `.dmg`. The app asks for Automation permission for System Events, to read the app in front.
 - **Windows:** an NSIS `.exe` for 64-bit Windows. It is unsigned for now.
-- **Linux:** a `.deb` and an `.rpm`. It needs an X11 session, `xdotool`, and a keyring that Electron can use.
+- **Linux:** a `.deb` and an `.rpm`. It needs an X11 session, `xdotool`, `xprop` (the `x11-utils` package on Debian and Ubuntu), and a keyring that Electron can use.
 
 ## Build and run from source
 
