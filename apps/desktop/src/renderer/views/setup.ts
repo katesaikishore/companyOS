@@ -175,11 +175,11 @@ function permRow(name: string, tag: string, description: string, control: Child)
     { class: 'perm-row' },
     h(
       'div',
-      { class: 'perm-text' },
+      { class: 'perm-head' },
       h('div', { class: 'perm-title' }, h('span', { class: 'perm-name' }, name), h('span', { class: 'mono small muted' }, tag)),
-      h('p', { class: 'muted small' }, description),
+      h('div', { class: 'perm-control' }, control),
     ),
-    h('div', { class: 'perm-control' }, control),
+    h('p', { class: 'muted small' }, description),
   );
 }
 
@@ -205,10 +205,11 @@ function devices(status: TwinStatus): Child[] {
     if (plan.warnings.length > 0) {
       parts.push(h('ul', { class: 'warnings' }, ...plan.warnings.map(warning => h('li', null, warning))));
     }
+    const models: Child[] = [];
     if (plan.chat) {
-      parts.push(modelCard('chat', plan.chat.spec, plan.chat, status));
+      models.push(modelCard('chat', plan.chat.spec, plan.chat, status));
     } else {
-      parts.push(
+      models.push(
         h(
           'div',
           { class: 'box box-warn', 'data-testid': 'setup-no-chat' },
@@ -216,8 +217,8 @@ function devices(status: TwinStatus): Child[] {
         ),
       );
     }
-    parts.push(modelCard('embedding', plan.embedding, undefined, status));
-    parts.push(h('div', { class: 'actions' }, installRecommendedButton(plan, status)));
+    models.push(modelCard('embedding', plan.embedding, undefined, status));
+    parts.push(h('div', { class: 'model-grid' }, ...models));
     parts.push(alternativesBlock(plan, status));
   }
   return parts;
@@ -314,18 +315,23 @@ function alternativesBlock(plan: SetupPlan, status: TwinStatus): HTMLElement {
     'div',
     { class: 'alternatives' },
     h(
-      'button',
-      {
-        type: 'button',
-        class: 'btn btn-link',
-        'aria-expanded': String(open),
-        'data-testid': 'setup-alternatives-toggle',
-        onclick: () => {
-          state.altOpen = !open;
-          requestRender();
+      'div',
+      { class: 'actions' },
+      installRecommendedButton(plan, status),
+      h(
+        'button',
+        {
+          type: 'button',
+          class: 'btn btn-link',
+          'aria-expanded': String(open),
+          'data-testid': 'setup-alternatives-toggle',
+          onclick: () => {
+            state.altOpen = !open;
+            requestRender();
+          },
         },
-      },
-      open ? 'Hide other models' : 'Choose a different model',
+        open ? 'Hide other models' : 'Choose a different model',
+      ),
     ),
     open
       ? h(

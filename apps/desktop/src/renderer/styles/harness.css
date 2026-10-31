@@ -1,16 +1,20 @@
 /* Agent harness page. Styles for this page only. Colours come from tokens.css. */
 
+/* The page is its own container, so the two columns stack by the width of the page, not the window. */
 .harness-page {
   display: flex;
   flex-direction: column;
   gap: 16px;
   min-width: 0;
+  container-name: harness;
+  container-type: inline-size;
 }
 
 .harness-layout {
   display: grid;
   grid-template-columns: minmax(200px, 260px) minmax(0, 1fr);
-  min-height: 480px;
+  grid-template-rows: minmax(0, 1fr);
+  height: 420px;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 14px;
@@ -18,16 +22,36 @@
   box-shadow: var(--shadow);
 }
 
+/* Narrow page: the list sits above the conversation. Each keeps a fixed share and scrolls inside it. */
+@container harness (max-width: 719px) {
+  .harness-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+    height: auto;
+  }
+
+  .harness-list {
+    max-height: 200px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .harness-thread {
+    height: 260px;
+  }
+}
+
 /* Left column: the lead bot or room, then the handoffs grouped by routine. */
 
 .harness-list {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 14px;
   min-width: 0;
-  max-height: 640px;
+  min-height: 0;
+  overflow-x: hidden;
   overflow-y: auto;
-  padding: 16px 12px;
+  padding: 14px 12px;
   border-right: 1px solid var(--border);
   background: var(--sidebar);
 }
@@ -36,7 +60,7 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 6px;
+  gap: 4px;
   padding: 0 4px;
 }
 
@@ -46,31 +70,46 @@
   overflow-wrap: anywhere;
 }
 
+.harness-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.harness-tab {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  margin-bottom: -1px;
+  padding: 0 8px;
+  border-bottom: 2px solid var(--accent);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .harness-groups {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
+  min-width: 0;
 }
 
 .harness-group {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
-}
-
-.harness-group-title {
-  margin: 0 8px 2px;
-  overflow-wrap: anywhere;
 }
 
 .harness-row {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   width: 100%;
   min-width: 0;
-  padding: 10px;
+  padding: 9px 10px;
   border: 0;
   border-radius: 10px;
   background: transparent;
@@ -89,10 +128,33 @@
   box-shadow: 0 0 0 1px var(--border);
 }
 
-.harness-row-brief {
+.harness-row-top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.harness-row-name {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.harness-row-time {
+  flex: 0 0 auto;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.harness-row-brief {
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -102,31 +164,55 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 8px;
+  min-width: 0;
 }
 
-/* Middle column: the selected handoff as a conversation. */
+/* Main pane: the header, the Task or Job view, and the reply box. */
 
 .harness-thread {
   display: flex;
   flex-direction: column;
-  gap: 12px;
   min-width: 0;
-  max-height: 640px;
-  overflow-y: auto;
-  padding: 16px 20px 20px;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .harness-thread-empty {
   align-items: center;
   justify-content: center;
-  max-height: none;
+  padding: 20px;
 }
 
 .harness-thread-head {
   display: flex;
+  flex: 0 0 auto;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 10px;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.harness-avatar {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.harness-thread-id {
+  display: flex;
+  flex: 1 1 140px;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 
 .harness-thread-title {
@@ -134,6 +220,21 @@
   font-size: 16px;
   font-weight: 600;
   overflow-wrap: anywhere;
+}
+
+.harness-switch {
+  flex: 0 0 auto;
+}
+
+.harness-thread-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 14px 16px;
 }
 
 .harness-stamp {
@@ -145,7 +246,7 @@
   flex-direction: column;
   gap: 4px;
   max-width: 88%;
-  padding: 11px 15px;
+  padding: 10px 14px;
   border-radius: 18px;
   font-size: 14px;
   line-height: 1.45;
@@ -164,7 +265,7 @@
 
 .harness-bubble-in {
   align-self: flex-start;
-  background: var(--inset);
+  background: var(--neutral-soft);
   color: var(--ink);
 }
 
@@ -185,17 +286,37 @@
   white-space: pre-wrap;
 }
 
-/* The job card: state chip, thread id, and the task tree. */
+/* The line under a reply that leads to the job. */
+
+.harness-job-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  align-self: stretch;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--card);
+}
+
+/* The job card: state chip, thread id, and the task tree as a table. */
 
 .harness-job {
   display: flex;
   flex-direction: column;
   gap: 10px;
   align-self: stretch;
+  min-width: 0;
   padding: 14px 16px;
   border: 1px solid var(--border);
   border-radius: 16px;
   background: var(--card);
+}
+
+.harness-job-head,
+.harness-job-summary {
+  min-width: 0;
 }
 
 .harness-job-head {
@@ -214,36 +335,65 @@
   overflow-wrap: anywhere;
 }
 
+.harness-job-summary .harness-job-thread {
+  flex: 1 1 auto;
+}
+
 .harness-job-head .chip {
   margin-left: auto;
 }
 
 .harness-tree {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  width: 100%;
   margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.harness-tree-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  min-height: 30px;
+  border-collapse: collapse;
+  table-layout: fixed;
   font-size: 13px;
 }
 
+.harness-tree th {
+  padding: 0 8px 6px;
+  border-bottom: 1px solid var(--divider);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.harness-tree th:first-child {
+  width: 40%;
+}
+
+.harness-tree th:last-child {
+  width: 96px;
+}
+
+.harness-tree td {
+  height: 30px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--divider);
+  overflow: hidden;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.harness-tree-who-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .harness-tree-who {
-  flex: 0 0 auto;
+  min-width: 0;
+  overflow: hidden;
   font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .harness-tree-what {
-  flex: 1 1 auto;
-  min-width: 0;
+  display: block;
   overflow: hidden;
   color: var(--muted);
   text-overflow: ellipsis;
@@ -251,7 +401,10 @@
 }
 
 .harness-tree-status {
-  flex: 0 0 auto;
+  display: block;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -275,28 +428,52 @@
   background: var(--danger);
 }
 
-.harness-raw {
-  max-height: 360px;
+/* Raw task tree text wraps; the page never scrolls sideways. */
+.harness-page .harness-raw {
+  max-height: 240px;
   margin: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Reply box: read-only, because replies happen in OpenMausBot. */
+
+.harness-composer {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 16px 10px;
+  border-top: 1px solid var(--divider);
+}
+
+.harness-composer-label {
+  padding: 0 6px;
+}
+
+.harness-composer-input {
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  margin: 0;
+  padding: 9px 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--inset);
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  resize: none;
+}
+
+.harness-composer-input:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
 }
 
 .harness-foot {
   margin: 0;
-}
-
-@media (max-width: 760px) {
-  .harness-layout {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .harness-list {
-    max-height: none;
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .harness-thread {
-    max-height: none;
-  }
 }

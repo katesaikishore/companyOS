@@ -9,7 +9,8 @@ import { go, requestRender, state } from '../store.js';
 const MAX_TREE_ROWS = 100;
 const MAX_TREE_LEVELS = 5;
 const MAX_TREE_VISITS = 1_000;
-const TREE_INDENT_PX = 20;
+const TREE_INDENT_PX = 16;
+const TREE_CELL_PAD_PX = 8;
 const TREE_CHILD_KEYS = ['children', 'subtasks', 'tasks'] as const;
 const PREVIEW_CHARS = 80;
 
@@ -25,6 +26,15 @@ interface RoutineGroup {
   automationId: string;
   routineName: string;
   handoffs: HandoffView[];
+}
+
+/** The main pane shows either the conversation for the handoff or its job. Kept across redraws. */
+type DetailView = 'task' | 'job';
+let detailView: DetailView = 'task';
+
+function showDetail(view: DetailView): void {
+  detailView = view;
+  requestRender();
 }
 
 /**
@@ -108,7 +118,10 @@ function groupByRoutine(handoffs: readonly HandoffView[]): RoutineGroup[] {
   return [...groups.values()];
 }
 
-/** The lead bot or room from Settings, labelled as the current setting, then the handoffs grouped by routine. */
+/**
+ * The lead bot or room from Settings, labelled as the current setting, then the handoffs grouped by routine. The list
+ * has only an Automations tab, because companyOS holds no plugin data to list under a Plugins tab.
+ */
 function leadColumn(target: string, groups: RoutineGroup[], selectedId: string | undefined): HTMLElement {
   return h(
     'aside',
@@ -123,6 +136,7 @@ function leadColumn(target: string, groups: RoutineGroup[], selectedId: string |
       target ? h('span', { class: 'muted small' }, 'Current setting. New handoffs go here.') : undefined,
       target ? undefined : button('Open Settings', { onClick: () => go('#/settings') }, 'btn-small'),
     ),
+    h('div', { class: 'harness-tabs' }, h('span', { class: 'harness-tab' }, 'Automations')),
     groups.length === 0
       ? h('p', { class: 'muted small', 'data-testid': 'harness-no-handoffs' }, 'No handoffs yet.')
       : h('div', { class: 'harness-groups' }, ...groups.map(group => routineGroup(group, selectedId))),
@@ -132,12 +146,12 @@ function leadColumn(target: string, groups: RoutineGroup[], selectedId: string |
 function routineGroup(group: RoutineGroup, selectedId: string | undefined): HTMLElement {
   return h(
     'section',
-    { class: 'harness-group', 'data-testid': 'harness-group' },
-    h('h2', { class: 'eyebrow harness-group-title' }, group.routineName),
+    { class: 'harness-group', role: 'group', 'aria-label': group.routineName, 'data-testid': 'harness-group' },
     ...group.handoffs.map(item => handoffRow(item, item.id === selectedId)),
   );
 }
 
+/** One handoff as a thread row: the routine name, when it was sent, the first line of the brief, and its state. */
 function handoffRow(item: HandoffView, selected: boolean): HTMLElement {
   return h(
     'button',
@@ -151,13 +165,14 @@ function handoffRow(item: HandoffView, selected: boolean): HTMLElement {
         requestRender();
       },
     },
-    h('span', { class: 'harness-row-brief' }, preview(item.brief)),
     h(
       'span',
-      { class: 'harness-row-meta' },
-      chip(handoffStateLabel(item.state), handoffTone(item.state)),
-      h('span', { class: 'mono small muted' }, formatWhen(item.sentAt)),
+      { class: 'harness-row-top' },
+      h('span', { class: 'harness-row-name' }, item.routineName),
+      h('span', { class: 'harness-row-time mono muted' }, formatWhen(item.sentAt)),
     ),
+    h('span', { class: 'harness-row-brief' }, preview(item.brief)),
+    h('span', { class: 'harness-row-meta' }, chip(handoffStateLabel(item.state), handoffTone(item.state))),
   );
 }
 
@@ -168,24 +183,80 @@ function preview(text: string): string {
 }
 
 /**
- * The selected handoff as a conversation: what companyOS sent, what came back, and the job it started. The title is the
- * target this handoff was sent to, as it was stored, not the current setting.
+ * The selected handoff in the main pane: a header with the target it was sent to, the Task or Job view, and a reply box.
+ * The title is the target this handoff was sent to, as it was stored, not the current setting.
  */
 function conversation(item: HandoffView): HTMLElement {
   return h(
     'article',
     { class: 'harness-thread', 'data-testid': 'harness-conversation' },
+    threadHead(item),
+    h('div', { class: 'harness-thread-body' }, detailView === 'job' ? jobView(item) : taskView(item)),
+    composer(),
+  );
+}
+
+function threadHead(item: HandoffView): HTMLElement {
+  const title = item.target || 'OpenMausBot';
+  return h(
+    'header',
+    { class: 'harness-thread-head' },
+    h('span', { class: 'harness-avatar', 'aria-hidden': 'true' }, title.charAt(0).toUpperCase()),
     h(
-      'header',
-      { class: 'harness-thread-head' },
-      h('h2', { class: 'harness-thread-title' }, item.target || 'OpenMausBot'),
+      'span',
+      { class: 'harness-thread-id' },
+      h('h2', { class: 'harness-thread-title' }, title),
       item.target ? h('span', { class: 'mono small muted' }, 'Lead bot or room when sent') : undefined,
     ),
+    detailSwitch(),
+    button('New task', { testid: 'harness-new-task', onClick: () => go('#/automations') }, 'btn-small'),
+  );
+}
+
+/** Task and Job, as two views of the same handoff. */
+function detailSwitch(): HTMLElement {
+  const option = (view: DetailView, label: string): HTMLElement => {
+    const on = detailView === view;
+    return h(
+      'button',
+      {
+        type: 'button',
+        class: on ? 'seg is-on' : 'seg',
+        'aria-pressed': String(on),
+        'data-testid': `harness-view-${view}`,
+        onclick: () => showDetail(view),
+      },
+      label,
+    );
+  };
+  return h(
+    'div',
+    { class: 'segmented harness-switch', role: 'group', 'aria-label': 'Show the task or the job' },
+    option('task', 'Task'),
+    option('job', 'Job'),
+  );
+}
+
+/** The Task view: what companyOS sent, what came back, and a line that leads to the job. */
+function taskView(item: HandoffView): Child[] {
+  return [
     h('span', { class: 'harness-stamp mono small muted' }, formatWhen(item.sentAt)),
     companyOsMessage(item),
     replyMessage(item),
-    item.localFailure ? undefined : jobCard(item),
-  );
+    item.localFailure ? undefined : jobSummary(item),
+  ];
+}
+
+/** The Job view: the job card, or a note when this handoff has no job. */
+function jobView(item: HandoffView): Child {
+  if (item.localFailure) {
+    return h(
+      'p',
+      { class: 'muted small', 'data-testid': 'harness-no-job' },
+      'No job is shown for this handoff. OpenMausBot gave no reply, so companyOS wrote the reply in the Task view.',
+    );
+  }
+  return jobCard(item);
 }
 
 /** What companyOS sent: the routine name, the observed app sequence, the cadence and the brief. */
@@ -216,7 +287,19 @@ function replyMessage(item: HandoffView): HTMLElement {
   );
 }
 
-/** The job OpenMausBot started: its state, its thread id, and the task tree as an indented list. */
+/** The job's thread and state, with a button that opens the Job view. */
+function jobSummary(item: HandoffView): HTMLElement {
+  return h(
+    'div',
+    { class: 'harness-job-summary' },
+    h('span', { class: 'harness-job-title' }, 'Job'),
+    h('span', { class: 'harness-job-thread mono small muted' }, threadLabel(item)),
+    chip(handoffStateLabel(item.state), handoffTone(item.state)),
+    button('View job', { testid: 'harness-view-job-link', variant: 'ghost', onClick: () => showDetail('job') }, 'btn-small'),
+  );
+}
+
+/** The job OpenMausBot started: its state, its thread id, and the task tree as a table. */
 function jobCard(item: HandoffView): HTMLElement {
   return h(
     'section',
@@ -237,24 +320,42 @@ function threadLabel(item: HandoffView): string {
   return item.state === 'sending' ? 'Thread pending' : 'No thread id';
 }
 
-/** The indented task tree, or the raw text when it does not parse. */
+/** The task tree as a table of who, what and status, or the raw text when it does not parse. */
 function treeBody(item: HandoffView): Child {
   if (!item.taskTree) {
     return h('p', { class: 'muted small' }, item.state === 'sending' ? 'Waiting for the job to start.' : 'No task tree was returned.');
   }
   const rows = parseTaskTree(item.taskTree);
   if (!rows) return h('pre', { class: 'code-block harness-raw', 'data-testid': 'harness-tree-raw' }, item.taskTree);
-  return h('ul', { class: 'harness-tree', 'data-testid': 'harness-tree' }, ...rows.map(treeRow));
+  return h(
+    'table',
+    { class: 'harness-tree', 'data-testid': 'harness-tree' },
+    h(
+      'thead',
+      null,
+      h('tr', null, h('th', { scope: 'col' }, 'Who'), h('th', { scope: 'col' }, 'What'), h('th', { scope: 'col' }, 'Status')),
+    ),
+    h('tbody', null, ...rows.map(treeRow)),
+  );
 }
 
+/** Depth shows as indentation on the Who cell, so the columns stay aligned. */
 function treeRow(row: TreeRow): HTMLElement {
   return h(
-    'li',
-    { class: 'harness-tree-row', style: { paddingLeft: `${row.depth * TREE_INDENT_PX}px` } },
-    h('span', { class: `harness-dot harness-dot-${statusTone(row.status)}`, 'aria-hidden': 'true' }),
-    row.who ? h('span', { class: 'harness-tree-who' }, row.who) : undefined,
-    h('span', { class: 'harness-tree-what' }, row.what || 'Untitled task'),
-    row.status ? h('span', { class: 'harness-tree-status mono small muted' }, row.status) : undefined,
+    'tr',
+    { class: 'harness-tree-row' },
+    h(
+      'td',
+      { style: { paddingLeft: `${TREE_CELL_PAD_PX + row.depth * TREE_INDENT_PX}px` } },
+      h(
+        'span',
+        { class: 'harness-tree-who-wrap' },
+        h('span', { class: `harness-dot harness-dot-${statusTone(row.status)}`, 'aria-hidden': 'true' }),
+        row.who ? h('span', { class: 'harness-tree-who' }, row.who) : undefined,
+      ),
+    ),
+    h('td', null, h('span', { class: 'harness-tree-what', title: row.what || undefined }, row.what || 'Untitled task')),
+    h('td', null, row.status ? h('span', { class: 'harness-tree-status mono small muted' }, row.status) : undefined),
   );
 }
 
@@ -264,6 +365,19 @@ function statusTone(status: string): 'teal' | 'warn' | 'danger' | 'neutral' {
   if (/input|approv|wait|needs/i.test(status)) return 'warn';
   if (/fail|stall|timed|error/i.test(status)) return 'danger';
   return 'neutral';
+}
+
+/**
+ * The reply box is read-only. Replies and approvals happen in OpenMausBot, and companyOS has no channel to send it a
+ * chat message, so the box shows that instead of accepting text it cannot send.
+ */
+function composer(): HTMLElement {
+  return h(
+    'label',
+    { class: 'harness-composer' },
+    h('span', { class: 'harness-composer-label small muted' }, 'Reply in OpenMausBot'),
+    h('textarea', { class: 'harness-composer-input', rows: 1, disabled: true }),
+  );
 }
 
 /** Shown until a routine is sent. It says how to send one, and what to set first when the lead bot or room is missing. */

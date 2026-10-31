@@ -1,1 +1,361 @@
-/* Suggestions screen. Styles for its view in views/suggestions.ts only; shared tokens and components live in tokens.css and app.css. */
+/* Suggestions screen. Styles for its view in views/suggestions.ts only. Shared classes (btn, chip, panel, box, page-head, empty) come from app.css. Colours come from tokens.css only. */
+
+/* The page column is the container, so the two columns stack when the column is narrow, whatever the window size. */
+.sg-view {
+  gap: 16px;
+  container-type: inline-size;
+  container-name: sg-view;
+}
+
+.sg-count {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--ink-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.sg-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 16px;
+  min-width: 0;
+}
+
+.sg-side {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Narrow: the cards sit side by side in as many columns as fit. */
+.sg-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+
+.sg-note {
+  padding: 0 4px;
+  line-height: 1.5;
+}
+
+.sg-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sg-card:hover {
+  border-color: var(--border-strong);
+}
+
+.sg-card.is-selected {
+  padding: 13px 15px;
+  border: 2px solid var(--ink);
+}
+
+.sg-card-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.sg-score {
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.sg-name {
+  display: block;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+
+.sg-apps {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sg-app {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 28px;
+  padding: 0 10px 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--inset);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* One neutral tile for every app: the twin does not know an app's brand colour. */
+.sg-app-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  background: var(--ink-2);
+  color: var(--card);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.sg-app-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.sg-arrow {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.sg-figures {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.sg-figure {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sg-figure-label {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.sg-figure-value {
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.sg-detail {
+  gap: 0;
+  padding: 0;
+  border-radius: 14px;
+}
+
+.sg-detail-head {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 20px 22px 18px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.sg-detail-title {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+
+.sg-detail-lede {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.sg-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px 22px;
+}
+
+.sg-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sg-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.sg-steps {
+  display: flex;
+  flex-direction: column;
+}
+
+.sg-step {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--divider);
+}
+
+.sg-step-num {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.sg-step-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.sg-step-text strong {
+  font-weight: 600;
+}
+
+.sg-effect {
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--neutral-soft);
+  color: var(--ink-2);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.sg-effect-local {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.sg-effect-ask {
+  background: var(--warn-bg);
+  color: var(--warn-ink);
+}
+
+.sg-params {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+.sg-plain {
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.sg-touch {
+  gap: 4px;
+}
+
+.sg-touch-clear {
+  background: var(--accent-soft);
+}
+
+.sg-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  padding: 14px 22px;
+  border-top: 1px solid var(--divider);
+  border-radius: 0 0 14px 14px;
+  background: var(--inset);
+}
+
+.sg-foot-text {
+  flex: 1 1 220px;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.sg-foot-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.sg-empty {
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 240px;
+  padding: 32px;
+  text-align: center;
+}
+
+.sg-empty .empty {
+  align-items: center;
+}
+
+.sg-empty .empty-title {
+  font-size: 17px;
+}
+
+.sg-empty .muted {
+  max-width: 360px;
+}
+
+.sg-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.sg-link {
+  text-decoration: none;
+}
+
+/* Wide page column: the list sits beside the detail. Below this width they stack. */
+@container sg-view (min-width: 720px) {
+  .sg-layout {
+    grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  }
+
+  .sg-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
