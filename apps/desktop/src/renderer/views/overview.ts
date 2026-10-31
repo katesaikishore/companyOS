@@ -1,8 +1,8 @@
 import type { NetworkEntry, SuggestionView, TwinStatus } from '@companyos/twin-core';
 import { h, type Child } from '../dom.js';
+import { AUTOMATE, CHEVRON, LOCK, outlineIcon, type Shape, SHIELD, SUGGEST } from '../components/shell.js';
 import { button, emptyState, pageHeader } from '../components/ui.js';
 import { formatBytes, formatWhen, percent, plural } from '../format.js';
-import { captureTitle } from '../labels.js';
 import {
   NETWORK_DAYS,
   networkCallsThisWeek,
@@ -14,18 +14,6 @@ import {
   summaryLine,
 } from '../overview-model.js';
 import { call, pending } from '../store.js';
-
-const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
-
-type Shape = [tag: string, attributes: Record<string, string>];
-const LOCK: Shape[] = [
-  ['rect', { x: '5', y: '11', width: '14', height: '10', rx: '2' }],
-  ['path', { d: 'M8 11V8a4 4 0 0 1 8 0v3' }],
-];
-const SHIELD: Shape[] = [
-  ['path', { d: 'M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6l-8-3z' }],
-  ['path', { d: 'm9 12 2 2 4-4' }],
-];
 
 /** Apps shown as overlapping marks before the rest collapse into a count. */
 const MARKS_SHOWN = 3;
@@ -44,34 +32,72 @@ export function overviewView(status: TwinStatus): HTMLElement {
     h(
       'div',
       { class: 'ov-split' },
-      h('div', { class: 'ov-main' }, waitingPanel(status), networkPanel(status.network, now)),
+      h('div', { class: 'ov-main' }, inboxTiles(status), waitingPanel(status), networkPanel(status.network, now)),
       h('div', { class: 'ov-side' }, heatmapPanel(status.activity), devicePanel(status, networkCallsThisWeek(status.network, now))),
     ),
   );
 }
 
 function overviewHeader(status: TwinStatus): HTMLElement {
-  const captured = status.capture.state;
-  const paused = captured === 'paused';
   return pageHeader(
     'Overview',
     summaryLine(status.recordedFocusEvents, status.stats.observedDays),
-    [
-      h(
-        'span',
-        { class: paused ? 'ov-pill ov-capture-paused' : 'ov-pill', 'data-testid': 'overview-capture-state' },
-        h('span', { class: `dot dot-${captured}`, 'aria-hidden': 'true' }),
-        captureTitle(captured),
-      ),
-      paused
-        ? button('Resume capture', {
-            variant: 'primary',
-            disabled: pending('capture'),
-            onClick: () => void call('capture', twin => twin.setPaused(false)),
-          })
-        : undefined,
-      h('span', { class: 'ov-pill' }, outlineIcon(12, LOCK), 'AES-256-GCM · OS keychain'),
-    ],
+    h('span', { class: 'ov-pill' }, outlineIcon(12, LOCK), 'AES-256-GCM · OS keychain'),
+  );
+}
+
+interface InboxTile {
+  href: string;
+  icon: Shape[];
+  title: string;
+  count: number;
+  note: string;
+}
+
+/** Suggestions and automations, each a link to its page. A count above zero shows as a badge. */
+function inboxTiles(status: TwinStatus): HTMLElement {
+  const suggestions = status.suggestions.length;
+  const automations = status.automations.length;
+  return h(
+    'div',
+    { class: 'ov-inbox' },
+    inboxTile({
+      href: '#/suggestions',
+      icon: SUGGEST,
+      title: 'Suggestions',
+      count: suggestions,
+      note: suggestions > 0 ? plural(suggestions, 'new routine to review', 'new routines to review') : 'Nothing new',
+    }),
+    inboxTile({
+      href: '#/automations',
+      icon: AUTOMATE,
+      title: 'Automations',
+      count: automations,
+      note:
+        automations > 0
+          ? plural(automations, 'automation needs your attention', 'automations need your attention')
+          : 'None yet · accepted routines land here',
+    }),
+  );
+}
+
+function inboxTile(tile: InboxTile): HTMLElement {
+  return h(
+    'a',
+    { class: 'ov-tile', href: tile.href },
+    h(
+      'span',
+      { class: 'ov-tile-icon' },
+      outlineIcon(18, tile.icon),
+      tile.count > 0 ? h('span', { class: 'ov-tile-badge mono' }, String(tile.count)) : undefined,
+    ),
+    h(
+      'span',
+      { class: 'ov-tile-copy' },
+      h('span', { class: 'ov-tile-title' }, tile.title),
+      h('span', { class: 'ov-tile-note' }, tile.note),
+    ),
+    outlineIcon(16, CHEVRON, 'ov-tile-chevron'),
   );
 }
 
@@ -285,7 +311,7 @@ function networkPanel(network: readonly NetworkEntry[], now: number): HTMLElemen
       { class: 'ov-strip-legend' },
       h('span', { class: 'ov-legend-item' }, h('span', { class: 'ov-swatch is-download', 'aria-hidden': 'true' }), 'Model download'),
       h('span', { class: 'ov-legend-item' }, h('span', { class: 'ov-swatch is-check', 'aria-hidden': 'true' }), 'Update check'),
-      summary.hosts.length > 0 ? h('span', { class: 'ov-legend-end mono' }, `Hosts: ${summary.hosts.join(', ')}`) : undefined,
+      summary.hosts.length > 0 ? h('span', { class: 'ov-legend-end mono' }, `${summary.hosts.join(', ')} only`) : undefined,
     ),
   );
 }
@@ -336,7 +362,7 @@ function heatmapPanel(activity: number[][]): HTMLElement {
         { class: 'ov-rhythm-axis mono' },
         h('span', { class: 'ov-axis-start' }, '08:00'),
         h('span', { class: 'ov-axis-middle' }, '13:00'),
-        h('span', { class: 'ov-axis-end' }, '18:00'),
+        h('span', { class: 'ov-axis-end' }, '18'),
       ),
     ),
     h(
@@ -366,7 +392,7 @@ function devicePanel(status: TwinStatus, callsThisWeek: number): HTMLElement {
       'dl',
       { class: 'ov-facts' },
       deviceFact('Twin store', `Encrypted · ${formatBytes(status.storageBytes)}`),
-      deviceFact('Key held by', 'This device · OS keychain'),
+      deviceFact('Key held by', 'You · OS keychain'),
       deviceFact('Raw events kept', plural(status.retentionDays, 'day')),
       deviceFact('Network calls this week', h('a', { href: '#/ledger' }, String(callsThisWeek))),
       deviceFact(
@@ -382,28 +408,4 @@ function devicePanel(status: TwinStatus, callsThisWeek: number): HTMLElement {
 
 function deviceFact(label: string, value: Child, wide = false): HTMLElement {
   return h('div', { class: wide ? 'ov-fact is-wide' : 'ov-fact' }, h('dt', null, label), h('dd', null, value));
-}
-
-/** A stroked outline icon. It is built in the SVG namespace, which h() does not create. */
-function outlineIcon(size: number, shapes: Shape[], extra?: string): SVGSVGElement {
-  const svg = document.createElementNS(SVG_NAMESPACE, 'svg');
-  const attributes: Record<string, string> = {
-    width: String(size),
-    height: String(size),
-    viewBox: '0 0 24 24',
-    fill: 'none',
-    stroke: 'currentColor',
-    'stroke-width': '1.8',
-    'stroke-linecap': 'round',
-    'stroke-linejoin': 'round',
-    'aria-hidden': 'true',
-  };
-  for (const [name, value] of Object.entries(attributes)) svg.setAttribute(name, value);
-  if (extra) svg.setAttribute('class', extra);
-  for (const [tag, shapeAttributes] of shapes) {
-    const element = document.createElementNS(SVG_NAMESPACE, tag);
-    for (const [name, value] of Object.entries(shapeAttributes)) element.setAttribute(name, value);
-    svg.appendChild(element);
-  }
-  return svg;
 }

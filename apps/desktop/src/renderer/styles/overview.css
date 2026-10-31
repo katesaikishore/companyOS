@@ -9,7 +9,12 @@
   container-type: inline-size;
 }
 
-/* Header pills: the capture state and the encryption note. */
+/* The title takes the room the note leaves, so the note stays on the title's line when the window is narrow. */
+.ov-page > .page-head > .page-head-text {
+  flex: 1 1 0;
+}
+
+/* Header pill: the encryption note. */
 
 .ov-pill {
   display: inline-flex;
@@ -28,12 +33,6 @@
 
 .ov-pill svg {
   flex: 0 0 auto;
-}
-
-.ov-capture-paused {
-  border-color: var(--warn-bg);
-  background: var(--warn-bg);
-  color: var(--warn-ink);
 }
 
 /* Summary figures: two across on a narrow page, four across once the page has room. */
@@ -125,7 +124,7 @@
 .ov-side {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
   min-width: 0;
 }
 
@@ -139,6 +138,88 @@
   .ov-split {
     grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
   }
+}
+
+/* Inbox tiles: suggestions and automations, each a link with a badge when something waits. */
+
+.ov-inbox {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.ov-tile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  min-height: 56px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.ov-tile:hover {
+  border-color: var(--border-strong);
+}
+
+.ov-tile-icon {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--page);
+  color: var(--ink-2);
+}
+
+.ov-tile-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 11px;
+  font-weight: 600;
+  box-shadow: 0 0 0 2px var(--card);
+}
+
+.ov-tile-copy {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ov-tile-title {
+  font-weight: 600;
+}
+
+.ov-tile-note {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ov-tile-chevron {
+  flex: 0 0 auto;
+  color: var(--dot-off);
 }
 
 /* Cards share one shape. */
@@ -455,11 +536,11 @@
 }
 
 .ov-axis-middle {
-  grid-column: 7 / span 4;
+  grid-column: 7 / span 5;
 }
 
 .ov-axis-end {
-  grid-column: 11 / span 2;
+  grid-column: 12;
   text-align: right;
 }
 
@@ -495,9 +576,9 @@
 /* On this device: the privacy facts, on a tinted card. */
 
 .ov-device {
-  gap: 12px;
+  gap: 10px;
   border-color: var(--accent-soft-2);
-  background: var(--accent-tint);
+  background: var(--accent-soft);
 }
 
 .ov-device-head {

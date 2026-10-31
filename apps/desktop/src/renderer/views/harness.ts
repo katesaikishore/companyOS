@@ -1,6 +1,6 @@
 import type { HandoffView, TwinStatus } from '@companyos/twin-core';
 import { h, type Child } from '../dom.js';
-import { button, chip, emptyState, pageHeader } from '../components/ui.js';
+import { button, chip, emptyState } from '../components/ui.js';
 import { formatWhen, handoffStateLabel, noticedPerWeek, summarySourceLabel } from '../format.js';
 import { handoffTone } from '../labels.js';
 import { go, requestRender, state } from '../store.js';
@@ -13,6 +13,7 @@ const TREE_INDENT_PX = 16;
 const TREE_CELL_PAD_PX = 8;
 const TREE_CHILD_KEYS = ['children', 'subtasks', 'tasks'] as const;
 const PREVIEW_CHARS = 80;
+const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 
 /** One line of the task tree: how deep it sits, who owns it, what it is, and its state, as text. */
 export interface TreeRow {
@@ -81,18 +82,14 @@ function textOf(...values: unknown[]): string {
   return '';
 }
 
-/** The agent harness page: the lead bot or room, the handoffs by routine, and the selected handoff as a conversation. */
+/** The agent harness page, drawn as OpenMausBot: the lead bot or room and the handoffs on the left, the selected handoff as a conversation. */
 export function harnessView(status: TwinStatus): HTMLElement {
   const handoffs = status.handoffs;
   const target = status.config.openMausBotTarget.trim();
   const selected = handoffs.find(item => item.id === state.selectedHandoff) ?? handoffs[0];
   return h(
     'section',
-    { class: 'harness-page', 'data-testid': 'harness-root' },
-    pageHeader(
-      'Agent harness',
-      'Routines handed to OpenMausBot. companyOS keeps each handoff on this device, so the replies survive a restart.',
-    ),
+    { class: 'harness-page', 'aria-label': 'OpenMausBot', 'data-testid': 'harness-root' },
     h(
       'div',
       { class: 'harness-layout' },
@@ -151,7 +148,7 @@ function routineGroup(group: RoutineGroup, selectedId: string | undefined): HTML
   );
 }
 
-/** One handoff as a thread row: the routine name, when it was sent, the first line of the brief, and its state. */
+/** One handoff as a row: the routine name, the first line of the brief, then its state and when it was sent. */
 function handoffRow(item: HandoffView, selected: boolean): HTMLElement {
   return h(
     'button',
@@ -165,14 +162,14 @@ function handoffRow(item: HandoffView, selected: boolean): HTMLElement {
         requestRender();
       },
     },
+    h('span', { class: 'harness-row-name' }, item.routineName),
+    h('span', { class: 'harness-row-brief' }, preview(item.brief)),
     h(
       'span',
-      { class: 'harness-row-top' },
-      h('span', { class: 'harness-row-name' }, item.routineName),
+      { class: 'harness-row-meta' },
+      chip(handoffStateLabel(item.state), handoffTone(item.state)),
       h('span', { class: 'harness-row-time mono muted' }, formatWhen(item.sentAt)),
     ),
-    h('span', { class: 'harness-row-brief' }, preview(item.brief)),
-    h('span', { class: 'harness-row-meta' }, chip(handoffStateLabel(item.state), handoffTone(item.state))),
   );
 }
 
@@ -201,16 +198,34 @@ function threadHead(item: HandoffView): HTMLElement {
   return h(
     'header',
     { class: 'harness-thread-head' },
-    h('span', { class: 'harness-avatar', 'aria-hidden': 'true' }, title.charAt(0).toUpperCase()),
+    botMark(),
     h(
       'span',
       { class: 'harness-thread-id' },
-      h('h2', { class: 'harness-thread-title' }, title),
+      h('h1', { class: 'harness-thread-title' }, title),
       item.target ? h('span', { class: 'mono small muted' }, 'Lead bot or room when sent') : undefined,
     ),
     detailSwitch(),
-    button('New task', { testid: 'harness-new-task', onClick: () => go('#/automations') }, 'btn-small'),
+    button('New task', { testid: 'harness-new-task', onClick: () => go('#/automations') }, 'btn-small harness-new-task'),
   );
+}
+
+/** The OpenMausBot mark at the head of the conversation. Its colours come from the stylesheet. */
+function botMark(): SVGElement {
+  return svgElement(
+    'svg',
+    { viewBox: '0 0 48 48', class: 'harness-mark', 'aria-hidden': 'true' },
+    svgElement('path', { d: 'M10 7.5c0-3.1 3.4-5 6-3.4l26 16.5c2.5 1.6 2.5 5.2 0 6.8l-26 16.5c-2.6 1.6-6-.3-6-3.4z', class: 'harness-mark-body' }),
+    svgElement('rect', { x: '17', y: '18', width: '2.6', height: '5', rx: '1.3', class: 'harness-mark-eye' }),
+    svgElement('rect', { x: '23', y: '18', width: '2.6', height: '5', rx: '1.3', class: 'harness-mark-eye' }),
+  );
+}
+
+function svgElement(tag: string, attributes: Record<string, string>, ...children: SVGElement[]): SVGElement {
+  const element = document.createElementNS(SVG_NAMESPACE, tag);
+  for (const [name, value] of Object.entries(attributes)) element.setAttribute(name, value);
+  element.append(...children);
+  return element;
 }
 
 /** Task and Job, as two views of the same handoff. */
@@ -330,10 +345,17 @@ function treeBody(item: HandoffView): Child {
   return h(
     'table',
     { class: 'harness-tree', 'data-testid': 'harness-tree' },
+    h('colgroup', null, h('col', { style: { width: '40%' } }), h('col'), h('col', { style: { width: '96px' } })),
     h(
       'thead',
       null,
-      h('tr', null, h('th', { scope: 'col' }, 'Who'), h('th', { scope: 'col' }, 'What'), h('th', { scope: 'col' }, 'Status')),
+      h(
+        'tr',
+        null,
+        h('th', { scope: 'col' }, h('span', { class: 'harness-sr-only' }, 'Who')),
+        h('th', { scope: 'col' }, h('span', { class: 'harness-sr-only' }, 'What')),
+        h('th', { scope: 'col' }, h('span', { class: 'harness-sr-only' }, 'Status')),
+      ),
     ),
     h('tbody', null, ...rows.map(treeRow)),
   );
@@ -373,10 +395,15 @@ function statusTone(status: string): 'teal' | 'warn' | 'danger' | 'neutral' {
  */
 function composer(): HTMLElement {
   return h(
-    'label',
+    'div',
     { class: 'harness-composer' },
-    h('span', { class: 'harness-composer-label small muted' }, 'Reply in OpenMausBot'),
-    h('textarea', { class: 'harness-composer-input', rows: 1, disabled: true }),
+    h('textarea', {
+      class: 'harness-composer-input',
+      rows: 1,
+      disabled: true,
+      placeholder: 'Reply in OpenMausBot',
+      'aria-label': 'Reply in OpenMausBot',
+    }),
   );
 }
 

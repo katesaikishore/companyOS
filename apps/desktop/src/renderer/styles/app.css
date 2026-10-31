@@ -182,7 +182,20 @@ a {
   background: var(--nav-active);
   color: var(--ink);
   font-weight: 600;
-  box-shadow: var(--shadow);
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.nav-icon {
+  flex: 0 0 auto;
+}
+
+.nav-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.nav-item.is-active .nav-icon {
+  color: var(--accent);
 }
 
 .nav-count {
@@ -221,6 +234,20 @@ a {
 .command-launch:hover {
   color: var(--ink);
   border-color: var(--border-strong);
+}
+
+.command-icon {
+  flex: 0 0 auto;
+}
+
+.command-label {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+.command-launch kbd {
+  background: var(--card);
 }
 
 .command-launch kbd,
@@ -368,6 +395,13 @@ a {
   gap: 10px;
 }
 
+/* The sidebar is 600px tall, so the two buttons take the artifact's sizes and Stop all stays in view. */
+.sidebar-foot > .btn {
+  min-height: 36px;
+  border-radius: 9px;
+  font-size: 13px;
+}
+
 .observing {
   display: flex;
   flex-direction: column;
@@ -384,6 +418,33 @@ a {
   align-items: center;
   gap: 8px;
   font-size: 13px;
+}
+
+.observing-days {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.observing-detail {
+  font-size: 11px;
+  line-height: 1.45;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
+}
+
+.observing .btn {
+  min-height: 34px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.observing .dot-capturing {
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .dot {

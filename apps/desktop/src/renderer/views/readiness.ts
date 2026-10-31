@@ -21,7 +21,7 @@ const STATUS_CHIPS: Record<AppReadinessStatus, { label: string; tone: ChipTone }
   automatable: { label: 'Automatable', tone: 'teal' },
   partly: { label: 'Partly automatable', tone: 'ink' },
   approval: { label: 'Needs approval', tone: 'warn' },
-  not_yet: { label: 'Not yet', tone: 'neutral' },
+  not_yet: { label: 'Learning', tone: 'neutral' },
 };
 
 type ReadinessFilter = 'all' | 'automatable' | 'approval' | 'not_yet';
@@ -31,7 +31,7 @@ const FILTERS: readonly { id: ReadinessFilter; label: string; statuses: readonly
   { id: 'all', label: 'All', statuses: ['automatable', 'partly', 'approval', 'not_yet'] },
   { id: 'automatable', label: 'Automatable', statuses: ['automatable', 'partly'] },
   { id: 'approval', label: 'Needs approval', statuses: ['approval'] },
-  { id: 'not_yet', label: 'Not yet', statuses: ['not_yet'] },
+  { id: 'not_yet', label: 'Learning', statuses: ['not_yet'] },
 ];
 
 /** The group the list shows. It is kept here, not in the page, because a refresh draws the page again. */
@@ -57,7 +57,7 @@ function listPage(readiness: AppReadinessView): HTMLElement {
   const body: Child = hasSwitches ? [banner(readiness), appTable(readiness.rows)] : emptyPanel();
   return h(
     'div',
-    { class: 'stack readiness-page', 'data-testid': 'readiness-root' },
+    { class: 'stack readiness-page readiness-fill', 'data-testid': 'readiness-root' },
     pageHeader(
       'App readiness',
       "How much of each app's switches could run on its own · past 7 days",
@@ -236,7 +236,7 @@ function appRow(row: AppReadinessRow): HTMLElement {
         'span',
         { class: 'readiness-app-text' },
         h('span', { class: 'readiness-app-name' }, titleCase(row.app)),
-        h('span', { class: 'readiness-app-sub' }, `${row.windowClass} · ${plural(row.switches, 'switch', 'switches')}`),
+        h('span', { class: 'readiness-app-sub' }, `${row.windowClass} · ${row.switches} sw`),
       ),
     ),
     breakdownBar(row, false),

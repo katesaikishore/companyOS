@@ -1,20 +1,24 @@
 /* Agent harness page. Styles for this page only. Colours come from tokens.css. */
 
-/* The page is its own container, so the two columns stack by the width of the page, not the window. */
+/* The page fills the page column: the window less the main padding (22px top, 20px bottom). The conversation scrolls inside it. */
 .harness-page {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 8px;
+  height: calc(100vh - 42px);
+  min-height: 420px;
   min-width: 0;
   container-name: harness;
   container-type: inline-size;
 }
 
+/* The lead column and the conversation sit side by side, as in the design. */
 .harness-layout {
   display: grid;
-  grid-template-columns: minmax(200px, 260px) minmax(0, 1fr);
+  grid-template-columns: minmax(176px, 216px) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
-  height: 420px;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 14px;
@@ -22,22 +26,16 @@
   box-shadow: var(--shadow);
 }
 
-/* Narrow page: the list sits above the conversation. Each keeps a fixed share and scrolls inside it. */
-@container harness (max-width: 719px) {
+/* Narrow page: the list sits above the conversation. Each keeps its share of the height and scrolls inside it. */
+@container harness (max-width: 479px) {
   .harness-layout {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto;
-    height: auto;
+    grid-template-rows: minmax(0, 2fr) minmax(0, 3fr);
   }
 
   .harness-list {
-    max-height: 200px;
     border-right: 0;
     border-bottom: 1px solid var(--border);
-  }
-
-  .harness-thread {
-    height: 260px;
   }
 }
 
@@ -53,7 +51,7 @@
   overflow-y: auto;
   padding: 14px 12px;
   border-right: 1px solid var(--border);
-  background: var(--sidebar);
+  background: var(--inset);
 }
 
 .harness-lead {
@@ -103,15 +101,17 @@
   min-width: 0;
 }
 
+/* A handoff row takes the design's sidebar row: name, brief line, then state and time. */
 .harness-row {
   display: flex;
   flex-direction: column;
   gap: 4px;
   width: 100%;
   min-width: 0;
-  padding: 9px 10px;
+  min-height: 64px;
+  padding: 8px 10px;
   border: 0;
-  border-radius: 10px;
+  border-radius: 12px;
   background: transparent;
   color: var(--ink);
   font: inherit;
@@ -120,34 +120,18 @@
 }
 
 .harness-row:hover {
-  background: var(--inset);
+  background: var(--neutral-soft);
 }
 
 .harness-row.is-selected {
-  background: var(--card);
-  box-shadow: 0 0 0 1px var(--border);
-}
-
-.harness-row-top {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  min-width: 0;
+  background: var(--border);
 }
 
 .harness-row-name {
-  flex: 1 1 auto;
-  min-width: 0;
   overflow: hidden;
   font-size: 14px;
   font-weight: 600;
   text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.harness-row-time {
-  flex: 0 0 auto;
-  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -163,8 +147,14 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 8px;
+  gap: 4px 8px;
   min-width: 0;
+}
+
+.harness-row-time {
+  margin-left: auto;
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 /* Main pane: the header, the Task or Job view, and the reply box. */
@@ -175,6 +165,7 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  background: var(--card);
 }
 
 .harness-thread-empty {
@@ -189,27 +180,29 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 12px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--divider);
+  min-height: 56px;
+  padding: 0 16px 0 20px;
 }
 
-.harness-avatar {
-  display: inline-flex;
+/* The OpenMausBot mark: the body takes the accent, the eyes take the on-accent colour. */
+.harness-mark {
   flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  background: var(--accent-soft);
-  color: var(--accent-ink);
-  font-size: 13px;
-  font-weight: 600;
+  width: 26px;
+  height: 26px;
+  color: var(--accent);
+}
+
+.harness-mark-body {
+  fill: currentColor;
+}
+
+.harness-mark-eye {
+  fill: var(--on-accent);
 }
 
 .harness-thread-id {
   display: flex;
-  flex: 1 1 140px;
+  flex: 1 1 120px;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
@@ -222,6 +215,12 @@
   overflow-wrap: anywhere;
 }
 
+.harness-new-task {
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+}
+
 .harness-switch {
   flex: 0 0 auto;
 }
@@ -230,11 +229,11 @@
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  padding: 14px 16px;
+  padding: 8px 20px 16px;
 }
 
 .harness-stamp {
@@ -245,7 +244,7 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-width: 88%;
+  max-width: 82%;
   padding: 10px 14px;
   border-radius: 18px;
   font-size: 14px;
@@ -253,6 +252,7 @@
   overflow-wrap: anywhere;
 }
 
+/* What companyOS sent is the person's side of the conversation: the dark bubble on the right. */
 .harness-bubble-out {
   align-self: flex-end;
   background: var(--btn-primary-bg);
@@ -265,6 +265,8 @@
 
 .harness-bubble-in {
   align-self: flex-start;
+  max-width: 92%;
+  padding: 11px 15px;
   background: var(--neutral-soft);
   color: var(--ink);
 }
@@ -296,7 +298,7 @@
   align-self: stretch;
   padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 18px;
   background: var(--card);
 }
 
@@ -310,7 +312,7 @@
   min-width: 0;
   padding: 14px 16px;
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: 18px;
   background: var(--card);
 }
 
@@ -341,6 +343,9 @@
 
 .harness-job-head .chip {
   margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
 }
 
 .harness-tree {
@@ -351,27 +356,28 @@
   font-size: 13px;
 }
 
-.harness-tree th {
-  padding: 0 8px 6px;
-  border-bottom: 1px solid var(--divider);
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 600;
-  text-align: left;
+/* The column names are for screen readers only. The design's job table has no header row. */
+.harness-tree thead th {
+  height: 0;
+  padding: 0;
+  border: 0;
 }
 
-.harness-tree th:first-child {
-  width: 40%;
-}
-
-.harness-tree th:last-child {
-  width: 96px;
+.harness-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .harness-tree td {
   height: 30px;
-  padding: 4px 8px;
-  border-bottom: 1px solid var(--divider);
+  padding: 2px 8px;
   overflow: hidden;
   vertical-align: middle;
   white-space: nowrap;
@@ -403,7 +409,8 @@
 .harness-tree-status {
   display: block;
   overflow: hidden;
-  font-size: 12px;
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -438,35 +445,35 @@
   overflow-wrap: anywhere;
 }
 
-/* Reply box: read-only, because replies happen in OpenMausBot. */
+/* Reply box: read-only, because replies happen in OpenMausBot. It shows the design's pill with the reason as its placeholder. */
 
 .harness-composer {
   display: flex;
   flex: 0 0 auto;
   flex-direction: column;
-  gap: 4px;
-  padding: 8px 16px 10px;
-  border-top: 1px solid var(--divider);
-}
-
-.harness-composer-label {
-  padding: 0 6px;
+  padding: 8px 20px 14px;
 }
 
 .harness-composer-input {
+  box-sizing: border-box;
   width: 100%;
   min-width: 0;
-  height: 40px;
+  height: 46px;
   margin: 0;
-  padding: 9px 16px;
-  border: 1px solid var(--border-strong);
+  padding: 12px 18px;
+  border: 1px solid var(--border);
   border-radius: 999px;
-  background: var(--inset);
+  background: var(--card);
+  box-shadow: var(--shadow);
   color: var(--ink);
   font: inherit;
-  font-size: 14px;
+  font-size: 15px;
   line-height: 20px;
   resize: none;
+}
+
+.harness-composer-input::placeholder {
+  color: var(--muted);
 }
 
 .harness-composer-input:disabled {
