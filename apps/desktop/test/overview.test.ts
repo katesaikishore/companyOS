@@ -1,59 +1,116 @@
 import { describe, expect, it } from 'vitest';
 import { DAY_MS, handoffStateLabel, noticedPerWeek, summarySourceLabel, titleCase, titleCaseSequence } from '../src/renderer/format';
 import {
-  foundTitle,
-  heroLede,
-  ladderCounts,
   networkCallsThisWeek,
+  networkSummary,
+  NETWORK_DAYS,
   rhythmLevels,
+  routineChain,
+  summaryLine,
 } from '../src/renderer/overview-model';
 
-describe('foundTitle', () => {
-  it('says no routines are found when there are none', () => {
-    expect(foundTitle(0)).toBe('No routines found yet.');
-  });
+const PRIVACY = 'Your data stays encrypted on this device.';
 
-  it('uses the singular for one routine', () => {
-    expect(foundTitle(1)).toBe('One routine found.');
-  });
-
-  it('spells out a small count and keeps the digits for a large one', () => {
-    expect(foundTitle(2)).toBe('Two routines found.');
-    expect(foundTitle(3)).toBe('Three routines found.');
-    expect(foundTitle(13)).toBe('13 routines found.');
-  });
-});
-
-const RUN_RULE = 'Nothing runs unless you start it, or you have turned on unattended runs for an automation at level 4.';
-
-describe('heroLede', () => {
+describe('summaryLine', () => {
   it('uses the recorded switches and the days observed', () => {
-    expect(heroLede(70, 10)).toBe(`Your twin noticed 70 app switches over 10 days. ${RUN_RULE}`);
+    expect(summaryLine(70, 10)).toBe(`70 app switches over 10 days. ${PRIVACY}`);
   });
 
   it('reads a first day without saying zero days', () => {
-    expect(heroLede(1, 0)).toBe(`Your twin noticed 1 app switch today. ${RUN_RULE}`);
+    expect(summaryLine(1, 0)).toBe(`1 app switch today. ${PRIVACY}`);
   });
 
   it('says so when nothing has been recorded yet', () => {
-    expect(heroLede(0, 0)).toBe(
-      `Your twin has not recorded any app switches yet. It learns from app switches and their timing. ${RUN_RULE}`,
-    );
+    expect(summaryLine(0, 0)).toBe(`No app switches recorded yet. ${PRIVACY}`);
   });
 });
 
-describe('ladderCounts', () => {
-  it('counts automations at each level from L0 to L4', () => {
-    const automations = [{ state: { level: 2 } }, { state: { level: 2 } }, { state: { level: 4 } }];
-    expect(ladderCounts(automations)).toEqual([0, 0, 2, 0, 1, 0]);
+describe('networkSummary', () => {
+  const now = new Date(2026, 9, 31, 12).getTime();
+  const MB = 1024 * 1024;
+
+  it('counts calls, bytes and hosts in the window, by local day', () => {
+    const network = [
+      {
+        ts: new Date(2026, 9, 27, 9).getTime(),
+        purpose: 'model_download' as const,
+        host: 'huggingface.co',
+        path: '/model',
+        bytes: 610 * MB,
+        outcome: 'ok' as const,
+      },
+      {
+        ts: now - 60_000,
+        purpose: 'update_check' as const,
+        host: 'huggingface.co',
+        path: '/feed',
+        bytes: 0,
+        outcome: 'ok' as const,
+      },
+      {
+        ts: new Date(2026, 9, 1, 9).getTime(),
+        purpose: 'model_download' as const,
+        host: 'example.org',
+        path: '/old',
+        bytes: 5 * MB,
+        outcome: 'ok' as const,
+      },
+    ];
+    const summary = networkSummary(network, now);
+
+    expect(summary.calls).toBe(2);
+    expect(summary.bytes).toBe(610 * MB);
+    expect(summary.downloads).toBe(1);
+    expect(summary.checks).toBe(1);
+    expect(summary.hosts).toEqual(['huggingface.co']);
   });
 
-  it('is all zeros with no automations', () => {
-    expect(ladderCounts([])).toEqual([0, 0, 0, 0, 0, 0]);
+  it('lays out one day per column, oldest first and ending today', () => {
+    const summary = networkSummary([], now);
+
+    expect(summary.days).toHaveLength(NETWORK_DAYS);
+    expect(summary.days[0].label).toBe('18 Oct');
+    expect(summary.days[NETWORK_DAYS - 1].label).toBe('31 Oct');
   });
 
-  it('keeps L5 at zero, because external runs are not built', () => {
-    expect(ladderCounts([{ state: { level: 5 } }])).toEqual([0, 0, 0, 0, 0, 0]);
+  it('puts each call on its own day', () => {
+    const network = [
+      {
+        ts: new Date(2026, 9, 27, 9).getTime(),
+        purpose: 'model_download' as const,
+        host: 'huggingface.co',
+        path: '/model',
+        bytes: 1,
+        outcome: 'ok' as const,
+      },
+    ];
+    const { days } = networkSummary(network, now);
+
+    expect(days[9].downloads).toBe(1);
+    expect(days.reduce((sum, day) => sum + day.downloads + day.checks, 0)).toBe(1);
+  });
+
+  it('is empty with no calls', () => {
+    const summary = networkSummary([], now);
+    expect(summary.calls).toBe(0);
+    expect(summary.hosts).toEqual([]);
+  });
+});
+
+describe('routineChain', () => {
+  it('lists the apps the routine moves focus to, in order, title-cased', () => {
+    const steps = [
+      { kind: 'act' as const, app: 'excel' },
+      { kind: 'check' as const, app: 'excel' },
+      { kind: 'act' as const, app: 'word' },
+      { kind: 'act' as const, app: 'word' },
+      { kind: 'act' as const, app: 'outlook' },
+    ];
+    expect(routineChain(steps)).toEqual(['Excel', 'Word', 'Outlook']);
+  });
+
+  it('is empty when no step moves focus', () => {
+    expect(routineChain([])).toEqual([]);
   });
 });
 
