@@ -115,6 +115,14 @@ describe('browser steps are keyed by site', () => {
     expect(routines[0].steps.map(step => step.windowClass)).toEqual(['spreadsheet', 'browser', 'chat']);
     expect(routines[0].steps[1].site).toBe('mail.google.com/mail');
   });
+
+  it('gives a site routine the id of the hash of its key', () => {
+    const routines = mineRoutines(segment(events(siteWorkdays(4)), 60 * 60_000));
+    const mail = routines.find(routine => routine.steps.some(step => step.site === 'mail.google.com/mail'));
+    const key = 'spreadsheet>browser@mail.google.com/mail>browser@docs.google.com/spreadsheets>chat';
+
+    expect(mail?.id).toBe(createHash('sha256').update(key).digest('hex').slice(0, 12));
+  });
 });
 
 describe('routine ids for events without a site', () => {
