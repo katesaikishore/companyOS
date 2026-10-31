@@ -5,7 +5,8 @@ import type { AutonomyLevel } from './types';
 
 /**
  * Thrown by an executor to say why it refused a focus or key step, in words that are safe to show. The runner keeps
- * this message on the step record as failureReason. Any other thrown error is an ordinary failure, and its text is not kept.
+ * this message on the step record as failureReason, and the step and run are blocked rather than failed, because nothing
+ * was done. Any other thrown error is an ordinary failure, and its text is not kept.
  */
 export class StepRefusedError extends Error {
   constructor(message: string) {
@@ -237,7 +238,12 @@ export async function runAutomation(automation: Automation, request: RunRequest,
         failureReason = refusalMessage(error);
       }
       if (!ok) {
-        record('failed', 'The app could not be focused.', failureReason);
+        // A refusal means nothing was done, so the run is blocked and not failed. Only a failed run lowers the level.
+        if (failureReason !== undefined) {
+          record('blocked', 'The app could not be focused.', failureReason);
+          return finish('blocked');
+        }
+        record('failed', 'The app could not be focused.');
         return finish('failed');
       }
       record('executed', decision.reason);
@@ -248,7 +254,11 @@ export async function runAutomation(automation: Automation, request: RunRequest,
       // One action, then its postcondition: the expected app is in front once the action has run.
       const performed = await perform(step, executor);
       if (!performed.ok) {
-        record('failed', FAILED_REASON[step.op], performed.failureReason);
+        if (performed.failureReason !== undefined) {
+          record('blocked', FAILED_REASON[step.op], performed.failureReason);
+          return finish('blocked');
+        }
+        record('failed', FAILED_REASON[step.op]);
         return finish('failed');
       }
       if (await settlesInFront(executor, step.app, request.settleMs ?? DEFAULT_SETTLE_MS)) {

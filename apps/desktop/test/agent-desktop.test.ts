@@ -504,9 +504,10 @@ describe('the executor carries the refusal to the runner', () => {
       },
       executor,
     );
-    expect(result.status).toBe('failed');
+    // Nothing was focused, so the run is blocked rather than failed, and the level is kept.
+    expect(result.status).toBe('blocked');
     expect(result.steps[0]).toMatchObject({
-      outcome: 'failed',
+      outcome: 'blocked',
       reason: 'The app could not be focused.',
       failureReason: SEVERAL,
     });

@@ -8,6 +8,7 @@ import {
   EncryptedStore,
   StepRefusedError,
   TwinAgent,
+  recordRun,
   runAutomation,
   type Automation,
   type Executor,
@@ -354,18 +355,19 @@ describe('a refusal the executor explains', () => {
       },
     };
     const result = await runAutomation(automation([FOCUS]), request, refusing);
-    expect(result.status).toBe('failed');
+    // A refusal means nothing was done, so the run is blocked rather than failed. A failed run lowers the level.
+    expect(result.status).toBe('blocked');
     expect(result.steps[0]).toEqual({
       index: 0,
       op: 'focus_app',
       app: 'microsoft excel',
-      outcome: 'failed',
+      outcome: 'blocked',
       reason: 'The app could not be focused.',
       failureReason: WHY,
     });
   });
 
-  it('keeps the message of a StepRefusedError from a press as failureReason', async () => {
+  it('keeps the message of a StepRefusedError from a press as failureReason, and the run is blocked', async () => {
     const { executor } = fakeDesktop();
     const refusing: Executor = {
       ...executor,
@@ -374,8 +376,23 @@ describe('a refusal the executor explains', () => {
       },
     };
     const result = await runAutomation(automation([CHORD]), request, refusing);
-    expect(result.status).toBe('failed');
-    expect(result.steps[0]).toMatchObject({ outcome: 'failed', reason: 'The shortcut could not be pressed.', failureReason: WHY });
+    expect(result.status).toBe('blocked');
+    expect(result.steps[0]).toMatchObject({ outcome: 'blocked', reason: 'The shortcut could not be pressed.', failureReason: WHY });
+  });
+
+  it('does not lower the level when a run is blocked by a refusal, but does when the step fails', async () => {
+    const { executor } = fakeDesktop();
+    const refusing: Executor = {
+      ...executor,
+      focusApp: async () => {
+        throw new StepRefusedError(WHY);
+      },
+    };
+    const blocked = await runAutomation(automation([FOCUS]), request, refusing);
+    const run = { ts: 1, mode: 'unattended' as const, level: 4 as const, postconditionsPassed: 0, postconditionsFailed: 0, reverted: false };
+    const state = { automationId: 'a', level: 4 as const, effects: [], runs: [] };
+    expect(recordRun(state, { ...run, status: blocked.status }).level).toBe(4);
+    expect(recordRun(state, { ...run, status: 'failed' }).level).toBe(3);
   });
 
   it('is a plain Error whose message is the refusal', () => {
