@@ -131,7 +131,7 @@ export class TwinAgent {
   }
 
   analyze(): { segments: Segment[]; routines: Routine[] } {
-    const segments = segment(this.recentEvents(ANALYSIS_DAYS), this.config.idleGapMs);
+    const segments = segment(this.minableEvents(ANALYSIS_DAYS), this.config.idleGapMs);
     return { segments, routines: mineRoutines(segments, DEFAULT_MINING) };
   }
 
@@ -313,7 +313,7 @@ export class TwinAgent {
   readiness(): AppReadinessView {
     return computeReadiness({
       now: this.now(),
-      events: this.recentEvents(ANALYSIS_DAYS),
+      events: this.minableEvents(ANALYSIS_DAYS),
       idleGapMs: this.config.idleGapMs,
       routines: this.analyze().routines,
       automations: this.automations(),
@@ -485,6 +485,14 @@ export class TwinAgent {
   private recentEvents(days: number): TwinEvent[] {
     const since = this.now() - days * DAY_MS;
     return this.store.readAll<TwinEvent>('events').filter(event => event.ts >= since);
+  }
+
+  /**
+   * The events that mining and readiness may read. Capture and purge already keep an excluded app out of the store.
+   * This filter is the last check, so no routine can name one.
+   */
+  private minableEvents(days: number): TwinEvent[] {
+    return this.recentEvents(days).filter(event => !event.app || !isExcludedApp(event.app, this.config.excludedApps));
   }
 
   private autonomyConfig(): AutonomyConfig {

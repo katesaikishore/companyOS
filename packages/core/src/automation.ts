@@ -198,8 +198,9 @@ export function compileRoutine(routine: Routine, name: string = defaultName(rout
   });
 }
 
+/** An unknown app is named by its app, since its window class is only 'other'. */
 function defaultName(routine: Routine): string {
-  return `Routine: ${routine.steps.map(step => step.windowClass).join(' → ')}`;
+  return `Routine: ${routine.steps.map(step => (step.windowClass === 'other' ? step.app : step.windowClass)).join(' → ')}`;
 }
 
 /** A name the schema accepts. A longer one is cut and ends with an ellipsis, so a long routine still compiles. */
