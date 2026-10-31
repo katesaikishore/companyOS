@@ -151,10 +151,23 @@ $processId = [uint32]0
 (Get-Process -Id $processId -ErrorAction SilentlyContinue).ProcessName
 `;
 
-const WIN_FOCUS = `
+/**
+ * Brings the app forward. AppActivate does not restore a minimized window: on a hosted Windows runner it returned false
+ * every time for a minimized Notepad. So when the first AppActivate fails, a minimized window is restored and AppActivate
+ * is tried once more. A window that is not minimized is never touched. Exit codes: 2 not running, 3 not activated.
+ */
+export const WIN_FOCUS = `
 $process = Get-Process -Name $env:TWIN_APP -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
 if (-not $process) { exit 2 }
 $shell = New-Object -ComObject WScript.Shell
+if ($shell.AppActivate($process.Id)) { 'ok'; exit 0 }
+Add-Type -Namespace Twin -Name Restore -MemberDefinition @'
+[DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
+[DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+'@
+if (-not [Twin.Restore]::IsIconic($process.MainWindowHandle)) { exit 3 }
+[void][Twin.Restore]::ShowWindowAsync($process.MainWindowHandle, 9)
+Start-Sleep -Milliseconds 300
 if ($shell.AppActivate($process.Id)) { 'ok' } else { exit 3 }
 `;
 
@@ -167,20 +180,27 @@ Start-Process -FilePath $env:TWIN_APP -ArgumentList ('"' + $env:TWIN_TARGET + '"
 
 /**
  * Activates the app, waits until its window is the foreground window, and only then sends the keys. The keys come from
- * the environment as a SendKeys string built from the checked chord. Exit codes: 2 not running, 3 not activated,
- * 4 never in front.
+ * the environment as a SendKeys string built from the checked chord. A minimized window is restored when the first
+ * activation fails, as in WIN_FOCUS. Exit codes: 2 not running, 3 not activated, 4 never in front.
  */
-const WIN_PRESS = `
+export const WIN_PRESS = `
 $ErrorActionPreference = 'Stop'
 $process = Get-Process -Name $env:TWIN_APP -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
 if (-not $process) { exit 2 }
 Add-Type -Namespace Twin -Name Keys -MemberDefinition @'
 [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
 [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+[DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
+[DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
 '@
 Add-Type -AssemblyName System.Windows.Forms
 $shell = New-Object -ComObject WScript.Shell
-if (-not $shell.AppActivate($process.Id)) { exit 3 }
+if (-not $shell.AppActivate($process.Id)) {
+  if (-not [Twin.Keys]::IsIconic($process.MainWindowHandle)) { exit 3 }
+  [void][Twin.Keys]::ShowWindowAsync($process.MainWindowHandle, 9)
+  Start-Sleep -Milliseconds 300
+  if (-not $shell.AppActivate($process.Id)) { exit 3 }
+}
 $inFront = $false
 for ($attempt = 0; $attempt -lt 10; $attempt++) {
   $foreground = [uint32]0

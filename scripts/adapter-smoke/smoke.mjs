@@ -162,6 +162,13 @@ try {
     if (!isFront(focused)) await step(`restore ${name} after a focus that left it behind (direct OS call)`, () => restoreApp(name));
   }
 
+  // 2b. Press while the app is behind another app. On Windows the app is minimized first, as in the focus loop above.
+  if (otherName) {
+    await step('make other app front before press (direct OS call)', () => makeOtherFront(otherName, name));
+    const behind = await step(`pressShortcut ${SELECT_ALL} while app is behind (minimized on Windows)`, () => executor.pressShortcut?.(name, SELECT_ALL), withApp);
+    if (!isFront(behind)) await step(`restore ${name} after a press that left it behind (direct OS call)`, () => restoreApp(name));
+  }
+
   // 3. Press with the app already in front, three times for timing.
   for (let index = 1; index <= 3; index++) {
     await step(`pressShortcut ${SELECT_ALL} #${index}`, () => executor.pressShortcut?.(name, SELECT_ALL), withApp);
