@@ -6,7 +6,7 @@ description: "Install companyOS Twin on macOS, Windows or Linux, or build it fro
 ## macOS
 
 - **Architecture.** Builds are for Apple silicon (arm64) only. Intel Macs are not supported by the current builds.
-- **Download.** The installer is a `.dmg` on the GitHub Releases page. Open it and drag the app into Applications.
+- **Download.** No GitHub Release is published yet, so there is no download page for the app. The release workflow uploads the `.dmg` as a workflow artifact. Once a release is created, open the `.dmg` and drag the app into Applications.
 - **Signing.** Release builds are signed with a Developer ID certificate and notarised by Apple, so macOS opens them without a warning. No signed release is published yet. Until one is, a build from source runs on your own Mac, but macOS may still warn about it.
 - **Permission.** On first capture macOS asks for Automation permission for System Events. The app uses it only to read the name of the app in front. Without it, app capture does not run.
 
