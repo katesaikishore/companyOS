@@ -1,101 +1,121 @@
 # companyOS Twin
 
-companyOS Twin is a private desktop app for macOS, Windows and Linux (X11). It notices the apps you use in the
-same order again and again, such as a spreadsheet, then a document, then an editor, and offers to run that order
-as an automation. A new automation starts as a draft. You can run it with your approval, and it runs on its own
-only after it has earned that. Your activity is stored encrypted on your device. This is an early preview.
+companyOS Twin is a private desktop app for macOS, Windows and Linux (X11). It notices the work you repeat, such as a
+spreadsheet, then a document, then an editor, and offers to run that sequence for you. A new automation starts as a
+draft. You run it with your approval, and it runs on its own only after it has earned that. Your activity is stored
+encrypted on your device. This is an early preview.
 
-## Principles
+![The companyOS Twin overview on a 1200 by 800 window, with synthetic activity](docs-site/images/overview.png)
 
-- Raw activity data stays on the device, in an encrypted store.
-- Open-weight models only. Every model is Apache-2.0 or MIT, comes from a fixed catalogue, and is checked
-  against a SHA-256 digest.
-- Automations run on their own only after they have earned it.
-- It fails closed if the OS cannot protect its key. The app does not start.
+Documentation lives in [`docs-site`](docs-site), a Mintlify site that builds and validates locally. Publishing it needs
+the owner's Mintlify account.
 
-## Status
+## What makes it different
 
-**Works today**
+- **It records little.** The app name in front, the window type and, if you turn browser capture on, the host and path
+  shape of the active tab. Never window titles, page text, typed text, the clipboard, screenshots or keystrokes.
+- **Automations earn autonomy.** A routine starts as a draft, and it runs on its own only after eight conditions hold
+  for it, only for steps that are local and reversible, and only while the unattended switch is on.
+- **The store is encrypted.** One SQLCipher database, opened with a key that the OS keychain seals. Without a keychain
+  that can protect the key, the app does not start.
+- **Models are open and checked.** Only open-weight models from a fixed catalogue, each checked against its SHA-256
+  digest, and every download is written to a network ledger you can read.
 
-- **Capture.** Reads the name of the app in front on macOS, Windows and Linux X11, with pause, idle detection
-  and an exclusion list. Titles, page text and typed text are never read. With Watch browsers on (off by default,
-  macOS and Linux only), Chrome and Edge are recorded too, as the host and path shape of the active tab. The
-  extension never reports incognito windows.
-- **Store.** One SQLCipher database, opened with a 32-byte key that the OS keychain seals. It includes export
-  (a plain file, after a warning), Delete everything, and 90-day pruning of raw events.
-- **Routines.** Fixed rules find repeated app sequences and offer them as suggestions. An accepted one becomes
-  a draft, which can be dry-run. At level 3 you start each run, from a tray offer or with **Run now**, and steps
-  with external effects ask again. At level 4, with **Allow unattended runs** on, a routine with only local,
-  reversible steps runs on its own when its app comes to the front. Otherwise level 4 works like level 3. An
-  offer never starts a run by itself.
-- **Autonomy.** Autonomy levels, a deterministic policy check before every step, a promotion gate to level 4,
-  and demotion after a failed or undone run. Stop all automations is one switch.
-- **Downloads.** Installing a model fetches it only from Hugging Face hosts and checks its SHA-256 digest.
-  Each download that runs is written to the network ledger.
-- **Routine names.** An installed chat model can name routines in a background worker, and the rule-based name
-  is the fallback. Names are kept in memory only. Not verified with a real model file, because the tests use
-  a fake worker.
-- **OpenMausBot handoff.** Sends a task brief to an external CLI after a native confirmation. Not run against
-  the real CLI. The privacy suite checks its prompt and arguments against a fake CLI.
+## Works today
 
-**Not done yet**
+- **Capture.** Reads the app in front on macOS, Windows and Linux X11, with pause, idle detection, an exclusion list,
+  and a pause while the screen is locked. Browser capture is off by default. It works on macOS and Linux only, for
+  Chrome and Edge, and it never reports incognito windows.
+- **Store.** Encrypted at rest. Raw events and handoffs are kept for 90 days. Export writes a plain file after a
+  warning. Delete everything removes the database, the data key and the installed models.
+- **Routines and automations.** Repeated sequences on at least three different days are suggested. An accepted routine
+  becomes a draft that can be dry-run. At level 3 you start each run, from the tray offer or with Run now. At level 4,
+  with the unattended switch on, a routine of local, reversible steps can run when its app comes to the front. A
+  promotion gate and demotion after a failed or undone run keep that honest.
+- **App readiness.** For each app, the share of its switches in the last seven days that could run on their own,
+  worked out by fixed rules.
+- **Agent harness.** OpenMausBot handoffs, after a native confirmation, with their replies and job trees.
+- **Window.** The layout works from 640 by 560 up to full screen. Below 900 pixels the sidebar becomes a header, and
+  every navigation item stays visible.
 
-- **Model use** stops at naming. Routine detection, labels, policy and safety checks are rule-based. The
-  embedding model is downloaded but never loaded.
-- **Steps** are limited. Focus and check work wherever app capture works. Opening a web link or one file works
-  on macOS and Windows only, and a file asks each time. Pressing keys has no adapter on any OS, so it is always
-  blocked. Typing, clicking and sending are not built. Level 5 is not built.
-- **Platforms.** Wayland has no app capture. Linux cannot open links or files. Windows has no browser capture,
-  because its native host registration is not written.
-- **Capture** polls every 3 to 5 seconds with OS tools. There are no native helpers and no keystroke counts.
-  The poll cannot see private windows, so with Watch browsers on, an incognito Chrome window is recorded under
-  the browser's name.
-- **Delete everything** removes the store, the data key and the installed model files. Any export you saved
-  elsewhere is yours and is not touched.
-- **Company mode** is not built. `packages/core/src/company` holds only the aggregate release maths (cohort
-  minimum, noise, privacy budget). Nothing sends or shows it.
-- **Packaging** is built in CI (unpacked, unsigned), and a packaged macOS build was launched once by hand. No
-  test starts a packaged app. Signing and notarisation run only when certificates are set.
-  Auto-update checks run only when `COMPANYOS_UPDATE_URL` is set, and no update feed exists yet.
+## Not done yet
 
-## Quick start
+- **Model use** stops at naming. Routine detection, labels, policy and safety checks are rule-based. The embedding
+  model is downloaded but never loaded. Naming with a real chat model has not been checked, because the tests use a fake
+  worker.
+- **Steps** are limited. Focusing an app and checking focus work wherever app capture works. Opening a link or a file
+  works on macOS and Windows only, and a file asks each time. Pressing keys has no adapter, so it is always blocked.
+  Typing, clicking and sending are not built. Level 5 is not built.
+- **Platforms.** Wayland has no app capture, and Linux cannot open links or files. Windows has no browser capture.
+  Intel Macs are not supported by the current builds, which are for Apple silicon.
+- **Signing.** Release builds are checked for a Developer ID signature and notarisation, but no certificate has been
+  used yet. Windows installers are unsigned, so SmartScreen warns about them.
+- **Updates.** Auto-update checks run only when `COMPANYOS_UPDATE_URL` is set to an HTTPS feed. No feed exists yet.
+- **Company mode** is not built. `packages/core/src/company` holds only the aggregate release arithmetic.
+- **Releases** are built by CI and uploaded as artifacts. Creating the GitHub Release from them is not automated yet.
 
-Prerequisites: Node.js 22 or later, and npm. CI uses Node.js 22.
+## Install
 
-- **macOS:** when asked, allow Automation for System Events.
-- **Linux:** an X11 session with `DISPLAY` set, `xdotool` installed, and a keyring Electron can use (GNOME
-  Keyring or KWallet). Without a keyring the app does not start. Wayland is not supported.
+Installers are built for each platform. Release installers appear on the GitHub Releases page when a release is
+published. The [Install](docs-site/install.mdx) page has the details for each platform. In short:
+
+- **macOS:** an Apple silicon `.dmg`. The app asks for Automation permission for System Events, to read the app in front.
+- **Windows:** an NSIS `.exe` for 64-bit Windows. It is unsigned for now.
+- **Linux:** a `.deb` and an `.rpm`. It needs an X11 session, `xdotool`, and a keyring that Electron can use.
+
+## Build and run from source
+
+You need Node.js 22 or later.
 
 ```bash
-npm ci                  # install, and download the Electron 45.1.0 binary
+npm ci                  # install, and download the Electron binary
 npm run typecheck
-npm test                # engine, desktop, browser extension and measurement unit tests
+npm test                # core, desktop, browser extension and measurement tests
+npm run test:privacy    # planted canaries must not reach any output
 npm run build
 npm start               # build, then launch the app from source
-npm run test:privacy    # privacy leak suite: planted canaries must not reach any output
+npm run dist:dir        # an unpacked app for this system, in apps/desktop/release
+npm run dist            # the installers for this system
 ```
 
-The end-to-end script, `apps/desktop/test/e2e.cjs`, needs a build, Playwright and a display, and it downloads
-the embedding model from huggingface.co. Run `npm run build`, then `npm install --no-save playwright`, then
-`npm run test:e2e` (under `xvfb-run -a` on a Linux machine without a display). The end-to-end test runs in CI
-on Linux only. CI (`.github/workflows/ci.yml`) runs typecheck, unit tests, the privacy suite, build and
-packaging on macOS, Windows and Linux.
+The end-to-end script drives the built app through Playwright, covers setup through to the responsive layout, and needs
+network access to huggingface.co for the embedding model. Playwright is not a repository dependency:
 
-## Layout
+```bash
+npm run build
+npm install --no-save playwright
+NODE_PATH=$(npm root)/node_modules node apps/desktop/test/e2e.cjs
+```
 
-- `packages/core`: the twin engine. Redaction, store, segmentation, mining, automations, policy, autonomy and
-  the naming job. Unit tests are in `packages/core/test`.
-- `apps/desktop`: the Electron app. `src/main` is the main process, and `src/renderer` is the UI, with no
-  framework. `test/e2e.cjs` is the end-to-end script.
-- `apps/browser-ext`: the Chrome and Edge bridge, a Manifest V3 extension and its native messaging host.
-- `tests/privacy`: the planted-canary leak suite.
-- `scripts/measure`: a CPU and memory sampler for the budgets in plan section 5.5, run with `npm run measure`.
-- `docs`: the plan, the research notes and the screenshots.
+## Repository layout
 
-## Docs
+- `packages/core`: the twin engine. Redaction, store, segmentation, mining, automations, policy, autonomy and naming.
+- `apps/desktop`: the Electron app. `src/main` is the main process, `src/renderer` is the interface, and
+  `test/e2e.cjs` is the end-to-end script.
+- `apps/browser-ext`: the Chrome and Edge extension and its native messaging host.
+- `tests/privacy`: the planted-canary suite.
+- `scripts/measure`: a CPU and memory sampler for the resource budgets.
+- `docs-site`: the Mintlify documentation. `docs`: the plan and the research notes.
+- `.github/workflows`: CI on every push, and the release build for version tags.
 
-- [`docs/plan/README.md`](docs/plan/README.md): the product plan and decision log. Its section 16 describes an
-  older MVP: it says the browser extension is not built, and it names AES-256-GCM logs as the store. Check
-  Status in this README first.
-- [`docs/research/`](docs/research/): research notes on automation and autonomy, OS capture, prior art, privacy
-  and law, and understanding and ML.
+## Privacy in short
+
+Activity stays on this device. The only calls the app makes are the ones listed in the network ledger: approved
+OpenMausBot handoffs, model downloads from Hugging Face hosts, and update checks when an update feed is set. The
+[privacy page](docs-site/privacy.mdx) lists them in full.
+
+## Releases
+
+A release is a version tag that matches `apps/desktop/package.json`, for example `v0.1.0`. Pushing it starts
+`.github/workflows/release.yml`, which builds on Ubuntu, macOS and Windows. A macOS release needs these repository
+secrets, and it fails without them: `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_API_KEY_P8`, `APPLE_API_KEY_ID` and
+`APPLE_API_ISSUER`. Windows signing, `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD`, is optional. The
+[releasing page](docs-site/releasing.mdx) explains each step.
+
+## More
+
+- [`docs-site`](docs-site): the user documentation.
+- [`docs/plan/README.md`](docs/plan/README.md): the product plan and decision log. Its section 16 describes an older
+  MVP, so check this README for the current status first.
+- [`docs/research/`](docs/research/): research notes on automation and autonomy, OS capture, prior art, privacy and
+  law, and understanding and ML.
