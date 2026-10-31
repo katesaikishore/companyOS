@@ -255,10 +255,12 @@ const linuxX11: Platform = {
   pollMs: 3000,
   async frontmost() {
     const windowId = await run('xdotool', ['getactivewindow']);
-    // xdotool on Ubuntu 24.04 has no getwindowclassname, so the class is read from the window's WM_CLASS property, the
-    // last quoted string in it: the class name, as xdotool reports it.
+    // xdotool on Ubuntu 24.04 has no getwindowclassname, so the class is read from the window's WM_CLASS property.
+    // It is the second quoted string, as xdotool reports it. xprop escapes a quote or backslash inside it with a
+    // backslash. A value with one string has an instance name only, so it has no class.
     const wmClass = await run('xprop', ['-id', windowId, 'WM_CLASS']);
-    const className = /"([^"]*)"\s*$/.exec(wmClass)?.[1];
+    const escaped = /,\s*"((?:[^"\\]|\\.)*)"\s*$/.exec(wmClass)?.[1];
+    const className = escaped?.replace(/\\(.)/g, '$1');
     return className || undefined;
   },
   async focus(app) {

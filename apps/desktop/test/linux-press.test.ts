@@ -25,18 +25,33 @@ const FAKE_XDOTOOL = [
   '',
 ].join('\n');
 
-/** A stand-in for xprop. It reports the WM_CLASS of any window the same way the real tool does. */
+/**
+ * A stand-in for xprop. It prints FAKE_XPROP_LINE as the WM_CLASS line, the way the real tool writes it: quotes and
+ * backslashes inside a string are escaped with a backslash.
+ */
 const FAKE_XPROP = [
   '#!/bin/bash',
   'if [ "$1" = "-version" ]; then echo "xprop 1.2.6"; exit 0; fi',
-  "echo 'WM_CLASS(STRING) = \"testapp.py\", \"Testapp.py\"'",
+  'printf \'%s\\n\' "$FAKE_XPROP_LINE"',
   '',
 ].join('\n');
+
+const DEFAULT_WM_CLASS = 'WM_CLASS(STRING) = "testapp.py", "Testapp.py"';
 
 const LINUX = process.platform === 'linux';
 let folder = '';
 const saved: Record<string, string | undefined> = {};
-const KEYS = ['PATH', 'DISPLAY', 'XDG_SESSION_TYPE', 'COMPANYOS_TEST_FAKE_PLATFORM', 'FAKE_XDO_LOG', 'FAKE_XDO_ACTIVE', 'FAKE_XDO_MATCH', 'FAKE_XDO_ACTIVATE'];
+const KEYS = [
+  'PATH',
+  'DISPLAY',
+  'XDG_SESSION_TYPE',
+  'COMPANYOS_TEST_FAKE_PLATFORM',
+  'FAKE_XDO_LOG',
+  'FAKE_XDO_ACTIVE',
+  'FAKE_XDO_MATCH',
+  'FAKE_XDO_ACTIVATE',
+  'FAKE_XPROP_LINE',
+];
 
 beforeAll(() => {
   for (const key of KEYS) saved[key] = process.env[key];
@@ -59,13 +74,14 @@ afterAll(() => {
 });
 
 /** Points the fake at a new log and sets what it reports. Returns the path of the log. */
-function useFake(options: { active: string; match: string; activate?: 'fail' }): string {
+function useFake(options: { active: string; match: string; activate?: 'fail'; wmClass?: string }): string {
   const log = join(folder, `calls-${Math.random().toString(36).slice(2)}.log`);
   process.env.PATH = `${folder}:${saved.PATH ?? ''}`;
   process.env.DISPLAY = ':0';
   process.env.FAKE_XDO_LOG = log;
   process.env.FAKE_XDO_ACTIVE = options.active;
   process.env.FAKE_XDO_MATCH = options.match;
+  process.env.FAKE_XPROP_LINE = options.wmClass ?? DEFAULT_WM_CLASS;
   if (options.activate) process.env.FAKE_XDO_ACTIVATE = options.activate;
   else delete process.env.FAKE_XDO_ACTIVATE;
   delete process.env.XDG_SESSION_TYPE;
@@ -88,6 +104,24 @@ describe.skipIf(!LINUX)('X11 frontmost app', () => {
     useFake({ active: '4194307', match: '4194307' });
     const executor = await linuxExecutor();
     expect(await executor.frontmostApp()).toBe('Testapp.py');
+  });
+
+  it('reports no class for a WM_CLASS with one string, since xdotool --class does not match that string', async () => {
+    useFake({ active: '4194307', match: '4194307', wmClass: 'WM_CLASS(STRING) = "solo"' });
+    const executor = await linuxExecutor();
+    expect(await executor.frontmostApp()).toBeUndefined();
+  });
+
+  it('unescapes a quote in the class, so it is the name xdotool matches', async () => {
+    useFake({ active: '4194307', match: '4194307', wmClass: 'WM_CLASS(STRING) = "inst", "My\\"App"' });
+    const executor = await linuxExecutor();
+    expect(await executor.frontmostApp()).toBe('My"App');
+  });
+
+  it('unescapes a backslash in the class', async () => {
+    useFake({ active: '4194307', match: '4194307', wmClass: 'WM_CLASS(STRING) = "inst", "back\\\\slash"' });
+    const executor = await linuxExecutor();
+    expect(await executor.frontmostApp()).toBe('back\\slash');
   });
 });
 

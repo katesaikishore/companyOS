@@ -61,7 +61,7 @@ published. The [Install](docs-site/install.mdx) page has the details for each pl
 
 - **macOS:** an Apple silicon `.dmg`. The app asks for Automation permission for System Events, to read the app in front.
 - **Windows:** an NSIS `.exe` for 64-bit Windows. It is unsigned for now.
-- **Linux:** a `.deb` and an `.rpm`. It needs an X11 session, `xdotool`, `xprop` (package `x11-utils`), and a keyring that Electron can use.
+- **Linux:** a `.deb` and an `.rpm`. It needs an X11 session, `xdotool`, `xprop` (the `x11-utils` package on Debian and Ubuntu), and a keyring that Electron can use.
 
 ## Build and run from source
 
