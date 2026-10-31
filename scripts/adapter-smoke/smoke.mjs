@@ -11,11 +11,14 @@ import {
   IS_WIN,
   MARKER,
   OUT_DIR,
-  launchOtherApp,
-  makeOtherFront,
-  launchTestApp,
   cleanStderr,
+  launchOtherApp,
+  launchTestApp,
+  makeOtherFront,
+  openProbe,
   readClipboard,
+  removeTestFiles,
+  restoreApp,
   round,
   runMeta,
   screenshot,
@@ -103,6 +106,7 @@ async function shot(label) {
 
 let app;
 let other;
+let launched;
 try {
   report.system = await systemInfo();
   console.log(`SYSTEM ${JSON.stringify(report.system)}`);
@@ -127,7 +131,7 @@ try {
 
   await step('frontmost before launch', front);
 
-  const launched = await launchTestApp();
+  launched = await launchTestApp();
   app = launched.app;
   await step('launch test app', async () => launched);
   await shot('after-launch');
@@ -144,7 +148,7 @@ try {
   // 1. Press with another app in front. The adapter has to bring the app forward by itself.
   if (otherName) {
     await step(`focus other app (${otherName})`, () => executor.focusApp(otherName), withApp);
-    await step('make other app front (direct OS call)', () => makeOtherFront(otherName));
+    await step('make other app front (direct OS call)', () => makeOtherFront(otherName, name));
   }
   await step('frontmost before press from other app', front);
   const press1 = await step(`pressShortcut ${SELECT_ALL} while other app in front`, () => executor.pressShortcut?.(name, SELECT_ALL), withApp);
@@ -152,9 +156,10 @@ try {
 
   // 2. Focus three times, each time after another app was in front. Timing and whether the app ended up in front.
   for (let index = 1; index <= 3; index++) {
-    if (otherName) await step(`make other app front #${index} (direct OS call)`, () => makeOtherFront(otherName));
+    if (otherName) await step(`make other app front #${index} (direct OS call)`, () => makeOtherFront(otherName, name));
     await step(`frontmost before focus #${index}`, front);
-    await step(`focus ${name} #${index}`, () => executor.focusApp(name), withApp);
+    const focused = await step(`focus ${name} #${index}`, () => executor.focusApp(name), withApp);
+    if (!isFront(focused)) await step(`restore ${name} after a focus that left it behind (direct OS call)`, () => restoreApp(name));
   }
 
   // 3. Press with the app already in front, three times for timing.
@@ -201,6 +206,7 @@ try {
   await shot('end');
   try {
     report.cleanup = await stopApps([app, other?.app].filter(Boolean));
+    removeTestFiles(launched);
   } catch (error) {
     report.cleanup = { error: truncate(error?.message ?? error, 600) };
   }

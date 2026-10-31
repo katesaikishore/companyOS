@@ -3,6 +3,7 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { arch, release, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -353,21 +354,55 @@ if (-not $activated -and $p.MainWindowTitle) { $activated = $shell.AppActivate($
   );
 }
 
+const WIN_SHOW = `
+Add-Type -Namespace Twin -Name Win -MemberDefinition '[DllImport("user32.dll")] public static extern bool ShowWindowAsync(System.IntPtr hWnd, int nCmdShow);'
+$p = Get-Process -Name $env:TWIN_APP -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+if (-not $p) { 'no-window'; exit 2 }
+"shown=$([Twin.Win]::ShowWindowAsync($p.MainWindowHandle, [int]$env:TWIN_CMD))"
+`;
+
+/** Windows: minimize (6) or restore (9) the first window of a program, by direct call. */
+function showWindow(program, command) {
+  return ps(WIN_SHOW, { TWIN_APP: program, TWIN_CMD: String(command) }, { timeoutMs: 30_000 });
+}
+
 /**
- * Tries up to four times to make the other app the front app, and says whether it worked. A caller that wants to test a
- * focus change needs to know that the app was really not in front before. The attempts are kept as data.
+ * Makes the other app the front app, and says whether it worked. A caller that wants to test a focus change needs to know
+ * that the app was really not in front before. macOS: `open -a`. Windows: AppActivate twice. If that does not take the
+ * foreground (Windows limits which process may do that), the test app's window is minimized, which hands the foreground to
+ * the next window. Every attempt is kept as data.
  */
-export async function makeOtherFront(otherApp) {
+export async function makeOtherFront(otherApp, testApp) {
   const attempts = [];
   let front = (await frontmostDirect()).stdout.trim();
   const isOther = value => value.toLowerCase().replace(/\.exe$/, '') === String(otherApp ?? '').toLowerCase();
-  for (let attempt = 0; otherApp && attempt < 4 && !isOther(front); attempt++) {
-    const result = await bringOtherForward(otherApp);
+  for (let attempt = 0; otherApp && attempt < 3 && !isOther(front); attempt++) {
+    const minimize = IS_WIN && attempt === 2 && testApp;
+    const result = minimize ? await showWindow(testApp, 6) : await bringOtherForward(otherApp);
     await sleep(700);
     front = (await frontmostDirect()).stdout.trim();
-    attempts.push({ stdout: result?.stdout.trim(), exitCode: result?.exitCode, frontAfter: front });
+    attempts.push({ how: minimize ? 'minimize test app' : 'activate other app', stdout: result?.stdout.trim(), exitCode: result?.exitCode, frontAfter: front });
   }
   return { front, otherInFront: Boolean(otherApp) && isOther(front), attempts };
+}
+
+/** Brings the test app back after a step left it behind or minimized, so the steps after it start from a known state. */
+export async function restoreApp(program) {
+  if (IS_MAC) return capture('open', ['-a', program], { timeoutMs: 15_000 });
+  const shown = await showWindow(program, 9);
+  const activated = await bringOtherForward(program);
+  await sleep(700);
+  return { shown: shown.stdout.trim(), activated: activated?.stdout.trim(), front: (await frontmostDirect()).stdout.trim() };
+}
+
+/** Removes the temp folder that holds the test file, so a later launch has nothing to reopen. */
+export function removeTestFiles(info) {
+  if (!info?.file) return;
+  try {
+    rmSync(dirname(info.file), { recursive: true, force: true });
+  } catch {
+    // Best effort.
+  }
 }
 
 export async function stopApps(names) {

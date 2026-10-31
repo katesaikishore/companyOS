@@ -18,6 +18,7 @@ import {
   MARKER,
   ps,
   readClipboard,
+  removeTestFiles,
   runMeta,
   screenshot,
   setClipboard,
@@ -98,7 +99,7 @@ async function timed(label, binary, args, times, env, around = {}) {
   const runs = [];
   for (let index = 0; index < times; index++) {
     const before = around.before ? await around.before(index) : undefined;
-    const result = await capture(binary, args, { env, timeoutMs: 30_000, outputLimit: index === 0 ? 6000 : 600 });
+    const result = await capture(binary, args, { env, timeoutMs: 30_000, outputLimit: 400_000 });
     const after = around.after ? await around.after(index) : undefined;
     const envelope = parseEnvelope(result.stdout);
     runs.push({
@@ -109,7 +110,7 @@ async function timed(label, binary, args, times, env, around = {}) {
       timedOut: result.timedOut,
       durationMs: result.durationMs,
       envelope,
-      stdout: index === 0 ? result.stdout : undefined,
+      stdout: index === 0 ? truncate(result.stdout, 6000) : undefined,
       stderr: result.stderr || undefined,
       errorMessage: result.errorMessage,
     });
@@ -128,6 +129,7 @@ async function timed(label, binary, args, times, env, around = {}) {
 
 let app;
 let other;
+let launched;
 try {
   const packageDir = join(await globalRoot(), 'agent-desktop');
   const binary = nativeBinary(packageDir);
@@ -143,7 +145,7 @@ try {
   report.version_output = await capture(binary, ['--version'], { env });
   log('VERSION', report.version_output);
 
-  const launched = await launchTestApp();
+  launched = await launchTestApp();
   app = launched.app;
   report.testApp = launched;
   log('TESTAPP', launched);
@@ -192,7 +194,7 @@ try {
 
   // Focus: put the other app in front first, so a focus has something to change. Record who was in front before and after.
   await timed('focus-window', binary, ['focus-window', '--app', appName], 3, env, {
-    before: async () => (await makeOtherFront(other?.app)).front,
+    before: async () => (await makeOtherFront(other?.app, app)).front,
     after: async () => {
       await sleep(300);
       return (await frontmostDirect()).stdout.trim();
@@ -202,7 +204,7 @@ try {
   // Press: always after a focus-window call, as the product's executor does. Keep who was in front afterwards.
   const press = [];
   for (let index = 0; index < 3; index++) {
-    const otherFront = await makeOtherFront(other?.app);
+    const otherFront = await makeOtherFront(other?.app, app);
     const focusCall = await capture(binary, ['focus-window', '--app', appName], { env, timeoutMs: 30_000 });
     const pressCall = await capture(binary, ['press', CHORD, '--app', appName], { env, timeoutMs: 30_000, outputLimit: 3000 });
     const front = (await frontmostDirect()).stdout.trim();
@@ -226,7 +228,7 @@ try {
   log('PRESS_AFTER_FOCUS', report.pressAfterFocus);
 
   // Press with the other app in front and no focus call, to see what the CLI does with a window that is not in front.
-  const coldFront = await makeOtherFront(other?.app);
+  const coldFront = await makeOtherFront(other?.app, app);
   const frontBefore = coldFront.front;
   const cold = await capture(binary, ['press', CHORD, '--app', appName], { env, timeoutMs: 30_000, outputLimit: 3000 });
   report.pressWithoutFocus = {
@@ -251,7 +253,7 @@ try {
   ]) {
     const { withFocus, headed } = variant;
     await setClipboard('twin-smoke-sentinel');
-    const otherFront = await makeOtherFront(other?.app);
+    const otherFront = await makeOtherFront(other?.app, app);
     const frontBefore = otherFront.front;
     const calls = [];
     const call = async args => {
@@ -287,6 +289,7 @@ try {
 } finally {
   try {
     report.cleanup = await stopApps([app, other?.app].filter(Boolean));
+    if (launched) removeTestFiles(launched);
   } catch (error) {
     report.cleanup = { error: truncate(error?.message ?? error, 600) };
   }
