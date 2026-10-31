@@ -48,7 +48,8 @@ asarUnpack:
   - "**/node_modules/@node-llama-cpp/**"
   # onnxruntime-node (the Laya decision model's runtime) loads onnxruntime_binding.node, and that file links the runtime
   # library that sits beside it (libonnxruntime.so.1, libonnxruntime.1.dylib, onnxruntime.dll). Both must be real files on
-  # disk, so the whole bin folder is unpacked. The package's JavaScript stays inside the archive.
+  # disk, so the whole bin folder is unpacked. electron-builder unpacks a whole package that contains a .node file, so the
+  # package's JavaScript is unpacked with it (checked in an unpacked build).
   - "**/node_modules/onnxruntime-node/bin/**"
 mac:
   # onnxruntime-node holds the bindings of every platform in one package. Each build keeps only its own.
