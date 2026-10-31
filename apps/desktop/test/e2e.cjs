@@ -340,14 +340,14 @@ async function main() {
     await page.click('[data-testid="nav-overview"]');
     await setWindowSize(app, page, 1280, 800);
     const wideSidebar = await page.evaluate(() => document.querySelector('.sidebar').getBoundingClientRect().width);
-    assert.ok(wideSidebar >= 220 && wideSidebar <= 260, `the sidebar is a column at 1280px (${wideSidebar}px)`);
+    assert.ok(Math.abs(wideSidebar - 216) <= 1, `the sidebar is a 216px column at 1280px (${wideSidebar}px)`);
     await setWindowSize(app, page, 640, 600);
     const narrowSidebar = await page.evaluate(() => document.querySelector('.sidebar').getBoundingClientRect().width);
     assert.ok(narrowSidebar >= 600, `the sidebar becomes a top header at 640px (${narrowSidebar}px)`);
     assert.deepEqual(await responsiveProblems(page), [], 'the layout holds after the live resize to 640px');
     await setWindowSize(app, page, 1920, 900);
     const againSidebar = await page.evaluate(() => document.querySelector('.sidebar').getBoundingClientRect().width);
-    assert.ok(againSidebar >= 220 && againSidebar <= 260, `the sidebar is a column again at 1920px (${againSidebar}px)`);
+    assert.ok(Math.abs(againSidebar - 216) <= 1, `the sidebar is a 216px column again at 1920px (${againSidebar}px)`);
     log('live resize: the shell changes layout at the breakpoint, without a reload');
     await shot(page, '09-settings-min-width');
 
