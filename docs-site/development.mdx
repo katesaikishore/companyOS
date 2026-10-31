@@ -29,7 +29,7 @@ npm start
 
 ## End-to-end tests
 
-The end-to-end script launches the built app through Electron and drives it with Playwright. It covers setup, the overview, suggestions, automations, the tray, the network ledger, and the responsive layout from 640 to 1920 pixels wide, including a live resize.
+The end-to-end script launches the built app through Electron and drives it with Playwright. It covers setup, the overview, suggestions, automations, the tray, the network ledger, and the fixed 900 by 600 window. It checks that every main route fits the window with no sideways scroll, and that the window cannot be resized, maximised or made full screen.
 
 Playwright is not a dependency of the repository, so install it outside the tree:
 
