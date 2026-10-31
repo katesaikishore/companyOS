@@ -247,3 +247,18 @@ describe('readiness from the agent', () => {
     expect(serialized).not.toContain('token=');
   });
 });
+
+describe('readiness with sites', () => {
+  it('covers a routine whose two browser steps are different sites in a row, as mining keys them', () => {
+    const stream = Array.from({ length: 5 }, (_, day) => [
+      focus(at(day, 9), 'microsoft excel', 'spreadsheet'),
+      { ...focus(at(day, 9, 10), 'google chrome', 'browser'), urlTemplate: 'mail.google.com/mail' },
+      { ...focus(at(day, 9, 20), 'google chrome', 'browser'), urlTemplate: 'docs.google.com/spreadsheets' },
+      focus(at(day, 9, 30), 'microsoft word', 'document'),
+      idle(at(day, 9, 40)),
+    ]).flat();
+
+    const row = rowOf(readinessOf(stream, at(5, 0)), 'google chrome');
+    expect(row).toMatchObject({ status: 'automatable', automatablePct: 100, routines: 1 });
+  });
+});

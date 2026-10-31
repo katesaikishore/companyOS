@@ -33,3 +33,37 @@ export function workday(dayIndex: number): RawSignal[] {
 export function workdays(count: number): RawSignal[] {
   return Array.from({ length: count }, (_, day) => workday(day)).flat();
 }
+
+/**
+ * Two browser sequences in one day. In the morning Chrome visits mail, then a sheet, with no other app between them.
+ * In the afternoon Chrome visits an issue tracker, then the same sheet. Each sequence is a spreadsheet, two browser
+ * visits, then chat. The sheet URL carries a query string, so the fixture also checks that it never reaches a key.
+ */
+export function siteWorkday(dayIndex: number): RawSignal[] {
+  return [
+    { kind: 'focus', ts: at(dayIndex, 9), app: 'Microsoft Excel' },
+    { kind: 'focus', ts: at(dayIndex, 9, 10), app: 'Google Chrome', url: 'https://mail.google.com/mail/u/0/#inbox' },
+    {
+      kind: 'focus',
+      ts: at(dayIndex, 9, 20),
+      app: 'Google Chrome',
+      url: `https://docs.google.com/spreadsheets/d/1ab2cd3ef4567890?token=${SECRET_QUERY}`,
+    },
+    { kind: 'focus', ts: at(dayIndex, 9, 30), app: 'Slack' },
+    { kind: 'idle_start', ts: at(dayIndex, 9, 40) },
+    { kind: 'focus', ts: at(dayIndex, 14), app: 'Microsoft Excel' },
+    { kind: 'focus', ts: at(dayIndex, 14, 10), app: 'Google Chrome', url: 'https://jira.example.com/browse/ABC-123' },
+    {
+      kind: 'focus',
+      ts: at(dayIndex, 14, 20),
+      app: 'Google Chrome',
+      url: 'https://docs.google.com/spreadsheets/d/9zz8yy7xx',
+    },
+    { kind: 'focus', ts: at(dayIndex, 14, 30), app: 'Slack' },
+    { kind: 'idle_start', ts: at(dayIndex, 14, 40) },
+  ];
+}
+
+export function siteWorkdays(count: number): RawSignal[] {
+  return Array.from({ length: count }, (_, day) => siteWorkday(day)).flat();
+}

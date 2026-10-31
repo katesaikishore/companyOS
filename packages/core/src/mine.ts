@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { normalizeAppName } from './classify';
 import type { Segment } from './segment';
 import type { WindowClass } from './types';
 
@@ -17,7 +18,10 @@ export interface RoutineStep {
   windowClass: WindowClass;
   /** Most common application at this position. */
   app: string;
+  /** The same value as site. Kept for readers that already use it. */
   urlTemplate?: string;
+  /** The site a browser step visited, as urlTemplate gives it: the host and the first path segment. */
+  site?: string;
   /** Applications observed at this position. More than one means the step is a parameter. */
   options: string[];
 }
@@ -52,8 +56,20 @@ interface Group {
 }
 
 /**
- * Collapses consecutive focus events of the same window class. 'other' apps are not mined. Each step keeps the
- * time it started and the time the next app took focus, so routine durations can be estimated.
+ * The key that tells one step from another. A window class alone would merge every browser visit, so a browser step
+ * also carries its site. 'other' apps are keyed by name, so two of them never merge. Keys are joined with '>', so any
+ * '>' in a name or a site is removed.
+ */
+export function stepKey(step: { windowClass: WindowClass; app: string; urlTemplate?: string }): string {
+  const base = step.windowClass === 'other' ? `other:${normalizeAppName(step.app)}` : step.windowClass;
+  const key = step.urlTemplate ? `${base}@${step.urlTemplate}` : base;
+  return key.replace(/>/g, '');
+}
+
+/**
+ * Collapses consecutive focus events with the same step key, so a run on one site is one step. 'other' apps are not
+ * mined. Each step keeps the time it started and the time the next app took focus, so routine durations can be
+ * estimated.
  */
 function collapse(segment: Segment): Step[] {
   const steps: Step[] = [];
@@ -62,8 +78,9 @@ function collapse(segment: Segment): Step[] {
     const event = events[index];
     if (!event.app || !event.windowClass || event.windowClass === 'other') continue;
     const endTs = events[index + 1]?.ts ?? segment.endTs;
+    const key = stepKey({ windowClass: event.windowClass, app: event.app, urlTemplate: event.urlTemplate });
     const last = steps[steps.length - 1];
-    if (last && last.windowClass === event.windowClass) {
+    if (last && stepKey(last) === key) {
       last.endTs = endTs;
       continue;
     }
@@ -114,7 +131,7 @@ function toRoutine(key: string, group: Group, weeks: number): Routine {
     steps.push({
       windowClass: observed[0].windowClass,
       app: options[0],
-      ...(urlTemplate ? { urlTemplate } : {}),
+      ...(urlTemplate ? { urlTemplate, site: urlTemplate } : {}),
       options: options.slice(0, 5),
     });
   }
@@ -137,8 +154,8 @@ function toRoutine(key: string, group: Group, weeks: number): Routine {
 }
 
 /**
- * Finds contiguous sequences of window classes that recur across segments and days.
- * Routines are keyed by window class, so an app that changes at a position (Excel vs Calc)
+ * Finds contiguous sequences of steps that recur across segments and days.
+ * Routines are keyed by step (see stepKey), so an app that changes at a position (Excel vs Calc)
  * becomes an option at that position rather than splitting the routine.
  * Only maximal routines are returned: a shorter routine that sits inside a longer one with
  * the same support is dropped.
@@ -153,7 +170,7 @@ export function mineRoutines(segments: readonly Segment[], options: MiningOption
     for (let length = options.minLength; length <= options.maxLength; length++) {
       for (let start = 0; start + length <= steps.length; start++) {
         const window = steps.slice(start, start + length);
-        const key = window.map(step => step.windowClass).join('>');
+        const key = window.map(step => stepKey(step)).join('>');
         if (seenInSegment.has(key)) continue;
         seenInSegment.add(key);
 
