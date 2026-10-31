@@ -1,12 +1,22 @@
 import type { TwinConfig, TwinStatus } from '@companyos/twin-core';
-import { h } from '../dom.js';
-import { button, exclusionEditor, panel, panelHead, toggleRow } from '../components/ui.js';
-import { browserCaptureNote } from '../labels.js';
+import { h, type Child } from '../dom.js';
+import { button, chip, exclusionEditor, toggleRow } from '../components/ui.js';
 import { formatBytes } from '../format.js';
 import { act, bridge, confirmDeleteAll, pending, saveConfig, setNotice, state } from '../store.js';
 import { openSetup } from './setup.js';
 
 type Theme = TwinConfig['theme'];
+type InstalledModel = TwinStatus['config']['installedModels'][number];
+type SectionId = 'capture' | 'automations' | 'agents' | 'models' | 'appearance' | 'data';
+
+const SECTIONS: ReadonlyArray<{ id: SectionId; label: string }> = [
+  { id: 'capture', label: 'Capture' },
+  { id: 'automations', label: 'Automations' },
+  { id: 'agents', label: 'OpenMausBot agents' },
+  { id: 'models', label: 'Models' },
+  { id: 'appearance', label: 'Appearance' },
+  { id: 'data', label: 'Your data' },
+];
 
 const THEMES: Array<{ value: Theme; label: string; testid: string }> = [
   { value: 'system', label: 'System', testid: 'settings-theme-system' },
@@ -14,11 +24,23 @@ const THEMES: Array<{ value: Theme; label: string; testid: string }> = [
   { value: 'dark', label: 'Dark', testid: 'settings-theme-dark' },
 ];
 
+const LEVELS: Array<{ value: 3 | 4; label: string; note?: string }> = [
+  { value: 3, label: 'Level 3 · Run with you', note: 'One click per run' },
+  { value: 4, label: 'Level 4 · On its own', note: 'Only after the gate passes' },
+];
+
+/** A section counts as the one being read once its top has moved above this line, in pixels. */
+const READING_LINE_PX = 120;
+
+let activeSection: SectionId = 'capture';
+let followingScroll = false;
+
 export function settingsView(status: TwinStatus): HTMLElement {
   const config = status.config;
+  followScroll();
   return h(
     'div',
-    { class: 'stack settings', 'data-testid': 'view-settings' },
+    { class: 'stack settings settings-view', 'data-testid': 'view-settings' },
     h(
       'header',
       { class: 'page-head' },
@@ -29,20 +51,128 @@ export function settingsView(status: TwinStatus): HTMLElement {
         h('p', { class: 'page-sub' }, 'Choose what the twin may watch, what it may run, and what stays on this device.'),
       ),
     ),
-    appearancePanel(config.theme),
-    capturePanel(config.watchBrowsers, config.excludedApps, status.browserCaptureSupported),
-    automationsPanel(config),
-    openMausBotPanel(config),
-    modelsPanel(status),
-    setupPanel(),
-    dataPanel(),
+    h(
+      'div',
+      { class: 'settings-layout' },
+      sectionNav(),
+      h(
+        'div',
+        { class: 'settings-card' },
+        capturePanel(config.watchBrowsers, config.excludedApps, config.idleGapMs),
+        automationsPanel(config),
+        openMausBotPanel(config),
+        modelsPanel(status),
+        appearancePanel(config.theme),
+        dataPanel(),
+      ),
+    ),
+  );
+}
+
+function sectionDomId(id: SectionId): string {
+  return `settings-${id}`;
+}
+
+function sectionNav(): HTMLElement {
+  return h(
+    'nav',
+    { class: 'settings-nav', 'aria-label': 'Settings sections' },
+    ...SECTIONS.map(section =>
+      h(
+        'button',
+        {
+          type: 'button',
+          class: 'settings-nav-item',
+          'data-section': section.id,
+          'aria-current': section.id === activeSection ? 'true' : undefined,
+          onclick: () => {
+            activeSection = section.id;
+            markNav();
+            document.getElementById(sectionDomId(section.id))?.scrollIntoView();
+          },
+        },
+        section.label,
+      ),
+    ),
+  );
+}
+
+function markNav(): void {
+  document.querySelectorAll<HTMLElement>('.settings-nav-item').forEach(item => {
+    if (item.dataset.section === activeSection) item.setAttribute('aria-current', 'true');
+    else item.removeAttribute('aria-current');
+  });
+}
+
+/**
+ * Keeps the nav's current section in step with the page as it scrolls. Installed once, because the view is rebuilt on
+ * every refresh and each rebuild would otherwise add another listener.
+ */
+function followScroll(): void {
+  if (followingScroll) return;
+  followingScroll = true;
+  document.addEventListener(
+    'scroll',
+    () => {
+      let next: SectionId | undefined;
+      for (const section of SECTIONS) {
+        const el = document.getElementById(sectionDomId(section.id));
+        if (el && el.getBoundingClientRect().top <= READING_LINE_PX) next = section.id;
+      }
+      if (next && next !== activeSection) {
+        activeSection = next;
+        markNav();
+      }
+    },
+    { capture: true, passive: true },
+  );
+}
+
+interface SectionOptions {
+  id: SectionId;
+  testid: string;
+  title: string;
+  note?: string;
+  /** Lays the children out as one column with no dividers, for forms. */
+  stack?: boolean;
+}
+
+function sectionCard(options: SectionOptions, ...children: Child[]): HTMLElement {
+  const domId = sectionDomId(options.id);
+  return h(
+    'section',
+    { class: 'settings-section', id: domId, 'data-testid': options.testid, 'aria-labelledby': `${domId}-title` },
+    h(
+      'header',
+      { class: 'settings-head' },
+      h('h2', { class: 'settings-title', id: `${domId}-title` }, options.title),
+      options.note ? h('p', { class: 'settings-note' }, options.note) : undefined,
+    ),
+    h('div', { class: options.stack ? 'settings-body is-stack' : 'settings-body' }, ...children),
+  );
+}
+
+function row(...children: Child[]): HTMLElement {
+  return h('div', { class: 'settings-row' }, ...children);
+}
+
+function block(...children: Child[]): HTMLElement {
+  return h('div', { class: 'settings-row is-block' }, ...children);
+}
+
+function textBlock(title: string, note: string): HTMLElement {
+  return h(
+    'div',
+    { class: 'settings-text' },
+    h('span', { class: 'settings-row-title' }, title),
+    h('span', { class: 'settings-row-note' }, note),
   );
 }
 
 function openMausBotPanel(config: TwinConfig): HTMLElement {
   const key = 'openmausbot-settings';
   const command = h('input', {
-    class: 'input',
+    class: 'input mono',
     type: 'text',
     maxlength: 512,
     autocomplete: 'off',
@@ -64,166 +194,210 @@ function openMausBotPanel(config: TwinConfig): HTMLElement {
     'data-testid': 'settings-openmausbot-target',
     oninput: () => state.dirty.add(key),
   });
-  return panel({ testid: 'settings-openmausbot', labelledBy: 'openmausbot-title' },
-    panelHead('OpenMausBot agents', 'Delegate a task from any accepted routine to its existing agent harness.', 'openmausbot-title'),
-    h('p', { class: 'muted small' }, 'Install the CLI with `npm install -g openmausbot` (Node.js 24+) and configure its models, lead bot or room, and connected apps in OpenMausBot. companyOS starts one job and waits for its nested agent tasks.'),
-    h('label', { class: 'field-row' },
-      h('span', { class: 'toggle-label' }, 'CLI executable'),
-      command,
+  return sectionCard(
+    {
+      id: 'agents',
+      testid: 'settings-openmausbot',
+      title: 'OpenMausBot agents',
+      note: 'Delegate a task from any accepted routine to its existing agent harness.',
+      stack: true,
+    },
+    h('label', { class: 'settings-field' }, h('span', { class: 'settings-field-label' }, 'CLI executable'), command),
+    h('label', { class: 'settings-field' }, h('span', { class: 'settings-field-label' }, 'Lead bot or room'), target),
+    h(
+      'p',
+      { class: 'settings-note' },
+      'Install with ',
+      h('code', { class: 'settings-code mono' }, 'npm install -g openmausbot'),
+      ' (Node.js 24+) and configure its models, lead bot or room, and connected apps in OpenMausBot. companyOS starts one job and waits for its nested agent tasks.',
     ),
-    h('label', { class: 'field-row' },
-      h('span', { class: 'toggle-label' }, 'Lead bot or room'),
-      target,
+    h(
+      'p',
+      { class: 'settings-note' },
+      'A handoff sends the task brief, routine name, app sequence and estimated cadence after a native confirmation. The prompt excludes activity history, screenshots, window contents and companyOS credentials. OpenMausBot may use its own configured credentials and permissions, outside companyOS autonomy controls. Handoffs are kept on this device for 90 days, or until you delete everything.',
     ),
-    h('p', { class: 'muted small' }, 'A handoff sends the task brief, routine name, app sequence and estimated cadence after a native confirmation. The prompt excludes activity history, screenshots, window contents and companyOS credentials. OpenMausBot may use its own configured credentials and permissions, outside companyOS autonomy controls. Handoffs are kept on this device for 90 days, or until you delete everything.'),
-    h('div', { class: 'actions' }, button('Save OpenMausBot settings', {
-      testid: 'settings-openmausbot-save',
-      disabled: pending(key),
-      onClick: () => {
-        state.dirty.delete(key);
-        void act(key, async () => {
-          await bridge().updateConfig({ openMausBotCommand: command.value.trim(), openMausBotTarget: target.value.trim() });
-        });
-      },
-    })),
+    h(
+      'div',
+      { class: 'actions' },
+      button('Save OpenMausBot settings', {
+        variant: 'primary',
+        testid: 'settings-openmausbot-save',
+        disabled: pending(key),
+        onClick: () => {
+          state.dirty.delete(key);
+          void act(key, async () => {
+            await bridge().updateConfig({ openMausBotCommand: command.value.trim(), openMausBotTarget: target.value.trim() });
+          });
+        },
+      }),
+      h('a', { class: 'settings-link', href: '#/harness', 'data-testid': 'settings-open-harness' }, 'Open agent harness'),
+    ),
   );
 }
 
 function appearancePanel(current: Theme): HTMLElement {
-  return panel({ testid: 'settings-appearance', labelledBy: 'appearance-title' },
-    panelHead('Appearance', undefined, 'appearance-title'),
-    h(
-      'div',
-      { class: 'segmented', role: 'group', 'aria-label': 'Theme' },
-      ...THEMES.map(option =>
-        h(
-          'button',
-          {
-            type: 'button',
-            class: option.value === current ? 'seg is-on' : 'seg',
-            'aria-pressed': String(option.value === current),
-            'data-testid': option.testid,
-            onclick: () => void saveConfig('theme', { theme: option.value }),
-          },
-          option.label,
+  return sectionCard(
+    { id: 'appearance', testid: 'settings-appearance', title: 'Appearance' },
+    block(
+      h(
+        'div',
+        { class: 'settings-themes', role: 'group', 'aria-label': 'Theme' },
+        ...THEMES.map(option =>
+          h(
+            'button',
+            {
+              type: 'button',
+              class: option.value === current ? 'settings-theme is-on' : 'settings-theme',
+              'aria-pressed': String(option.value === current),
+              'data-testid': option.testid,
+              onclick: () => void saveConfig('theme', { theme: option.value }),
+            },
+            h('span', { class: `settings-theme-swatch is-${option.value}`, 'aria-hidden': 'true' }),
+            h('span', { class: 'settings-theme-label' }, option.label),
+          ),
         ),
       ),
     ),
   );
 }
 
-function capturePanel(watchBrowsers: boolean, excluded: readonly string[], bridgeSupported: boolean): HTMLElement {
-  return panel({ testid: 'settings-capture', labelledBy: 'capture-title' },
-    panelHead('Capture', undefined, 'capture-title'),
-    toggleRow({
-      testid: 'settings-browsers',
-      label: 'Watch browsers',
-      note: `${browserCaptureNote(bridgeSupported)} Off by default.`,
-      checked: watchBrowsers,
-      onChange: checked => void saveConfig('browsers', { watchBrowsers: checked }),
-    }),
-    h('h3', { class: 'eyebrow' }, 'Excluded apps'),
-    h(
-      'p',
-      { class: 'muted small' },
-      'The twin forgets anything it recorded from an excluded app and never records it again. Handoffs you already sent still name the app until they expire or you delete everything.',
+function capturePanel(watchBrowsers: boolean, excluded: readonly string[], idleGapMs: number): HTMLElement {
+  return sectionCard(
+    { id: 'capture', testid: 'settings-capture', title: 'Capture', note: 'App names and timing only. No titles, keystrokes or screenshots.' },
+    row(
+      toggleRow({
+        testid: 'settings-browsers',
+        label: 'Watch browsers',
+        note: 'Off by default. Browser names are recorded like app names.',
+        checked: watchBrowsers,
+        onChange: checked => void saveConfig('browsers', { watchBrowsers: checked }),
+      }),
     ),
-    exclusionEditor('exclusions:settings', excluded, 'settings-exclusions', next =>
-      void saveConfig('exclusions:settings', { excludedApps: next }),
+    block(
+      textBlock(
+        'Excluded apps',
+        'The twin forgets anything it recorded from an excluded app and never records it again. Handoffs you already sent still name the app until they expire or you delete everything.',
+      ),
+      exclusionEditor('exclusions:settings', excluded, 'settings-exclusions', next =>
+        void saveConfig('exclusions:settings', { excludedApps: next }),
+      ),
+    ),
+    row(
+      textBlock('Idle gap', 'A pause this long ends a work segment. Allowed 1 to 60 minutes.'),
+      h('span', { class: 'settings-value mono' }, `${Math.round(idleGapMs / 60_000)} min`),
     ),
   );
 }
 
 function automationsPanel(config: TwinConfig): HTMLElement {
-  const maxLevel = config.maxAutonomyLevel;
-  const select = h(
-    'select',
+  const current = Math.max(3, Math.min(4, config.maxAutonomyLevel));
+  return sectionCard(
+    { id: 'automations', testid: 'settings-automations', title: 'Automations' },
+    row(
+      toggleRow({
+        testid: 'settings-automations-toggle',
+        label: 'Automations on',
+        note: 'When off, no automation runs, on any level. It does not stop tasks you send to OpenMausBot.',
+        checked: config.automationsEnabled,
+        onChange: checked => void saveConfig('automations', { automationsEnabled: checked }),
+      }),
+    ),
+    block(
+      h('span', { class: 'settings-row-title' }, 'Highest level the twin may reach'),
+      h(
+        'div',
+        {
+          class: 'settings-levels',
+          role: 'group',
+          'aria-label': 'Highest level the twin may reach',
+          'data-testid': 'settings-max-level',
+        },
+        ...LEVELS.map(level => levelButton(level, current)),
+      ),
+    ),
+    row(
+      toggleRow({
+        testid: 'settings-unattended',
+        label: 'Allow unattended runs at level 4',
+        note: 'Local and reversible steps only. Needs the highest level set to 4.',
+        checked: config.allowUnattended,
+        onChange: checked => void saveConfig('unattended', { allowUnattended: checked }),
+      }),
+    ),
+  );
+}
+
+function levelButton(level: (typeof LEVELS)[number], current: number): HTMLElement {
+  const on = level.value === current;
+  return h(
+    'button',
     {
-      class: 'select',
-      'data-testid': 'settings-max-level',
-      'aria-label': 'Highest level the twin may reach',
-      onchange: () => {
-        const value = Number(select.value);
-        if (value === 3 || value === 4) void saveConfig('max-level', { maxAutonomyLevel: value });
+      type: 'button',
+      class: on ? 'settings-level is-on' : 'settings-level',
+      'aria-pressed': String(on),
+      'data-testid': `settings-max-level-${level.value}`,
+      onclick: () => {
+        if (!on) void saveConfig('max-level', { maxAutonomyLevel: level.value });
       },
     },
-    h('option', { value: '3' }, 'Level 3 · Run with you'),
-    h('option', { value: '4' }, 'Level 4 · On its own'),
-  );
-  select.value = String(Math.max(3, Math.min(4, maxLevel)));
-  return panel({ testid: 'settings-automations', labelledBy: 'automations-title' },
-    panelHead('Automations', undefined, 'automations-title'),
-    toggleRow({
-      testid: 'settings-automations-toggle',
-      label: 'Automations on',
-      note: 'When off, no automation runs, on any level. It does not stop tasks you send to OpenMausBot.',
-      checked: config.automationsEnabled,
-      onChange: checked => void saveConfig('automations', { automationsEnabled: checked }),
-    }),
-    toggleRow({
-      testid: 'settings-unattended',
-      label: 'Allow unattended runs at level 4 (local and reversible steps only)',
-      checked: config.allowUnattended,
-      onChange: checked => void saveConfig('unattended', { allowUnattended: checked }),
-    }),
-    h(
-      'div',
-      { class: 'field-row' },
-      h('span', { class: 'toggle-label' }, 'Highest level the twin may reach'),
-      select,
-    ),
+    h('span', { class: 'settings-level-label' }, level.label),
+    level.note ? h('span', { class: 'settings-level-note' }, level.note) : undefined,
   );
 }
 
 function modelsPanel(status: TwinStatus): HTMLElement {
   const installed = status.config.installedModels;
-  return panel({ testid: 'settings-models', labelledBy: 'models-title' },
-    panelHead('Models', undefined, 'models-title'),
+  return sectionCard(
+    {
+      id: 'models',
+      testid: 'settings-models',
+      title: 'Models',
+      note: 'Open-weight models, downloaded and checked against pinned SHA-256 digests.',
+    },
     installed.length === 0
-      ? h('p', { class: 'muted' }, 'No models installed. The twin uses simple rule-based labels until you install one.')
-      : h(
-          'div',
-          { class: 'model-list' },
-          ...installed.map(model =>
-            h(
-              'div',
-              { class: 'model-row', 'data-model-id': model.id },
-              h(
-                'div',
-                { class: 'model-main' },
-                h('span', { class: 'mono' }, model.id),
-                h('span', { class: 'muted small' }, `${formatBytes(model.bytes)} · checksum verified · ${model.sha256.slice(0, 12)}…`),
-              ),
-              button('Remove', {
-                testid: 'settings-model-remove',
-                disabled: pending(`remove:${model.id}`),
-                onClick: () => void act(`remove:${model.id}`, () => bridge().removeModel(model.id)),
-              }),
-            ),
-          ),
-        ),
-    h(
-      'div',
-      { class: 'actions' },
-      button('Choose models again', { onClick: () => void openSetup(3) }),
+      ? row(h('p', { class: 'muted small' }, 'No models installed. The twin uses simple rule-based labels until you install one.'))
+      : installed.map(model => modelRow(model)),
+    row(
+      h(
+        'div',
+        { class: 'actions', 'data-testid': 'settings-setup' },
+        button('Choose models again', { onClick: () => void openSetup(3) }),
+        button('Run setup again', { onClick: () => void openSetup(1) }),
+      ),
     ),
   );
 }
 
-function setupPanel(): HTMLElement {
-  return panel({ testid: 'settings-setup', labelledBy: 'setup-title' },
-    panelHead('Setup', 'Walk through the first-run steps again.', 'setup-title'),
-    h('div', { class: 'actions' }, button('Run setup again', { onClick: () => void openSetup(1) })),
+function modelRow(model: InstalledModel): HTMLElement {
+  return h(
+    'div',
+    { class: 'settings-row settings-model', 'data-model-id': model.id },
+    h(
+      'div',
+      { class: 'settings-model-main' },
+      h('span', { class: 'mono settings-model-id' }, model.id),
+      h('span', { class: 'settings-row-note mono' }, `${formatBytes(model.bytes)} · checksum verified · ${model.sha256.slice(0, 12)}…`),
+    ),
+    chip('installed', 'teal'),
+    button('Remove', {
+      testid: 'settings-model-remove',
+      disabled: pending(`remove:${model.id}`),
+      onClick: () => void act(`remove:${model.id}`, () => bridge().removeModel(model.id)),
+    }),
   );
 }
 
 function dataPanel(): HTMLElement {
   const exportKey = 'export';
-  return panel({ testid: 'settings-data', labelledBy: 'data-title' },
-    panelHead('Data', 'Export writes an unencrypted file. Keep it somewhere private.', 'data-title'),
-    h(
-      'div',
-      { class: 'actions' },
+  return sectionCard(
+    {
+      id: 'data',
+      testid: 'settings-data',
+      title: 'Your data',
+      note: 'Encrypted on this device with AES-256-GCM. The key is held by your OS keychain.',
+    },
+    row(
+      textBlock('Export my data', 'Export writes an unencrypted file. Keep it somewhere private.'),
       button('Export my data', {
         testid: 'settings-export',
         disabled: pending(exportKey),
@@ -233,6 +407,9 @@ function dataPanel(): HTMLElement {
             if (path) setNotice(`Saved to ${path}`, 'info');
           }),
       }),
+    ),
+    row(
+      textBlock('Delete everything', 'Removes every record, automation and setting. This cannot be undone.'),
       button('Delete everything', { variant: 'danger-outline', testid: 'settings-delete', onClick: confirmDeleteAll }),
     ),
   );

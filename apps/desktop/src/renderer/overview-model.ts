@@ -1,50 +1,90 @@
-import { DAY_MS, plural } from './format.js';
-
-/** Counts spelled out in the hero title, up to twelve. Larger counts keep their digits. */
-const COUNT_WORDS = ['Zero', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve'];
+import type { NetworkEntry } from '@companyos/twin-core';
+import { DAY_MS, plural, titleCase } from './format.js';
 
 export const RHYTHM_DAYS: readonly string[] = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 /** The hours the rhythm grid shows, one column each. */
 export const RHYTHM_HOURS: readonly number[] = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
+/** How many days the network strip covers. The last one is today. */
+export const NETWORK_DAYS = 14;
 
-/** The hero title. It counts the routines the twin has found and not yet accepted or dismissed. */
-export function foundTitle(found: number): string {
-  if (found <= 0) return 'No routines found yet.';
-  if (found === 1) return 'One routine found.';
-  const count = found < COUNT_WORDS.length ? COUNT_WORDS[found] : String(found);
-  return `${count} routines found.`;
-}
+const MONTH_NAMES: readonly string[] = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-/** The last sentence of the hero lede. It says when a run can start, and that is all it says. */
-const RUN_RULE = 'Nothing runs unless you start it, or you have turned on unattended runs for an automation at level 4.';
-
-/**
- * The lede under the hero title. It states only the counts the engine reports, then when a run can start.
- */
-export function heroLede(recordedFocusEvents: number, observedDays: number): string {
-  if (recordedFocusEvents === 0) {
-    return `Your twin has not recorded any app switches yet. It learns from app switches and their timing. ${RUN_RULE}`;
-  }
+/** The sentence under the page title: the app switches recorded, and that the data stays encrypted. */
+export function summaryLine(recordedFocusEvents: number, observedDays: number): string {
+  const privacy = 'Your data stays encrypted on this device.';
+  if (recordedFocusEvents === 0) return `No app switches recorded yet. ${privacy}`;
   const span = observedDays === 0 ? 'today' : `over ${plural(observedDays, 'day')}`;
-  return `Your twin noticed ${plural(recordedFocusEvents, 'app switch', 'app switches')} ${span}. ${RUN_RULE}`;
-}
-
-/**
- * Automations at each autonomy level, L0 to L5, by position. Level 5 is never counted: external runs are not built,
- * so it stays at zero whatever the automations hold.
- */
-export function ladderCounts(automations: readonly { state: { level: number } }[]): number[] {
-  const counts = [0, 0, 0, 0, 0, 0];
-  for (const { state } of automations) {
-    if (state.level >= 0 && state.level <= 4) counts[state.level] += 1;
-  }
-  return counts;
+  return `${plural(recordedFocusEvents, 'app switch', 'app switches')} ${span}. ${privacy}`;
 }
 
 /** Network calls made in the seven days up to now. */
 export function networkCallsThisWeek(network: readonly { ts: number }[], now: number): number {
   const weekAgo = now - 7 * DAY_MS;
   return network.filter(entry => entry.ts >= weekAgo).length;
+}
+
+export interface NetworkDay {
+  /** The day as a short date, such as "24 Oct". */
+  label: string;
+  downloads: number;
+  checks: number;
+}
+
+export interface NetworkSummary {
+  calls: number;
+  bytes: number;
+  downloads: number;
+  checks: number;
+  /** The hosts called in the window, sorted. */
+  hosts: string[];
+  /** One entry per day, oldest first. */
+  days: NetworkDay[];
+}
+
+/** The calls made in the last NETWORK_DAYS days, counted by local calendar day. */
+export function networkSummary(network: readonly NetworkEntry[], now: number): NetworkSummary {
+  const today = new Date(now);
+  const days: NetworkDay[] = [];
+  const slotOf = new Map<string, number>();
+  for (let back = NETWORK_DAYS - 1; back >= 0; back -= 1) {
+    const day = new Date(today.getFullYear(), today.getMonth(), today.getDate() - back);
+    slotOf.set(day.toDateString(), days.length);
+    days.push({ label: `${day.getDate()} ${MONTH_NAMES[day.getMonth()]}`, downloads: 0, checks: 0 });
+  }
+
+  const hosts = new Set<string>();
+  let calls = 0;
+  let bytes = 0;
+  for (const entry of network) {
+    const slot = slotOf.get(new Date(entry.ts).toDateString());
+    if (slot === undefined) continue;
+    const day = days[slot];
+    calls += 1;
+    bytes += entry.bytes;
+    hosts.add(entry.host);
+    if (entry.purpose === 'model_download') day.downloads += 1;
+    else day.checks += 1;
+  }
+
+  return {
+    calls,
+    bytes,
+    downloads: days.reduce((sum, day) => sum + day.downloads, 0),
+    checks: days.reduce((sum, day) => sum + day.checks, 0),
+    hosts: [...hosts].sort(),
+    days,
+  };
+}
+
+/** The apps a routine opens, in order, with an app repeated in a row shown once. Only act steps move focus. */
+export function routineChain(steps: readonly { kind: 'act' | 'check'; app: string }[]): string[] {
+  const apps: string[] = [];
+  for (const step of steps) {
+    if (step.kind !== 'act') continue;
+    const name = titleCase(step.app);
+    if (apps[apps.length - 1] !== name) apps.push(name);
+  }
+  return apps;
 }
 
 /** Intensity buckets for the rhythm grid: 0 is empty, 3 is the busiest cell shown. */

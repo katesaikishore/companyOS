@@ -10,6 +10,7 @@ import { h, type Child } from '../dom.js';
 import { chip, emptyState, pageHeader, panelHead, progressBar, type ChipTone } from '../components/ui.js';
 import { plural, titleCase, titleCaseSequence } from '../format.js';
 import { levelLabel, levelTone } from '../labels.js';
+import { requestRender } from '../store.js';
 
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 /** The ring is drawn in a 120 unit box. Its arcs are lengths along a circle of this radius. */
@@ -20,8 +21,21 @@ const STATUS_CHIPS: Record<AppReadinessStatus, { label: string; tone: ChipTone }
   automatable: { label: 'Automatable', tone: 'teal' },
   partly: { label: 'Partly automatable', tone: 'ink' },
   approval: { label: 'Needs approval', tone: 'warn' },
-  not_yet: { label: 'Not yet', tone: 'neutral' },
+  not_yet: { label: 'Learning', tone: 'neutral' },
 };
+
+type ReadinessFilter = 'all' | 'automatable' | 'approval' | 'not_yet';
+
+/** The groups the app list can show. A partly automatable app is in the automatable group. */
+const FILTERS: readonly { id: ReadinessFilter; label: string; statuses: readonly AppReadinessStatus[] }[] = [
+  { id: 'all', label: 'All', statuses: ['automatable', 'partly', 'approval', 'not_yet'] },
+  { id: 'automatable', label: 'Automatable', statuses: ['automatable', 'partly'] },
+  { id: 'approval', label: 'Needs approval', statuses: ['approval'] },
+  { id: 'not_yet', label: 'Learning', statuses: ['not_yet'] },
+];
+
+/** The group the list shows. It is kept here, not in the page, because a refresh draws the page again. */
+let listFilter: ReadinessFilter = 'all';
 
 /** The app readiness page: the overview of every app, or one app's detail when the route names it. */
 export function readinessView(status: TwinStatus, app?: string): HTMLElement {
@@ -39,11 +53,16 @@ export function routineUseLabel(count: number): string {
 }
 
 function listPage(readiness: AppReadinessView): HTMLElement {
-  const body: Child = readiness.switches === 0 ? emptyPanel() : [banner(readiness), appTable(readiness.rows)];
+  const hasSwitches = readiness.switches > 0;
+  const body: Child = hasSwitches ? [banner(readiness), appTable(readiness.rows)] : emptyPanel();
   return h(
     'div',
-    { class: 'stack readiness-page', 'data-testid': 'readiness-root' },
-    pageHeader('App readiness', "How much of each app's switches could run on its own · past 7 days"),
+    { class: 'stack readiness-page readiness-fill', 'data-testid': 'readiness-root' },
+    pageHeader(
+      'App readiness',
+      "How much of each app's switches could run on its own · past 7 days",
+      hasSwitches ? filterGroup() : undefined,
+    ),
     body,
   );
 }
@@ -59,7 +78,32 @@ function emptyPanel(): HTMLElement {
   );
 }
 
-/** The dark summary: the automatable share as a ring, the sentence for it, and the three groups as legend chips. */
+/** The filter over the app list. It uses the segmented control that Settings uses. */
+function filterGroup(): HTMLElement {
+  return h(
+    'div',
+    { class: 'segmented', role: 'group', 'aria-label': 'Filter apps' },
+    ...FILTERS.map(filter => {
+      const on = filter.id === listFilter;
+      return h(
+        'button',
+        {
+          type: 'button',
+          class: on ? 'seg is-on' : 'seg',
+          'aria-pressed': String(on),
+          'data-testid': `readiness-filter-${filter.id}`,
+          onclick: () => {
+            listFilter = filter.id;
+            requestRender();
+          },
+        },
+        filter.label,
+      );
+    }),
+  );
+}
+
+/** The dark summary: the automatable share as a ring, the sentence for it, and the three groups as legend items. */
 function banner(readiness: AppReadinessView): HTMLElement {
   return h(
     'section',
@@ -129,8 +173,9 @@ function legendChip(label: string, value: number, swatch: string): HTMLElement {
   );
 }
 
-/** The app table. Each row opens that app's detail. The note under it says what the figures rest on. */
+/** The rows of the list group in view, or the one group's empty line. The notes under the table say what the figures rest on. */
 function appTable(rows: readonly AppReadinessRow[]): HTMLElement {
+  const visible = rowsInGroup(rows);
   return h(
     'div',
     { class: 'readiness-table-block' },
@@ -150,23 +195,29 @@ function appTable(rows: readonly AppReadinessRow[]): HTMLElement {
             h('span', null, 'Breakdown'),
             h('span', { class: 'readiness-num' }, 'Auto'),
             h('span', null, 'Status'),
-            h('span', null, 'What it has learned'),
             h('span', null),
           ),
-          ...rows.map(appRow),
+          visible.length === 0
+            ? h('p', { class: 'readiness-none' }, 'No app is in this group in the last 7 days.')
+            : visible.map(appRow),
         ),
       ),
     ),
     h(
       'p',
       { class: 'readiness-note' },
-      "The twin records app names and timing. With browser capture on, it also keeps each site's host and the shape of its path, never titles, query strings or page content.",
+      'From app names and timing, not model confidence. With browser capture on, the twin also keeps each site\'s host and the shape of its path, never titles, query strings or page content.',
     ),
     h('p', { class: 'readiness-note' }, 'Mail and chat apps always ask. Mail or chat used in a browser is not detected.'),
   );
 }
 
-/** One app's row. The whole row is a link to that app's detail. */
+function rowsInGroup(rows: readonly AppReadinessRow[]): readonly AppReadinessRow[] {
+  const group = FILTERS.find(item => item.id === listFilter);
+  return group ? rows.filter(row => group.statuses.includes(row.status)) : rows;
+}
+
+/** One app's row. The whole row is a link to that app's detail. The learned summary sits under the app's name. */
 function appRow(row: AppReadinessRow): HTMLElement {
   return h(
     'a',
@@ -184,14 +235,14 @@ function appRow(row: AppReadinessRow): HTMLElement {
         'span',
         { class: 'readiness-app-text' },
         h('span', { class: 'readiness-app-name' }, titleCase(row.app)),
-        h('span', { class: 'readiness-app-sub' }, `${row.windowClass} · ${plural(row.switches, 'switch', 'switches')}`),
+        h('span', { class: 'readiness-app-sub' }, `${row.windowClass} · ${row.switches} sw`),
+        h('span', { class: 'readiness-app-learned' }, learnedSummary(row)),
       ),
     ),
     breakdownBar(row, false),
     h('span', { class: 'readiness-num readiness-auto' }, `${row.automatablePct}%`),
-    h('span', null, statusChip(row.status)),
-    h('span', { class: 'readiness-learned-summary small' }, learnedSummary(row)),
-    h('span', { class: 'readiness-chevron', 'aria-hidden': 'true' }, '›'),
+    h('span', { class: 'readiness-status' }, statusChip(row.status)),
+    chevron(),
   );
 }
 
@@ -215,11 +266,28 @@ function statusChip(status: AppReadinessStatus): HTMLElement {
   return chip(label, tone);
 }
 
+function chevron(): SVGElement {
+  return svgElement(
+    'svg',
+    {
+      viewBox: '0 0 24 24',
+      class: 'readiness-chevron',
+      fill: 'none',
+      stroke: 'currentColor',
+      'stroke-width': '2',
+      'stroke-linecap': 'round',
+      'stroke-linejoin': 'round',
+      'aria-hidden': 'true',
+    },
+    svgElement('path', { d: 'm9 6 6 6-6 6' }),
+  );
+}
+
 function monogram(app: string): string {
   return app.trim().charAt(0).toUpperCase() || '?';
 }
 
-/** The last column of the table: how many routines use the app, and how many of them the person accepted. */
+/** The line under the app name: how many routines use the app, and how many of them the person accepted. */
 function learnedSummary(row: AppReadinessRow): string {
   if (row.routines === 0) return 'No repeated sequence yet';
   const accepted = row.learned.filter(item => item.status === 'accepted').length;
@@ -258,6 +326,7 @@ function detailPage(readiness: AppReadinessView, app: string): HTMLElement {
       h(
         'div',
         { class: 'readiness-detail-title' },
+        backLink(),
         h('span', { class: 'readiness-mono readiness-mono-lg', 'aria-hidden': 'true' }, monogram(row.app)),
         h(
           'div',
@@ -275,7 +344,29 @@ function detailPage(readiness: AppReadinessView, app: string): HTMLElement {
       'div',
       { class: 'split readiness-split' },
       learnedPanel(row),
-      h('div', { class: 'stack' }, gatePanel(row), stylePanel()),
+      h('div', { class: 'stack readiness-side' }, gatePanel(row), stylePanel()),
+    ),
+  );
+}
+
+function backLink(): HTMLElement {
+  return h(
+    'a',
+    { class: 'readiness-back', href: '#/readiness', 'aria-label': 'Back to App readiness' },
+    svgElement(
+      'svg',
+      {
+        viewBox: '0 0 24 24',
+        width: '16',
+        height: '16',
+        fill: 'none',
+        stroke: 'currentColor',
+        'stroke-width': '2',
+        'stroke-linecap': 'round',
+        'stroke-linejoin': 'round',
+        'aria-hidden': 'true',
+      },
+      svgElement('path', { d: 'm15 6-6 6 6 6' }),
     ),
   );
 }
@@ -286,7 +377,7 @@ function breakdownStats(row: AppReadinessRow): HTMLElement {
     { class: 'readiness-stats' },
     statItem('Automatable', row.automatablePct, 'readiness-stat-auto'),
     statItem('Approval', row.approvalPct),
-    statItem('Not yet', row.notYetPct),
+    statItem('Not yet', row.notYetPct, 'readiness-stat-rest'),
   );
 }
 
@@ -299,10 +390,16 @@ function statItem(label: string, value: number, extra?: string): HTMLElement {
   );
 }
 
+/** The reason strip takes the tint of the chip beside it: teal when part of the app can run on its own, warm when it needs approval. */
+function reasonTint(status: AppReadinessStatus): string {
+  if (status === 'automatable' || status === 'partly') return 'readiness-reason-teal';
+  return status === 'approval' ? 'readiness-reason-warn' : '';
+}
+
 function reasonStrip(row: AppReadinessRow): HTMLElement {
   return h(
     'div',
-    { class: 'readiness-reason' },
+    { class: `readiness-reason ${reasonTint(row.status)}` },
     statusChip(row.status),
     h('span', { class: 'readiness-reason-text' }, row.reason),
     h('span', { class: 'muted small readiness-reason-count' }, routineUseLabel(row.routines)),
@@ -312,7 +409,7 @@ function reasonStrip(row: AppReadinessRow): HTMLElement {
 function learnedPanel(row: AppReadinessRow): HTMLElement {
   return h(
     'section',
-    { class: 'panel', 'aria-labelledby': 'readiness-learned-title', 'data-testid': 'readiness-learned' },
+    { class: 'panel readiness-panel', 'aria-labelledby': 'readiness-learned-title', 'data-testid': 'readiness-learned' },
     panelHead('What it has learned', plural(row.routines, 'routine'), 'readiness-learned-title'),
     row.learned.length === 0
       ? emptyState(
@@ -358,7 +455,7 @@ function gatePanel(row: AppReadinessRow): HTMLElement {
   if (!gate) {
     return h(
       'section',
-      { class: 'panel', 'aria-labelledby': 'readiness-gate-title', 'data-testid': 'readiness-gate' },
+      { class: 'panel readiness-panel', 'aria-labelledby': 'readiness-gate-title', 'data-testid': 'readiness-gate' },
       panelHead('Promotion gate to L4', undefined, 'readiness-gate-title'),
       emptyState('No automation for this app yet.', 'Accept a routine that uses it in Suggestions to start its gate.'),
     );
@@ -367,13 +464,13 @@ function gatePanel(row: AppReadinessRow): HTMLElement {
   const met = gate.requirements.filter(requirement => requirement.met).length;
   return h(
     'section',
-    { class: 'panel', 'aria-labelledby': 'readiness-gate-title', 'data-testid': 'readiness-gate' },
+    { class: 'panel readiness-panel', 'aria-labelledby': 'readiness-gate-title', 'data-testid': 'readiness-gate' },
     panelHead('Promotion gate to L4', reached ? undefined : `${met} of ${gate.requirements.length} met`, 'readiness-gate-title'),
-    h('p', { class: 'muted small' }, `${gate.automationName} · ${levelLabel(gate.level)}`),
+    h('p', { class: 'muted small readiness-gate-meta' }, `${gate.automationName} · ${levelLabel(gate.level)}`),
     reached
-      ? h('p', { class: 'muted small' }, 'This automation is already at L4.')
+      ? h('p', { class: 'muted small readiness-gate-meta' }, 'This automation is already at L4.')
       : h('ul', { class: 'readiness-gate-list' }, ...gate.requirements.map(gateRow)),
-    h('a', { class: 'crumb', href: `#/automations/${encodeURIComponent(gate.automationId)}` }, 'Open this automation'),
+    h('a', { class: 'crumb readiness-open', href: `#/automations/${encodeURIComponent(gate.automationId)}` }, 'Open this automation'),
   );
 }
 
@@ -401,13 +498,13 @@ function gateRow(requirement: GateRequirement): HTMLElement {
 function stylePanel(): HTMLElement {
   return h(
     'section',
-    { class: 'panel', 'aria-labelledby': 'readiness-style-title', 'data-testid': 'readiness-style' },
+    { class: 'panel readiness-panel', 'aria-labelledby': 'readiness-style-title', 'data-testid': 'readiness-style' },
     h(
       'header',
       { class: 'panel-head' },
       h('h2', { class: 'panel-title', id: 'readiness-style-title' }, 'Style learning'),
       chip('Not built yet', 'neutral', 'readiness-style-status'),
     ),
-    h('p', { class: 'muted small' }, 'Not part of this build. The twin keeps no style profile.'),
+    h('p', { class: 'muted small readiness-style-note' }, 'Not part of this build. The twin keeps no style profile.'),
   );
 }

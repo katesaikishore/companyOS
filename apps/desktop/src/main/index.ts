@@ -12,6 +12,7 @@ import {
   screen,
   Notification,
   Tray,
+  type MenuItemConstructorOptions,
   type MessageBoxOptions,
   type SaveDialogOptions,
 } from 'electron';
@@ -248,25 +249,44 @@ const WEB_PREFERENCES = {
   preload: join(__dirname, 'preload.js'),
 };
 
-/** Sized like a chat app's window on a 13-inch laptop. A smaller display gets the room it has. */
-const DEFAULT_WINDOW = { width: 1100, height: 700 };
-/** Space kept around the window when the screen is too small for the default. */
-const SCREEN_MARGIN = 40;
+/** The main window's content area. The window is a fixed size: it cannot be resized, maximised or made full screen. */
+const WINDOW_SIZE = { width: 900, height: 600 };
+
+/**
+ * Only the menus the app needs. Electron's default View menu zooms and full-screens the page, which would change the
+ * fixed window's size, so it is left out.
+ */
+function installAppMenu(): void {
+  const template: MenuItemConstructorOptions[] = [
+    ...(process.platform === 'darwin' ? [{ role: 'appMenu' as const }] : []),
+    { role: 'editMenu' },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
 
 function createMainWindow(): void {
-  const work = screen.getPrimaryDisplay().workArea;
+  installAppMenu();
   mainWindow = new BrowserWindow({
-    width: Math.min(DEFAULT_WINDOW.width, work.width - SCREEN_MARGIN),
-    height: Math.min(DEFAULT_WINDOW.height, work.height - SCREEN_MARGIN),
-    minWidth: 640,
-    minHeight: 560,
+    width: WINDOW_SIZE.width,
+    height: WINDOW_SIZE.height,
+    useContentSize: true,
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
     title: 'companyOS Twin',
     icon: join(BRAND_DIR, 'app-icon.png'),
     backgroundColor: '#F3F4F1',
     show: false,
     webPreferences: WEB_PREFERENCES,
   });
+  // The constructor options are not enough on every platform, so the lock is also set on the window itself.
+  mainWindow.setResizable(false);
+  mainWindow.setMaximizable(false);
+  mainWindow.setFullScreenable(false);
+  // Linux window managers can still maximise a window that reports it cannot be, so any maximise is undone.
+  mainWindow.on('maximize', () => mainWindow?.unmaximize());
   mainWindow.once('ready-to-show', () => mainWindow?.show());
+  mainWindow.webContents.setVisualZoomLevelLimits(1, 1);
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   mainWindow.webContents.on('will-navigate', event => event.preventDefault());
   mainWindow.on('close', event => {

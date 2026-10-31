@@ -19,7 +19,7 @@
 /* Layout sizes, the same in both themes. Sized for a 13-inch laptop window. */
 :root {
   --sidebar-width: 216px;
-  --nav-row: 38px;
+  --nav-row: 34px;
   --text-page-title: 22px;
 }
 

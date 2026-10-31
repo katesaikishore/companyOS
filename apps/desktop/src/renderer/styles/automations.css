@@ -1,1 +1,670 @@
-/* Automations screen. Styles for its view in views/automations.ts only; shared tokens and components live in tokens.css and app.css. */
+/* Automations screen. Styles for its view in views/automations.ts only; shared tokens and components live in tokens.css and app.css.
+   Colours come from tokens.css, so both themes follow. The layout changes with the width of its own containers, not the window:
+   the routine list stacks above the detail under 560px of page width, and the two-column tab bodies stack under 720px of detail width. */
+
+.auto-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  container: automations-screen / inline-size;
+}
+
+.auto-screen .page-head-text {
+  gap: 2px;
+}
+
+.auto-screen .page-title {
+  font-size: 22px;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.auto-screen .page-sub {
+  font-size: 13px;
+}
+
+.auto-screen .btn:not(.btn-small) {
+  min-height: 36px;
+  border-radius: 9px;
+  font-size: 13px;
+}
+
+.auto-screen .btn-primary:disabled {
+  opacity: 1;
+  border-color: var(--neutral-soft);
+  background: var(--neutral-soft);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.auto-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Routine list beside the detail */
+
+.auto-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  min-width: 0;
+}
+
+.auto-list {
+  flex: 0 0 236px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--card);
+}
+
+.auto-item {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  padding: 9px 11px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.auto-item:hover {
+  background: var(--inset);
+}
+
+.auto-item.is-selected {
+  border-color: var(--border-strong);
+  background: var(--inset);
+}
+
+.auto-item-name {
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.auto-item-level {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.auto-item-level .meter {
+  gap: 2px;
+}
+
+.auto-item-level .meter-seg {
+  width: 6px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.auto-item-level .meter-seg.is-on {
+  background: var(--ink);
+}
+
+.auto-item-level .meter-seg.is-on:nth-child(n + 4) {
+  background: var(--accent);
+}
+
+/* Detail: header, ladder, tabs */
+
+.auto-detail {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  container: automation-detail / inline-size;
+}
+
+.auto-detail-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+}
+
+.auto-detail-title {
+  flex: 1 1 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.auto-detail-name {
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+
+.auto-detail-sub {
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.auto-detail-actions {
+  flex: 0 1 auto;
+  justify-content: flex-end;
+}
+
+.auto-ladder-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.auto-ladder {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.auto-rung {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 72px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--ink-2);
+}
+
+.auto-rung-code,
+.auto-rung-desc {
+  color: inherit;
+  opacity: 0.8;
+}
+
+.auto-rung-code {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.auto-rung-name {
+  font-size: 12px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.auto-rung-desc {
+  font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.auto-rung.is-passed {
+  background: var(--inset);
+}
+
+.auto-rung.is-now {
+  border-color: var(--btn-primary-bg);
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-ink);
+}
+
+.auto-rung.is-eligible {
+  border: 1px dashed var(--accent);
+  background: var(--accent-tint);
+  color: var(--ink);
+}
+
+.auto-rung.is-next {
+  color: var(--muted);
+}
+
+.auto-rung.is-locked {
+  background: var(--page);
+  color: var(--muted);
+}
+
+.auto-tabs {
+  display: flex;
+  gap: 2px;
+  min-width: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.auto-tab {
+  min-height: 36px;
+  margin-bottom: -1px;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.auto-tab:hover {
+  color: var(--ink);
+}
+
+.auto-tab[aria-selected='true'] {
+  border-bottom-color: var(--ink);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* Last result: a strip under the tabs. The label and the time share a line; the text scrolls in a box of its own. */
+
+.auto-result {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 6px 12px;
+  border: 1px solid var(--accent-soft-2);
+  border-radius: 10px;
+  background: var(--card);
+}
+
+.auto-result-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+/* Short on purpose: the ladder, the tabs and this strip all sit above the fold at 900 by 600. */
+.auto-result-text {
+  gap: 2px;
+  max-height: 40px;
+  overflow-y: auto;
+  font-size: 12px;
+}
+
+/* Tab bodies: two cards side by side when the detail is wide enough */
+
+.auto-two {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  min-width: 0;
+}
+
+/* app.css also styles .auto-card for an older screen; the gap is reset here so these cards stack without extra space. */
+.auto-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+}
+
+.auto-col-wide {
+  flex: 3 1 0;
+}
+
+.auto-col-narrow {
+  flex: 2 1 0;
+}
+
+.auto-card-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.auto-card-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.auto-card-note {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.auto-empty {
+  padding: 14px;
+  font-size: 12px;
+}
+
+.auto-stack-sm {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* Workflow steps */
+
+.auto-steps {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.auto-step {
+  display: grid;
+  grid-template-columns: 26px 84px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.auto-step-num,
+.auto-step-op {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.auto-step-app {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.auto-step-detail {
+  font-size: 11px;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+
+/* Recent runs */
+
+.auto-runs {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.auto-run {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  min-height: 40px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--divider);
+  font-size: 12px;
+}
+
+.auto-run-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dot-off);
+}
+
+.auto-run-dot.is-good {
+  background: var(--dot-on);
+}
+
+.auto-run-dot.is-bad {
+  background: var(--danger);
+}
+
+.auto-run-when {
+  flex: 1 1 96px;
+  min-width: 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.auto-run-outcome {
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.auto-run-outcome.is-bad {
+  color: var(--danger);
+}
+
+.auto-run-undone {
+  font-size: 11px;
+}
+
+/* Promotion gate */
+
+.auto-gate {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.auto-gate-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--divider);
+  font-size: 13px;
+}
+
+.auto-gate-label,
+.auto-gate-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.auto-gate-value {
+  font-size: 12px;
+  color: var(--muted);
+  text-align: right;
+}
+
+.auto-gate-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--meter-off);
+  color: var(--on-accent);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.auto-gate-mark.is-met {
+  background: var(--accent);
+}
+
+.auto-reasons {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 10px 14px 10px 32px;
+  border-bottom: 1px solid var(--divider);
+  font-size: 12px;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+.auto-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: auto;
+  padding: 12px 14px;
+  border-top: 1px solid var(--divider);
+  background: var(--inset);
+}
+
+.auto-foot-note {
+  flex: 1 1 200px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* Asks first */
+
+.auto-floor {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.auto-floor-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--divider);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.auto-floor-icon {
+  flex-shrink: 0;
+  color: var(--warn-ink);
+}
+
+/* Delegate a task tree */
+
+.auto-delegate {
+  gap: 12px;
+  padding: 16px;
+}
+
+.auto-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.auto-field-label {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.auto-brief {
+  flex: 0 0 auto;
+  background: var(--inset);
+  border-radius: 10px;
+  font-size: 13px;
+}
+
+.auto-delegate-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.auto-delegate-note {
+  flex: 1 1 200px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.auto-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-text);
+  text-decoration: none;
+}
+
+.auto-link:hover {
+  text-decoration: underline;
+}
+
+/* Narrow containers stack their columns. The screen stacks the list above the detail under 560px. */
+
+@container automations-screen (max-width: 559px) {
+  .auto-body {
+    flex-direction: column;
+  }
+
+  .auto-list {
+    flex: 0 0 auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+    width: 100%;
+  }
+
+  .auto-detail {
+    flex: 0 0 auto;
+    width: 100%;
+  }
+}
+
+@container automation-detail (max-width: 719px) {
+  .auto-two {
+    flex-direction: column;
+  }
+
+  .auto-col-wide,
+  .auto-col-narrow {
+    flex: 0 0 auto;
+    width: 100%;
+  }
+}
+
+@container automation-detail (max-width: 479px) {
+  .auto-ladder {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}

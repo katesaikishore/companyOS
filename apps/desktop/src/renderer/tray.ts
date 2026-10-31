@@ -91,7 +91,7 @@ function render(): void {
           variant: 'danger',
           testid: 'tray-stop-all',
           onClick: () => void call('tray-stop', twin => twin.stopAllAutomations()),
-        }, 'btn-block tray-stop'),
+        }, 'btn-block'),
         h(
           'div',
           { class: 'tray-links' },

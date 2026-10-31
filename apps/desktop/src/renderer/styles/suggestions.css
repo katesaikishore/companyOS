@@ -1,1 +1,320 @@
-/* Suggestions screen. Styles for its view in views/suggestions.ts only; shared tokens and components live in tokens.css and app.css. */
+/* Suggestions screen. Styles for its view in views/suggestions.ts only. Shared classes (btn, chip, panel, page-head, empty) come from app.css. Colours come from tokens.css only. */
+
+/* The page column is the container, so the cards stack when the column is narrow, whatever the window size. */
+.sg-view {
+  gap: 16px;
+  container-type: inline-size;
+  container-name: sg-view;
+}
+
+.sg-count {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--ink-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* One card per row when the column is narrow. Wide enough, two cards sit side by side, as the design has them. */
+.sg-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.sg-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--card);
+  color: var(--ink);
+}
+
+.sg-card-head {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.sg-card-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.sg-score {
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.sg-name {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+
+.sg-apps {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sg-app {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 28px;
+  padding: 0 10px 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--inset);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* One neutral tile for every app: the twin does not know an app's brand colour. */
+.sg-app-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  background: var(--ink-2);
+  color: var(--card);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.sg-app-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.sg-arrow {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.sg-figures {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.sg-figure {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sg-figure-label {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.sg-figure-value {
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.sg-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 20px;
+}
+
+.sg-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sg-label {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.sg-steps {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sg-step {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--divider);
+}
+
+.sg-step-num {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.sg-step-text {
+  min-width: 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.sg-step-text strong {
+  font-weight: 600;
+}
+
+.sg-effect {
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--neutral-soft);
+  color: var(--ink-2);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.sg-effect-local {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.sg-effect-ask {
+  background: var(--warn-bg);
+  color: var(--warn-ink);
+}
+
+.sg-params {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+.sg-plain {
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.sg-touch {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+.sg-touch-ask {
+  background: var(--warn-bg);
+}
+
+.sg-touch-clear {
+  background: var(--accent-soft);
+}
+
+.sg-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 8px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--divider);
+  background: var(--inset);
+}
+
+.sg-foot-text {
+  flex: 1 1 160px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.sg-foot .btn:not(.btn-small) {
+  min-height: 36px;
+  border-radius: 9px;
+  font-size: 13px;
+}
+
+/* The empty state fills the page column below the header, as the readiness list does. */
+.sg-fill {
+  height: calc(100vh - 42px);
+}
+
+.sg-empty {
+  flex: 1;
+  min-height: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 32px;
+  text-align: center;
+}
+
+.sg-empty .empty {
+  align-items: center;
+}
+
+.sg-empty .empty-title {
+  font-size: 17px;
+}
+
+.sg-empty .muted {
+  max-width: 360px;
+}
+
+.sg-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.sg-link {
+  text-decoration: none;
+}
+
+/* Wide page column: two cards side by side. Below this width they stack. */
+@container sg-view (min-width: 560px) {
+  .sg-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

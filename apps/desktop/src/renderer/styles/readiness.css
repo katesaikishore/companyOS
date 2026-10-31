@@ -1,16 +1,38 @@
 /* App readiness page. Styles for this page only. Colours come from tokens.css. */
 
+/* The page is a container. Its two-column layouts stack by the page's own width, not the window's. */
 .readiness-page {
+  container: readiness / inline-size;
   min-width: 0;
+}
+
+/* The app list fills the page column, as the design does, so the app table scrolls inside it and the notes stay in view. */
+.readiness-fill {
+  height: calc(100vh - 42px);
+}
+
+.stack.readiness-page,
+.stack.readiness-side {
+  gap: 16px;
+}
+
+.readiness-page h1,
+.readiness-page h2,
+.readiness-page p,
+.readiness-page dl,
+.readiness-page dt,
+.readiness-page dd {
+  margin: 0;
 }
 
 /* The summary banner stays dark in both themes, so it reads the setup rail's tokens. */
 .readiness-banner {
   display: flex;
+  flex: 0 0 auto;
   flex-wrap: wrap;
   align-items: center;
-  gap: 18px 22px;
-  padding: 18px 22px;
+  gap: 16px 22px;
+  padding: 16px 22px;
   border-radius: 14px;
   background: var(--rail-bg);
   color: var(--rail-ink);
@@ -19,14 +41,14 @@
 .readiness-ring-wrap {
   position: relative;
   flex: 0 0 auto;
-  width: 84px;
-  height: 84px;
+  width: 72px;
+  height: 72px;
 }
 
 .readiness-ring {
   display: block;
-  width: 84px;
-  height: 84px;
+  width: 72px;
+  height: 72px;
   transform: rotate(-90deg);
 }
 
@@ -48,7 +70,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 19px;
+  font-size: 18px;
   font-weight: 600;
   letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
@@ -56,7 +78,7 @@
 
 .readiness-banner-copy {
   display: flex;
-  flex: 1 1 260px;
+  flex: 1 1 200px;
   flex-direction: column;
   gap: 4px;
   min-width: 0;
@@ -75,20 +97,15 @@
 
 .readiness-legend {
   display: flex;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   flex-wrap: wrap;
-  gap: 8px;
-  margin: 0;
+  gap: 10px 18px;
 }
 
 .readiness-legend-item {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  min-width: 96px;
-  padding: 8px 12px;
-  border: 1px solid var(--rail-line);
-  border-radius: 10px;
 }
 
 .readiness-legend-label {
@@ -126,47 +143,61 @@
 }
 
 .readiness-table-block {
+  container: readiness-table / inline-size;
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 10px;
   min-width: 0;
+  min-height: 0;
 }
 
 .readiness-table-panel {
+  flex: 1 1 auto;
   gap: 0;
+  min-height: 0;
   padding: 0;
   overflow: hidden;
 }
 
-/* The table keeps its width and scrolls inside its own box, so the page itself never scrolls sideways. */
+/* The table keeps its columns and scrolls inside the panel, so the page never scrolls sideways. */
 .readiness-table-scroll {
-  overflow-x: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
 }
 
 .readiness-table {
   display: flex;
   flex-direction: column;
-  min-width: 760px;
+  min-width: 0;
 }
 
+/* Five columns. The learned summary sits under the app name, so App takes the width the last column used to take. */
 .readiness-head,
 .readiness-row {
   display: grid;
-  grid-template-columns: minmax(200px, 1.7fr) minmax(130px, 1.1fr) 56px minmax(150px, 1fr) minmax(160px, 1.5fr) 16px;
+  grid-template-columns: minmax(0, 1.6fr) minmax(64px, 1fr) 44px 146px 16px;
   align-items: center;
-  gap: 14px;
-  padding: 0 18px;
+  gap: 12px;
+  padding: 0 16px;
 }
 
 .readiness-head {
-  height: 38px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: 36px;
   border-bottom: 1px solid var(--divider);
-  font-size: 12px;
+  background: var(--card);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
   color: var(--muted);
 }
 
 .readiness-row {
-  min-height: 60px;
+  min-height: 54px;
   padding-top: 10px;
   padding-bottom: 10px;
   border-bottom: 1px solid var(--divider);
@@ -217,16 +248,34 @@
   overflow-wrap: anywhere;
 }
 
-.readiness-learned-summary {
+.readiness-status {
+  min-width: 0;
+}
+
+/* The chip stays on one line. The status column is as wide as the longest label, "Partly automatable", at 12px. */
+.readiness-status .chip {
+  white-space: nowrap;
+}
+
+.readiness-app-learned {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: 11px;
   color: var(--ink-2);
+  min-width: 0;
   overflow-wrap: anywhere;
 }
 
 .readiness-chevron {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
   color: var(--muted);
-  font-size: 18px;
-  line-height: 1;
-  text-align: center;
+}
+
+.readiness-none {
+  padding: 14px 18px;
+  font-size: 13px;
+  color: var(--muted);
 }
 
 .readiness-mono {
@@ -251,6 +300,7 @@
   font-size: 16px;
 }
 
+/* The breakdown bar: automatable, then approval, and the rest is the track showing through. */
 .readiness-bar {
   display: flex;
   gap: 2px;
@@ -280,7 +330,7 @@
 }
 
 .readiness-seg-rest {
-  background: var(--border-strong);
+  background: transparent;
 }
 
 .readiness-note {
@@ -304,8 +354,24 @@
   min-width: 0;
 }
 
+.readiness-back {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  background: var(--card);
+  color: var(--ink);
+}
+
+.readiness-back:hover {
+  background: var(--inset);
+}
+
 .readiness-app-title {
-  font-size: 26px;
   overflow-wrap: anywhere;
 }
 
@@ -318,11 +384,17 @@
   color: var(--muted);
 }
 
+.readiness-crumb > a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  align-self: center;
+}
+
 .readiness-stats {
   display: flex;
   flex-wrap: wrap;
   gap: 10px 22px;
-  margin: 0;
   padding: 10px 18px;
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -336,7 +408,7 @@
 }
 
 .readiness-stat dt {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--muted);
 }
 
@@ -350,6 +422,10 @@
   color: var(--accent-ink);
 }
 
+.readiness-stat-rest dd {
+  color: var(--muted);
+}
+
 .readiness-reason {
   display: flex;
   flex-wrap: wrap;
@@ -361,8 +437,18 @@
   background: var(--inset);
 }
 
+.readiness-reason-teal {
+  border-color: transparent;
+  background: var(--accent-soft);
+}
+
+.readiness-reason-warn {
+  border-color: transparent;
+  background: var(--warn-bg);
+}
+
 .readiness-reason-text {
-  flex: 1 1 260px;
+  flex: 1 1 240px;
   min-width: 0;
   color: var(--ink-2);
 }
@@ -371,8 +457,36 @@
   white-space: nowrap;
 }
 
-.readiness-split {
-  align-items: start;
+/* A panel on this page is flush: its heading is a divided bar, and its rows carry their own padding. */
+.readiness-panel {
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.readiness-panel > .panel-head {
+  align-items: center;
+  min-height: 44px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.readiness-panel > .panel-head .panel-title {
+  font-size: 14px;
+}
+
+.readiness-panel > .panel-head .panel-note {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.readiness-panel > .empty {
+  padding: 16px 18px;
+}
+
+/* The split is two columns, three to two. It stacks only when the page is narrower than the design's column. */
+.split.readiness-split {
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
 }
 
 .readiness-learned {
@@ -381,12 +495,13 @@
   list-style: none;
 }
 
+/* The number sits in its own column. The label and the tags stack under the number, so the list keeps its width. */
 .readiness-learned-item {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) auto;
+  grid-template-columns: 28px minmax(0, 1fr);
   align-items: start;
-  gap: 12px;
-  padding: 12px 0;
+  gap: 4px 12px;
+  padding: 10px 18px;
   border-bottom: 1px solid var(--divider);
 }
 
@@ -395,6 +510,7 @@
 }
 
 .readiness-index {
+  grid-row: 1 / span 2;
   padding-top: 2px;
   font-size: 11px;
   color: var(--muted);
@@ -415,14 +531,22 @@
 
 .readiness-learned-tags {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
+  min-width: 0;
+  margin-top: 4px;
+}
+
+.readiness-gate-meta {
+  padding: 12px 18px 0;
 }
 
 .readiness-gate-list {
   display: flex;
   flex-direction: column;
+  margin: 0;
+  padding: 0;
   list-style: none;
 }
 
@@ -430,12 +554,20 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 10px 0;
+  padding: 10px 18px;
   border-bottom: 1px solid var(--divider);
 }
 
 .readiness-gate-row:last-child {
   border-bottom: 0;
+}
+
+.readiness-gate-row .progress {
+  height: 4px;
+}
+
+.readiness-gate-row .progress-fill {
+  background: var(--ink);
 }
 
 .readiness-gate-line {
@@ -463,25 +595,34 @@
   font-size: 12px;
 }
 
-/* Narrow content: the readiness table turns each row into a stacked block, so the table never needs a sideways scroll.
-   The column headings are hidden here. Each cell keeps its own text, and the bar has its own label. */
-.readiness-table-block {
-  container: readiness-table / inline-size;
+.readiness-open {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  min-height: 28px;
+  margin: 6px 18px 12px;
 }
 
-@container readiness-table (max-width: 820px) {
-  .readiness-table {
-    min-width: 0;
-  }
+.readiness-style-note {
+  padding: 12px 18px 14px;
+}
 
+/* Narrow page: the split stacks, and each table row turns into a block. Each cell keeps its own text. */
+@container readiness (max-width: 559px) {
+  .split.readiness-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@container readiness-table (max-width: 559px) {
   .readiness-head {
     display: none;
   }
 
   .readiness-row {
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 8px 14px;
-    padding: 14px 16px;
+    grid-template-columns: minmax(0, 1fr) auto 16px;
+    gap: 8px 12px;
+    padding: 12px 16px;
   }
 
   .readiness-row > :nth-child(1) {
@@ -507,11 +648,7 @@
   }
 
   .readiness-row > :nth-child(5) {
-    grid-column: 1 / -1;
-    grid-row: 4;
-  }
-
-  .readiness-row > :nth-child(6) {
-    display: none;
+    grid-column: 3;
+    grid-row: 1;
   }
 }
