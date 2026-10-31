@@ -110,18 +110,53 @@ a {
   --tone-ink: var(--cyan-ink);
 }
 
-.tone-berry {
-  --tone: var(--berry);
-  --tone-hi: var(--berry-hi);
-  --tone-soft: var(--berry-soft);
-  --tone-ink: var(--berry-ink);
-}
-
 .tone-steel {
   --tone: var(--steel);
   --tone-hi: var(--steel-hi);
   --tone-soft: var(--steel-soft);
   --tone-ink: var(--steel-ink);
+}
+
+/* App colours. An app-<name> class sets --app, and an app's letter mark fills with it. */
+
+.app-excel {
+  --app: var(--app-excel);
+}
+
+.app-word {
+  --app: var(--app-word);
+}
+
+.app-outlook {
+  --app: var(--app-outlook);
+}
+
+.app-powerpoint {
+  --app: var(--app-powerpoint);
+}
+
+.app-teams {
+  --app: var(--app-teams);
+}
+
+.app-onenote {
+  --app: var(--app-onenote);
+}
+
+.app-code {
+  --app: var(--app-code);
+}
+
+.app-slack {
+  --app: var(--app-slack);
+}
+
+.app-figma {
+  --app: var(--app-figma);
+}
+
+.app-other {
+  --app: var(--app-other);
 }
 
 .stack {

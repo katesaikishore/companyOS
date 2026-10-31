@@ -126,15 +126,22 @@
   --cyan-soft: #e5f5f5;
   --cyan-ink: #035f62;
 
-  --berry: #b8279f;
-  --berry-hi: #e66fd6;
-  --berry-soft: #fbedf8;
-  --berry-ink: #8a1c77;
-
   --steel: #5d6c74;
   --steel-hi: #9aaab1;
   --steel-soft: #eef1f2;
   --steel-ink: #3f4b51;
+
+  /* App marks, flat in each app's brand colour as the design draws them. The same in both themes. */
+  --app-excel: #1d6f42;
+  --app-word: #2b579a;
+  --app-outlook: #0f5ca8;
+  --app-powerpoint: #b7472a;
+  --app-teams: #4b53bc;
+  --app-onenote: #7719aa;
+  --app-code: #1f6fb2;
+  --app-slack: #611f69;
+  --app-figma: #a23e1c;
+  --app-other: #3b4046;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -210,8 +217,6 @@
     --purple-ink: #d4aaf5;
     --cyan-soft: #0e2f31;
     --cyan-ink: #79d9da;
-    --berry-soft: #361534;
-    --berry-ink: #f2a6e6;
     --steel-soft: #262c2f;
     --steel-ink: #b9c4c9;
   }
@@ -289,8 +294,6 @@
   --purple-ink: #d4aaf5;
   --cyan-soft: #0e2f31;
   --cyan-ink: #79d9da;
-  --berry-soft: #361534;
-  --berry-ink: #f2a6e6;
   --steel-soft: #262c2f;
   --steel-ink: #b9c4c9;
 }

@@ -14,7 +14,7 @@ import {
   summaryLine,
 } from '../overview-model.js';
 import { call, pending } from '../store.js';
-import { appTone, type Tone } from '../tones.js';
+import { appColour, type Tone } from '../tones.js';
 
 /** Apps shown as overlapping marks before the rest collapse into a count. */
 const MARKS_SHOWN = 3;
@@ -261,7 +261,7 @@ function waitingRow(item: SuggestionView): HTMLElement {
     h(
       'span',
       { class: 'ov-app-marks', 'aria-hidden': 'true' },
-      ...apps.slice(0, MARKS_SHOWN).map(app => h('span', { class: `ov-app-mark tone-${appTone(app)}` }, app.charAt(0))),
+      ...apps.slice(0, MARKS_SHOWN).map(app => h('span', { class: `ov-app-mark app-${appColour(app)}` }, app.charAt(0))),
       hidden > 0 ? h('span', { class: 'ov-app-more mono' }, `+${hidden}`) : undefined,
     ),
     h(
