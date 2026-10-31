@@ -83,7 +83,15 @@ interface NavItem {
 
 export function shell(status: TwinStatus, route: Route, content: Child): HTMLElement {
   const items: NavItem[] = [
-    { label: 'Overview', href: '#/overview', testid: 'nav-overview', icon: OVERVIEW, tone: 'blue', active: route.name === 'overview' },
+    // The review has no link of its own. It is opened from the Overview, so the Overview stays marked while it is shown.
+    {
+      label: 'Overview',
+      href: '#/overview',
+      testid: 'nav-overview',
+      icon: OVERVIEW,
+      tone: 'blue',
+      active: route.name === 'overview' || route.name === 'review',
+    },
     {
       label: 'Suggestions',
       href: '#/suggestions',

@@ -13,6 +13,7 @@ import {
   routineChain,
   summaryLine,
 } from '../overview-model.js';
+import { tasksNote } from '../review-model.js';
 import { call, pending } from '../store.js';
 import { appTone, type Tone } from '../tones.js';
 
@@ -32,6 +33,15 @@ const BOLT: Shape[] = [['path', { d: 'M13 3 5 14h6l-1 7 8-11h-6z' }]];
 const CLOCK: Shape[] = [
   ['circle', { cx: '12', cy: '12', r: '9' }],
   ['path', { d: 'M12 7v5l3 2' }],
+];
+
+const TASKS: Shape[] = [
+  ['path', { d: 'M10 6h10' }],
+  ['path', { d: 'M10 12h10' }],
+  ['path', { d: 'M10 18h10' }],
+  ['path', { d: 'M4 6l1.6 1.6L8 5' }],
+  ['path', { d: 'M4 12l1.6 1.6L8 11' }],
+  ['path', { d: 'M4 18l1.6 1.6L8 17' }],
 ];
 
 export function overviewView(status: TwinStatus): HTMLElement {
@@ -93,7 +103,24 @@ function inboxTiles(status: TwinStatus): HTMLElement {
           ? plural(automations, 'automation needs your attention', 'automations need your attention')
           : 'None yet · accepted routines land here',
     }),
+    tasksTile(status),
   );
+}
+
+/** Today's tasks, when the day has any. The tile opens the review, where the person confirms, renames, merges or splits them. */
+function tasksTile(status: TwinStatus): HTMLElement | undefined {
+  const { tasks } = status.tasks;
+  if (tasks.length === 0) return undefined;
+  // The badge counts what still waits for the person, as the other tiles do, so it clears once every task is confirmed.
+  const open = tasks.filter(task => !task.confirmed).length;
+  return inboxTile({
+    href: '#/review',
+    icon: TASKS,
+    tone: 'berry',
+    title: 'Review today',
+    count: open,
+    note: tasksNote(tasks),
+  });
 }
 
 function inboxTile(tile: InboxTile): HTMLElement {

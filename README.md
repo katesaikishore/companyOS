@@ -26,8 +26,10 @@ the owner's Mintlify account.
 - **Capture.** Reads the app in front on macOS, Windows and Linux X11, with pause, idle detection, an exclusion list,
   and a pause while the screen is locked. Browser capture is off by default. It works on macOS and Linux only, for
   Chrome and Edge, and it never reports incognito windows.
-- **Store.** Encrypted at rest. Raw events and handoffs are kept for 90 days. Export writes a plain file after a
-  warning. Delete everything removes the database, the data key and the installed models.
+- **Store.** Encrypted at rest. Raw events, handoffs and task decisions are kept for 90 days. Export writes a plain file
+  after a warning. Delete everything removes the database, the data key and the installed models.
+- **Today's tasks.** Each day's work is grouped into tasks by fixed rules: app names and the breaks between them. You
+  confirm, rename, merge or split each task in the review. Only ids and your action are kept, plus any name you typed.
 - **Routines and automations.** Repeated sequences on at least three different days are suggested. An accepted routine
   becomes a draft that can be dry-run. At level 3 you start each run, from the tray offer or with Run now. At level 4,
   with the unattended switch on, a routine of local, reversible steps can run when its app comes to the front. A

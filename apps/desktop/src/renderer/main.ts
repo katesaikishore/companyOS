@@ -8,6 +8,7 @@ import { harnessView } from './views/harness.js';
 import { ledgerView } from './views/ledger.js';
 import { readinessView } from './views/readiness.js';
 import { overviewView } from './views/overview.js';
+import { reviewView } from './views/review.js';
 import { settingsView } from './views/settings.js';
 import { setupView } from './views/setup.js';
 import { suggestionsView } from './views/suggestions.js';
@@ -125,6 +126,8 @@ function viewFor(status: TwinStatus, route: Route): HTMLElement {
       return readinessView(status, route.app);
     case 'harness':
       return harnessView(status);
+    case 'review':
+      return reviewView(status);
     case 'settings':
       return settingsView(status);
     default:

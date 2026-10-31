@@ -352,11 +352,12 @@ async function main() {
 
     // 11. The window has one fixed size. Every main route holds the checks in responsiveProblems at 900x600, and the
     // window still reports that it cannot be resized, maximised or made full screen.
-    const ROUTES = ['overview', 'suggestions', 'automations', 'readiness', 'harness', 'ledger', 'settings'];
+    const ROUTES = ['overview', 'suggestions', 'automations', 'readiness', 'harness', 'review', 'ledger', 'settings'];
     for (const route of ROUTES) {
-      if (route === 'harness') {
-        // The harness has no sidebar link any more; it opens from an automation. Its route still has to lay out.
-        await page.evaluate(() => { location.hash = '#/harness'; });
+      if (route === 'harness' || route === 'review') {
+        // The harness has no sidebar link any more; it opens from an automation. The review opens from the Overview.
+        // Their routes still have to lay out.
+        await page.evaluate(name => { location.hash = `#/${name}`; }, route);
       } else {
         await page.click(`[data-testid="nav-${route}"]`);
       }
