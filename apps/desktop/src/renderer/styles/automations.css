@@ -1,6 +1,6 @@
 /* Automations screen. Styles for its view in views/automations.ts only; shared tokens and components live in tokens.css and app.css.
    Colours come from tokens.css, so both themes follow. The layout changes with the width of its own containers, not the window:
-   the routine list stacks above the detail under 720px, and the two-column tab bodies stack under 720px of detail width. */
+   the routine list stacks above the detail under 560px of page width, and the two-column tab bodies stack under 720px of detail width. */
 
 .auto-screen {
   display: flex;
@@ -602,9 +602,9 @@
   text-decoration: underline;
 }
 
-/* Narrow containers stack their columns. The screen stacks the list above the detail under 720px. */
+/* Narrow containers stack their columns. The screen stacks the list above the detail under 560px. */
 
-@container automations-screen (max-width: 719px) {
+@container automations-screen (max-width: 559px) {
   .auto-body {
     flex-direction: column;
   }

@@ -173,11 +173,11 @@
   min-width: 0;
 }
 
-/* Six columns, as the design draws them. The App and Breakdown columns share what the fixed columns leave. */
+/* Five columns. The learned summary sits under the app name, so App takes the width the last column used to take. */
 .readiness-head,
 .readiness-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(64px, 1fr) 44px 112px minmax(0, 1fr) 16px;
+  grid-template-columns: minmax(0, 1.6fr) minmax(64px, 1fr) 44px 136px 16px;
   align-items: center;
   gap: 12px;
   padding: 0 16px;
@@ -258,7 +258,7 @@
   white-space: normal;
 }
 
-.readiness-learned-summary {
+.readiness-app-learned {
   font-family: 'Geist Mono', ui-monospace, monospace;
   font-size: 11px;
   color: var(--ink-2);
@@ -649,11 +649,6 @@
   }
 
   .readiness-row > :nth-child(5) {
-    grid-column: 1 / -1;
-    grid-row: 4;
-  }
-
-  .readiness-row > :nth-child(6) {
     grid-column: 3;
     grid-row: 1;
   }

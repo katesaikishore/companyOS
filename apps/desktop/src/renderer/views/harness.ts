@@ -29,15 +29,6 @@ interface RoutineGroup {
   handoffs: HandoffView[];
 }
 
-/** The main pane shows either the conversation for the handoff or its job. Kept across redraws. */
-type DetailView = 'task' | 'job';
-let detailView: DetailView = 'task';
-
-function showDetail(view: DetailView): void {
-  detailView = view;
-  requestRender();
-}
-
 /**
  * Reads the stored task tree into indented rows. The text came from OpenMausBot and was bounded when it was stored, but
  * it is parsed again here as data: anything that is not an object is skipped, and the depth, row and visit counts are
@@ -180,15 +171,15 @@ function preview(text: string): string {
 }
 
 /**
- * The selected handoff in the main pane: a header with the target it was sent to, the Task or Job view, and a reply box.
- * The title is the target this handoff was sent to, as it was stored, not the current setting.
+ * The selected handoff in the main pane: a header with the target it was sent to, the conversation with its job, and a
+ * reply box. The title is the target this handoff was sent to, as it was stored, not the current setting.
  */
 function conversation(item: HandoffView): HTMLElement {
   return h(
     'article',
     { class: 'harness-thread', 'data-testid': 'harness-conversation' },
     threadHead(item),
-    h('div', { class: 'harness-thread-body' }, detailView === 'job' ? jobView(item) : taskView(item)),
+    h('div', { class: 'harness-thread-body' }, taskView(item)),
     composer(),
   );
 }
@@ -205,7 +196,6 @@ function threadHead(item: HandoffView): HTMLElement {
       h('h1', { class: 'harness-thread-title' }, title),
       item.target ? h('span', { class: 'mono small muted' }, 'Lead bot or room when sent') : undefined,
     ),
-    detailSwitch(),
     button('New task', { testid: 'harness-new-task', onClick: () => go('#/automations') }, 'btn-small harness-new-task'),
   );
 }
@@ -228,50 +218,14 @@ function svgElement(tag: string, attributes: Record<string, string>, ...children
   return element;
 }
 
-/** Task and Job, as two views of the same handoff. */
-function detailSwitch(): HTMLElement {
-  const option = (view: DetailView, label: string): HTMLElement => {
-    const on = detailView === view;
-    return h(
-      'button',
-      {
-        type: 'button',
-        class: on ? 'seg is-on' : 'seg',
-        'aria-pressed': String(on),
-        'data-testid': `harness-view-${view}`,
-        onclick: () => showDetail(view),
-      },
-      label,
-    );
-  };
-  return h(
-    'div',
-    { class: 'segmented harness-switch', role: 'group', 'aria-label': 'Show the task or the job' },
-    option('task', 'Task'),
-    option('job', 'Job'),
-  );
-}
-
-/** The Task view: what companyOS sent, what came back, and a line that leads to the job. */
+/** The conversation for the handoff: what companyOS sent, what came back, and the job it started. */
 function taskView(item: HandoffView): Child[] {
   return [
     h('span', { class: 'harness-stamp mono small muted' }, formatWhen(item.sentAt)),
     companyOsMessage(item),
     replyMessage(item),
-    item.localFailure ? undefined : jobSummary(item),
+    item.localFailure ? undefined : jobCard(item),
   ];
-}
-
-/** The Job view: the job card, or a note when this handoff has no job. */
-function jobView(item: HandoffView): Child {
-  if (item.localFailure) {
-    return h(
-      'p',
-      { class: 'muted small', 'data-testid': 'harness-no-job' },
-      'No job is shown for this handoff. OpenMausBot gave no reply, so companyOS wrote the reply in the Task view.',
-    );
-  }
-  return jobCard(item);
 }
 
 /** What companyOS sent: the routine name, the observed app sequence, the cadence and the brief. */
@@ -299,18 +253,6 @@ function replyMessage(item: HandoffView): HTMLElement {
     },
     h('span', { class: 'harness-bubble-head' }, sending ? 'OpenMausBot reply' : summarySourceLabel(item.localFailure)),
     h('span', { class: 'harness-bubble-body' }, body),
-  );
-}
-
-/** The job's thread and state, with a button that opens the Job view. */
-function jobSummary(item: HandoffView): HTMLElement {
-  return h(
-    'div',
-    { class: 'harness-job-summary' },
-    h('span', { class: 'harness-job-title' }, 'Job'),
-    h('span', { class: 'harness-job-thread mono small muted' }, threadLabel(item)),
-    chip(handoffStateLabel(item.state), handoffTone(item.state)),
-    button('View job', { testid: 'harness-view-job-link', variant: 'ghost', onClick: () => showDetail('job') }, 'btn-small'),
   );
 }
 

@@ -152,6 +152,11 @@
   min-width: 0;
 }
 
+/* In a column row the 260px basis would become a height, so the text takes its natural height. */
+.settings-view .settings-row.is-block > .settings-text {
+  flex: none;
+}
+
 .settings-view .settings-row-title {
   font-size: 14px;
   font-weight: 500;

@@ -134,7 +134,7 @@
   }
 }
 
-@container (min-width: 720px) {
+@container (min-width: 560px) {
   .ov-split {
     grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
   }

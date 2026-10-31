@@ -49,7 +49,7 @@ export function ledgerView(status: TwinStatus): HTMLElement {
     { class: 'stack ledger-view', 'data-testid': 'view-ledger' },
     pageHeader(
       'Network ledger',
-      'Every model download and update check this device made, with the fields the ledger recorded. No twin data leaves in these calls. OpenMausBot handoffs are listed on the Agent harness page.',
+      'Every network call the twin has made. Nothing about you leaves in these calls.',
     ),
     h(
       'section',

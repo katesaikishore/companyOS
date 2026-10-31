@@ -1,4 +1,4 @@
-import type { AgentDelegationResult, AutomationView, AutonomyLevel, GateRequirement, HandoffView, Param, RunRecord, RunResult, Step, TwinStatus } from '@companyos/twin-core';
+import type { AgentDelegationResult, AutomationView, AutonomyLevel, EffectClass, GateRequirement, HandoffView, Param, RunRecord, RunResult, Step, TwinStatus } from '@companyos/twin-core';
 import { h, type Child } from '../dom.js';
 import { button, emptyState, levelMeter, pageHeader, panel } from '../components/ui.js';
 import { formatRate, formatWhen, handoffStateLabel, noticedPerWeek, plural, summarySourceLabel, titleCase } from '../format.js';
@@ -13,8 +13,17 @@ const TABS: readonly { id: AutomationTab; label: string }[] = [
   { id: 'delegate', label: 'Delegate to agents' },
 ];
 
-/** Steps that ask first while supervised. Unattended runs refuse them. */
-const ASKS_FIRST = ['Steps that focus mail or chat', 'Steps that open a link, file or shortcut'] as const;
+/**
+ * The effects that always ask, at every level, in the design's order. Mirrors FLOOR_EFFECTS in packages/core/src/types.ts.
+ * The renderer imports only types from core, so the list is kept here and must change with it.
+ */
+const FLOOR_ROWS: readonly { effect: EffectClass; label: string }[] = [
+  { effect: 'money', label: 'Money and payments' },
+  { effect: 'external_effect', label: 'Messages to new recipients' },
+  { effect: 'deletion', label: 'Deleting anything' },
+  { effect: 'permission', label: 'Credentials and permissions' },
+  { effect: 'install', label: 'Installs and accepting terms' },
+];
 
 const RUN_HINT_ID = 'automation-run-hint';
 
@@ -160,10 +169,10 @@ function routineDetail(status: TwinStatus, view: AutomationView): HTMLElement {
         canRun ? undefined : h('span', { class: 'auto-sr', id: RUN_HINT_ID, 'data-testid': 'automation-run-hint' }, 'Runs need level 3 or higher. Raise the routine with Set level below.'),
       ),
     ),
-    result ? resultPanel(result) : undefined,
     ladderSection(view),
     tabStrip(),
     tabBody(status, view),
+    result ? resultPanel(result) : undefined,
   );
 }
 
@@ -556,10 +565,10 @@ function floorPanel(): HTMLElement {
     h(
       'div',
       { class: 'auto-card-head' },
-      h('h3', { class: 'auto-card-title', id: 'floor-title' }, 'Asks first when supervised'),
+      h('h3', { class: 'auto-card-title', id: 'floor-title' }, 'Always asks, at any level'),
       h('span', { class: 'auto-card-note' }, 'Checked by a local policy engine before every step.'),
     ),
-    h('ul', { class: 'auto-floor' }, ...ASKS_FIRST.map(item => h('li', { class: 'auto-floor-item' }, lockIcon(), h('span', null, item)))),
+    h('ul', { class: 'auto-floor' }, ...FLOOR_ROWS.map(row => h('li', { class: 'auto-floor-item' }, lockIcon(), h('span', null, row.label)))),
   );
 }
 

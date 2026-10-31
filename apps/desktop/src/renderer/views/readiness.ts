@@ -195,7 +195,6 @@ function appTable(rows: readonly AppReadinessRow[]): HTMLElement {
             h('span', null, 'Breakdown'),
             h('span', { class: 'readiness-num' }, 'Auto'),
             h('span', null, 'Status'),
-            h('span', null, 'What it has learned'),
             h('span', null),
           ),
           visible.length === 0
@@ -218,7 +217,7 @@ function rowsInGroup(rows: readonly AppReadinessRow[]): readonly AppReadinessRow
   return group ? rows.filter(row => group.statuses.includes(row.status)) : rows;
 }
 
-/** One app's row. The whole row is a link to that app's detail. */
+/** One app's row. The whole row is a link to that app's detail. The learned summary sits under the app's name. */
 function appRow(row: AppReadinessRow): HTMLElement {
   return h(
     'a',
@@ -237,12 +236,12 @@ function appRow(row: AppReadinessRow): HTMLElement {
         { class: 'readiness-app-text' },
         h('span', { class: 'readiness-app-name' }, titleCase(row.app)),
         h('span', { class: 'readiness-app-sub' }, `${row.windowClass} · ${row.switches} sw`),
+        h('span', { class: 'readiness-app-learned' }, learnedSummary(row)),
       ),
     ),
     breakdownBar(row, false),
     h('span', { class: 'readiness-num readiness-auto' }, `${row.automatablePct}%`),
     h('span', { class: 'readiness-status' }, statusChip(row.status)),
-    h('span', { class: 'readiness-learned-summary' }, learnedSummary(row)),
     chevron(),
   );
 }
@@ -288,7 +287,7 @@ function monogram(app: string): string {
   return app.trim().charAt(0).toUpperCase() || '?';
 }
 
-/** The last column of the table: how many routines use the app, and how many of them the person accepted. */
+/** The line under the app name: how many routines use the app, and how many of them the person accepted. */
 function learnedSummary(row: AppReadinessRow): string {
   if (row.routines === 0) return 'No repeated sequence yet';
   const accepted = row.learned.filter(item => item.status === 'accepted').length;

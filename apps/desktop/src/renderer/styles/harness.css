@@ -157,7 +157,7 @@
   white-space: nowrap;
 }
 
-/* Main pane: the header, the Task or Job view, and the reply box. */
+/* Main pane: the header, the conversation, and the reply box. */
 
 .harness-thread {
   display: flex;
@@ -219,10 +219,6 @@
   min-height: 30px;
   padding: 0 12px;
   border-radius: 999px;
-}
-
-.harness-switch {
-  flex: 0 0 auto;
 }
 
 .harness-thread-body {
@@ -288,20 +284,6 @@
   white-space: pre-wrap;
 }
 
-/* The line under a reply that leads to the job. */
-
-.harness-job-summary {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  align-self: stretch;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  background: var(--card);
-}
-
 /* The job card: state chip, thread id, and the task tree as a table. */
 
 .harness-job {
@@ -316,8 +298,7 @@
   background: var(--card);
 }
 
-.harness-job-head,
-.harness-job-summary {
+.harness-job-head {
   min-width: 0;
 }
 
@@ -335,10 +316,6 @@
 .harness-job-thread {
   min-width: 0;
   overflow-wrap: anywhere;
-}
-
-.harness-job-summary .harness-job-thread {
-  flex: 1 1 auto;
 }
 
 .harness-job-head .chip {
