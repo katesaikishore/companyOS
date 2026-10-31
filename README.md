@@ -26,7 +26,7 @@ the owner's Mintlify account.
 - **Capture.** Reads the app in front on macOS, Windows and Linux X11, with pause, idle detection, an exclusion list,
   and a pause while the screen is locked. Browser capture is off by default. It works on macOS and Linux only, for
   Chrome and Edge, and it never reports incognito windows.
-- **Store.** Encrypted at rest. Raw events and handoffs are kept for 90 days. Export writes a plain file after a
+- **Store.** Encrypted at rest. Raw events are kept for 90 days. Export writes a plain file after a
   warning. Delete everything removes the database, the data key and the installed models.
 - **Routines and automations.** Repeated sequences on at least three different days are suggested. An accepted routine
   becomes a draft that can be dry-run. At level 3 you start each run, from the tray offer or with Run now. At level 4,
@@ -34,7 +34,6 @@ the owner's Mintlify account.
   promotion gate and demotion after a failed or undone run keep that honest.
 - **App readiness.** For each app, the share of its switches in the last seven days that could run on their own,
   worked out by fixed rules.
-- **OpenMausBot handoffs.** Sent after a native confirmation. Each one, with its replies and job tree, opens from its automation.
 - **Window.** The main window is a fixed 900 by 600. It cannot be resized, maximised or made full screen, and zoom is off, so the layout is designed for that one size. The sidebar stays in place, and the page column scrolls inside the window.
 
 ## Not done yet
@@ -99,9 +98,9 @@ NODE_PATH=$(npm root)/node_modules node apps/desktop/test/e2e.cjs
 
 ## Privacy in short
 
-Activity stays on this device. The only calls the app makes are the ones listed in the network ledger: approved
-OpenMausBot handoffs, model downloads from Hugging Face hosts, and update checks when an update feed is set. The
-[privacy page](docs-site/privacy.mdx) lists them in full.
+Activity stays on this device. The only calls the app makes are the ones listed in the network ledger: model downloads
+from Hugging Face hosts, and update checks when an update feed is set. The [privacy page](docs-site/privacy.mdx) lists
+them in full.
 
 ## Releases
 

@@ -1,17 +1,10 @@
-import { TwinAgent, type Automation, type Executor, type HandoffView, type TwinEvent } from '@companyos/twin-core';
+import { TwinAgent, type Automation, type Executor, type TwinEvent } from '@companyos/twin-core';
 import { randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ModelManager } from '../../apps/desktop/src/main/models';
-import {
-  buildOpenMausBotPrompt,
-  observedAppSequence,
-  runOpenMausBotTask,
-  sendHandoff,
-} from '../../apps/desktop/src/main/openmausbot';
 import { CANARIES, type Surface } from './canaries';
-import { spawnLog } from './fake-spawn';
 import { ConsoleCapture, diskSurfaces, errorText, recordingFetch, refuseOutbound } from './surfaces';
 
 export type Outcome = 'stored' | 'dropped' | 'rejected';
@@ -71,9 +64,6 @@ export const PLANTED: readonly Planted[] = [
   { label: 'percent-encoded URL query in a browser', outcome: 'stored', signal: ts => ({ kind: 'focus', ts, app: 'Google Chrome', url: `https://docs.example.com/doc/5f0e7c21/view?t=${encodeURIComponent(CANARIES.encodedForms)}` }) },
 ];
 
-/** The outcome the person asks OpenMausBot for. It is a brief, not raw activity, so it is not a canary. */
-export const HANDOFF_BRIEF = 'Summarise the invoice follow-ups from this week';
-
 export interface ScenarioRun {
   /** Every output the suite inspects, taken after the whole scenario ran. */
   surfaces: Surface[];
@@ -82,12 +72,9 @@ export interface ScenarioRun {
   events: TwinEvent[];
   facts: {
     ledgerEntries: number;
-    spawnCalls: number;
     unexpectedOutboundCalls: number;
     chromeTemplate?: string;
     downloadStatus: string[];
-    /** The state of each handoff the store holds after the send. */
-    handoffStates: string[];
   };
 }
 
@@ -122,7 +109,7 @@ async function settle(done: () => boolean, timeoutMs = 10_000): Promise<void> {
 /**
  * Drives the real engine and desktop modules with canaries planted on every ingest surface, then returns every output
  * a person, a log reader or a network observer could see. Nothing here is mocked except the outside world: the
- * network is refused, the CLI is a fake, and the console is captured in memory.
+ * network and every process call are refused and recorded, and the console is captured in memory.
  */
 export async function runPlantedScenario(): Promise<ScenarioRun> {
   const root = mkdtempSync(join(tmpdir(), 'twin-privacy-'));
@@ -131,7 +118,6 @@ export async function runPlantedScenario(): Promise<ScenarioRun> {
   const outbound: string[] = [];
   const thrown: unknown[] = [];
   const outcomes: Record<string, Outcome> = {};
-  spawnLog.length = 0;
   const restoreOutbound = refuseOutbound(outbound);
   const capture = new ConsoleCapture();
 
@@ -168,26 +154,6 @@ export async function runPlantedScenario(): Promise<ScenarioRun> {
     models.install('qwen3-0.6b');
     await settle(() => models.states().every(state => state.status !== 'running'));
 
-    // The OpenMausBot handoff goes through the real send path, with the CLI replaced by the fake. Its record is written
-    // to the store, so the store, the export and the console are all checked for raw activity below.
-    const prompt = buildOpenMausBotPrompt(view.automation, HANDOFF_BRIEF);
-    const handoff: HandoffView = {
-      id: 'handoff-privacy-1',
-      automationId: view.automation.id,
-      routineName: view.automation.name,
-      target: 'Lead Bot',
-      brief: HANDOFF_BRIEF,
-      apps: observedAppSequence(view.automation),
-      cadencePerWeek: view.automation.estimate?.occurrencesPerWeek,
-      sentAt: at(10, 0),
-      state: 'sending',
-      summary: '',
-      localFailure: false,
-    };
-    await sendHandoff(agent, handoff, () =>
-      runOpenMausBotTask({ command: 'openmausbot', target: 'Lead Bot', automation: view.automation, taskBrief: HANDOFF_BRIEF }),
-    );
-
     const exported = agent.exportAll() as { events: TwinEvent[]; automations: Automation[] };
     const surfaces: Surface[] = [
       ...diskSurfaces(root, storeDir, key),
@@ -195,10 +161,8 @@ export async function runPlantedScenario(): Promise<ScenarioRun> {
       { name: 'ledger', text: JSON.stringify({ network: agent.networkLedger(), downloads: models.states() }, null, 2) },
       { name: 'export', text: JSON.stringify(exported, null, 2) },
       { name: 'export:automations', text: JSON.stringify(exported.automations, null, 2) },
-      { name: 'prompt:openmausbot', text: prompt },
       { name: 'errors', text: thrown.map(errorText).join('\n') },
       { name: 'outbound:fetch', text: outbound.join('\n') },
-      { name: 'outbound:spawn', text: spawnLog.map(call => [call.command, ...call.args].join('\n')).join('\n---\n') },
     ];
 
     return {
@@ -207,11 +171,9 @@ export async function runPlantedScenario(): Promise<ScenarioRun> {
       events: exported.events,
       facts: {
         ledgerEntries: agent.networkLedger().length,
-        spawnCalls: spawnLog.length,
         unexpectedOutboundCalls: outbound.filter(line => line.startsWith('UNEXPECTED')).length,
         chromeTemplate: exported.events.find(event => event.urlTemplate)?.urlTemplate,
         downloadStatus: models.states().map(state => state.status),
-        handoffStates: agent.handoffs().map(item => item.state),
       },
     };
   } finally {

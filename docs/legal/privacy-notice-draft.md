@@ -55,7 +55,6 @@ Your personal assistant is optional. You can decline it or turn it off. Declinin
 - **[COMPANY NAME]:** only statistics about workflows and apps. Never data about an individual.
 - **[VENDOR NAME]:** [CONFIRM: no identifiable data. List any telemetry the vendor receives, and whether it needs your consent.]
 - **Published automations:** if you choose to publish an automation to the company library, you see a preview with personal details removed before anything is sent. You choose whether your name is attached.
-- **Delegated tasks:** if you choose to send a task to [DELEGATION PARTNER, if enabled], only the task brief, the routine name, the app sequence and the usual timing are sent, and only after you press send. Your activity history, screenshots and window contents are not sent. [CONFIRM whether this is available in the company deployment.]
 - **Model downloads:** when you install an AI model, your device connects to [HOST NAMES]. Those hosts see your IP address, but no information about your activity.
 
 ### How it is protected

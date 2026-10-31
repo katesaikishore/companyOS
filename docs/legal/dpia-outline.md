@@ -38,7 +38,6 @@ The CNIL and German DSK lists also name employee monitoring (privacy-legal §1).
 | Employees | Data subjects, and owners of their own twin | Full access on their own device |
 | [VENDOR NAME] | [CONTROLLER, PROCESSOR, OR NO ROLE FOR PERSONAL DATA] | Design target: nothing identifiable. CONFIRM, including any telemetry (ePrivacy Art. 5(3)) |
 | Works council or CSE | Consulted. Co-determination applies (see the works-council note) | Aggregates only |
-| [DELEGATION PARTNER], if enabled | Recipient of approved handoffs only | Task brief, routine name, app sequence and cadence, after the employee presses send (plan §16) |
 | Model download hosts | Recipients of download requests | Connection data, such as IP address. No activity data. [CONFIRM HOST NAMES] |
 
 ### 3.2 Data flows

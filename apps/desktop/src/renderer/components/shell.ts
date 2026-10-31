@@ -32,12 +32,6 @@ const READINESS: Shape[] = [
   ['path', { d: 'M12 3a9 9 0 1 0 9 9h-9z' }],
   ['path', { d: 'M15 3.5A9 9 0 0 1 20.5 9H15z' }],
 ];
-const HARNESS: Shape[] = [
-  ['rect', { x: '4', y: '7', width: '16', height: '12', rx: '3' }],
-  ['path', { d: 'M12 3v4' }],
-  ['circle', { cx: '9', cy: '13', r: '1.2' }],
-  ['circle', { cx: '15', cy: '13', r: '1.2' }],
-];
 const LEDGER: Shape[] = [
   ['circle', { cx: '12', cy: '12', r: '9' }],
   ['path', { d: 'M3 12h18' }],
@@ -106,7 +100,6 @@ export function shell(status: TwinStatus, route: Route, content: Child): HTMLEle
       badge: `${status.readiness.automatablePct}%`,
       active: route.name === 'readiness',
     },
-    { label: 'Agent harness', href: '#/harness', testid: 'nav-harness', icon: HARNESS, active: route.name === 'harness' },
     {
       label: 'Network ledger',
       href: '#/ledger',

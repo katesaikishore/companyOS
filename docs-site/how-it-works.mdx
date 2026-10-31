@@ -8,7 +8,7 @@ description: "From capture to a routine you can run: what the twin records, how 
 The twin polls the operating system every few seconds and records the name of the app in front, its window class, and whether you are idle. It records nothing else about the app.
 
 - **Pause** stops recording until you resume. Locking the screen pauses it too, and it resumes at unlock unless you paused it yourself.
-- **Exclusions** tell the twin never to record an app. Excluding an app removes its recent events. Handoffs you already sent keep the app name until they expire or you delete everything.
+- **Exclusions** tell the twin never to record an app. Excluding an app removes its recent events. Handoff records saved by an earlier version keep the app name until you delete everything.
 - **Browser capture** is off by default. When it is on, Chrome and Edge report only the host and a short path shape of the active tab. Titles, query strings and fragments are dropped, and private windows are never reported. It works on macOS and Linux only.
 
 ## 2. Segment and mine

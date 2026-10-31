@@ -377,7 +377,6 @@ function heatmapPanel(activity: number[][]): HTMLElement {
 }
 
 function devicePanel(status: TwinStatus, callsThisWeek: number): HTMLElement {
-  const handoffs = status.handoffs.length;
   return h(
     'section',
     { class: 'ov-card ov-device', 'data-testid': 'overview-device', 'aria-labelledby': 'device-title' },
@@ -397,9 +396,7 @@ function devicePanel(status: TwinStatus, callsThisWeek: number): HTMLElement {
       deviceFact('Network calls this week', h('a', { href: '#/ledger' }, String(callsThisWeek))),
       deviceFact(
         'Sent outside this device',
-        handoffs === 0
-          ? 'Only model and update requests, which carry no activity.'
-          : `${plural(handoffs, 'approved handoff', 'approved handoffs')} to OpenMausBot. Model and update requests carry no activity.`,
+        'Only model and update requests, which carry no activity.',
         true,
       ),
     ),

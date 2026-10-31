@@ -40,6 +40,7 @@ Three principles shape everything else:
 | D12 | Company analytics | Only k-anonymous (k ≥ 10) differentially private aggregates, over secure aggregation. | `privacy-legal.md`, `prior-art.md` |
 | D13 | Cloud model | **Superseded by §15a:** no cloud model. (Was: Claude Opus 5.5 for synthesis and repair under zero data retention, with Fable 5.x excluded because it requires 30-day retention.) | `understanding-ml.md`, `privacy-legal.md`; §15a |
 | D14 | Product positioning | Do not compete with platform computer-use agents. Win on passive, cross-OS discovery and an employee-owned twin. | `prior-art.md` |
+| D15 | OpenMausBot integration removed | The product direction no longer includes OpenMausBot. The handoff sent an approved brief to a third-party app's command-line tool, over a network path that was never verified and is not in the network ledger. Its two settings are no longer read or written, and the Agent harness page, the Delegate tab and the handoff views are gone. Handoff records already on disk are ignored, not deleted: the app neither shows nor uses them, the data export carries them as stored, and Delete everything removes them. | Product owner; §16 |
 
 ## 3. What "anonymous" can honestly mean
 
@@ -541,9 +542,9 @@ The MVP is built on branch `work-twin-app`. It follows this plan with these deli
 | Keystroke counts | Not captured | Needs the native helper. |
 | Wayland | Reported as unavailable | Needs a compositor extension (spike S4). |
 | Automation steps: a workflow graph (`observe`, `act`, `check`, `approve`, `branch`, `agent_step`) over five execution tiers (§7.1, §7.2) | Two steps only: focus an app, and check that it is focused | Typing, clicking and sending need the execution tiers. |
-| Delegation: not in the plan | OpenMausBot handoff from an accepted routine, after a native confirmation that previews the prompt | Product owner addition. See the note below. |
+| Delegation: not in the plan | OpenMausBot handoff from an accepted routine, after a native confirmation that previews the prompt (removed, see D15) | Product owner addition. See the note below. |
 
-**OpenMausBot handoff.** This is the one path where data derived from the twin leaves companyOS: the task brief, routine name, app sequence and estimated cadence. Activity history, screenshots, window contents and companyOS credentials are not sent. OpenMausBot runs under its own permissions, models and credentials, outside the autonomy controls in §7. companyOS does not control which models OpenMausBot uses, so §15a does not cover what happens after the handoff. The handoff is not recorded in the network ledger.
+**OpenMausBot handoff (removed, see D15).** The handoff sent an approved brief, routine name, app sequence and estimated cadence to OpenMausBot. It is no longer in the app. Its records from earlier versions are ignored, not deleted. Before removal it ran under OpenMausBot's own permissions, models and credentials, outside the autonomy controls in §7, and it was not recorded in the network ledger.
 
 What the tests cover:
 - Engine (`packages/core/test`, 114 tests): redaction and privacy at ingest, store encryption and tamper detection, segmentation, routine mining, compilation, policy evaluation order, runner outcomes, the promotion gate and demotion, triggers, the model catalogue, hardware planning and verified downloads, the ledger, and an end-to-end agent run.

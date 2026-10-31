@@ -1,4 +1,4 @@
-import type { AutomationView, EffectClass, Fit, HandoffView, Param, RunRecord, Step, TwinStatus } from '@companyos/twin-core';
+import type { AutomationView, EffectClass, Fit, Param, RunRecord, Step, TwinStatus } from '@companyos/twin-core';
 import { formatBytes, clamp01 } from './format.js';
 
 export const LEVEL_NAMES = ['Observe', 'Suggest', 'Draft', 'Run with you', 'On its own', 'External'];
@@ -16,24 +16,6 @@ export function levelTone(level: number): 'teal' | 'ink' | 'neutral' {
   if (level >= 4) return 'teal';
   if (level === 3) return 'ink';
   return 'neutral';
-}
-
-/** The colour of a handoff's state chip. Sending and unknown states stay neutral: nothing is decided yet. */
-export function handoffTone(state: HandoffView['state']): 'teal' | 'warn' | 'danger' | 'neutral' {
-  switch (state) {
-    case 'completed':
-      return 'teal';
-    case 'needs-input':
-      return 'warn';
-    case 'failed':
-    case 'stalled':
-    case 'timed-out':
-      return 'danger';
-    case 'sending':
-    case 'unknown':
-    default:
-      return 'neutral';
-  }
 }
 
 export function effectLabel(effect: EffectClass): string {

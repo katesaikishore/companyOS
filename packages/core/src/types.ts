@@ -88,10 +88,6 @@ export const TwinConfigSchema = z
       .array(z.object({ id: z.string().max(80), sha256: z.string().length(64), bytes: z.number().int().nonnegative(), installedAt: z.number() }).strict())
       .max(20),
     dismissedRoutineIds: z.array(z.string().max(40)).max(500),
-    /** Optional local OpenMausBot CLI bridge. The data export includes it, because the export carries the whole config. */
-    openMausBotCommand: z.string().trim().min(1).max(512).default('openmausbot'),
-    /** Existing OpenMausBot lead bot or room; blank disables delegation. */
-    openMausBotTarget: z.string().trim().max(120).default(''),
   })
   .strict();
 export type TwinConfig = z.infer<typeof TwinConfigSchema>;
@@ -120,6 +116,4 @@ export const DEFAULT_CONFIG: TwinConfig = {
   automationsEnabled: true,
   installedModels: [],
   dismissedRoutineIds: [],
-  openMausBotCommand: 'openmausbot',
-  openMausBotTarget: '',
 };
