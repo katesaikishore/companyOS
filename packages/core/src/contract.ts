@@ -1,6 +1,6 @@
 import type { AutomationView } from './agent';
 import type { GateRequirement } from './autonomy';
-import type { EffectClass, TwinConfig, AutonomyLevel } from './types';
+import type { EffectClass, TwinConfig, AutonomyLevel, WindowClass } from './types';
 import type { DownloadState, HardwareProfile, InstalledModel, NetworkEntry, SetupPlan } from './models/types';
 import type { RunResult } from './runner';
 
@@ -144,6 +144,64 @@ export interface AppReadinessView {
   notYetPct: number;
   rows: AppReadinessRow[];
 }
+
+/** The usual hours of one weekday. Weekdays run Monday first, as in the activity grid. */
+export interface UsualHoursView {
+  /** 0 is Monday. */
+  weekday: number;
+  /** Local days in the window with an app switch on this weekday. */
+  days: number;
+  /** False when too few days were seen to name an hour. The hours are then null, so the twin does not guess. */
+  enoughData: boolean;
+  /** Median hour of the first app switch of each observed day, to two decimals. 9.5 is 09:30. */
+  startHour: number | null;
+  /** Median hour of the last app switch of each observed day. */
+  endHour: number | null;
+}
+
+/** How long a work segment usually lasts. A segment runs from its first app switch to its last. */
+export interface SessionMinutesView {
+  /** Work segments in the window. */
+  segments: number;
+  /** Null below the minimum number of segments. */
+  medianMinutes: number | null;
+}
+
+/** The app a window class uses most in the window. Only classes with enough switches appear. */
+export interface UsualAppView {
+  windowClass: WindowClass;
+  /** App switches into this class in the window. */
+  switches: number;
+  /** The normalised app name. */
+  app: string;
+  /** Whole percentage of the class's switches that went to this app. */
+  sharePct: number;
+}
+
+/** How long the person stayed in one app of a window class before switching to another. */
+export interface StretchMinutesView {
+  windowClass: WindowClass;
+  /** Stretches in this class that ended with a switch to another app. */
+  stretches: number;
+  /** Null below the minimum number of stretches. */
+  medianMinutes: number | null;
+}
+
+/**
+ * How the person usually works, over the last four weeks. It describes what was recorded and never judges it. Until
+ * enough days are observed, it says so and gives no habit.
+ */
+export type HabitsView =
+  | { state: 'not_enough_data'; windowDays: number; observedDays: number; requiredDays: number }
+  | {
+      state: 'ready';
+      windowDays: number;
+      observedDays: number;
+      usualHours: UsualHoursView[];
+      sessionMinutes: SessionMinutesView;
+      usualAppPerKind: UsualAppView[];
+      stretchMinutes: StretchMinutesView[];
+    };
 
 /** A routine handed to OpenMausBot. It is kept on this device, so its result survives a restart. */
 export interface HandoffView {
