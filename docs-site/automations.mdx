@@ -46,7 +46,7 @@ Focusing an app and pressing a shortcut can run through an external agent-deskto
 
 When a path is set:
 
-- Focus and press steps start the program with a fixed argument list and never through a shell: `focus --app <name>`, or `press --app <name> --shortcut <chord>`. A step succeeds only when the program exits with status 0.
+- Focus steps start the program with a fixed argument list and never through a shell: `focus-window --app <name>`. A press step runs `focus-window --app <name>` first, then `press <chord> --app <name>`. A step succeeds only when the program exits with status 0.
 - An application name or key chord must match a strict pattern before the program starts. Anything else is refused, and nothing runs.
 - A path that is not an existing file blocks both steps, and the run says why.
 - Each call is stopped after 10 seconds, and its output is capped. The log keeps only the step name, the exit status and the duration.
