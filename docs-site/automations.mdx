@@ -17,8 +17,8 @@ Level 5 is not built. Only the promotion step raises an automation to level 4, a
 
 The gate has eight conditions, and the automation's page shows each one:
 
-1. It has run at level 3.
-2. The unattended switch is on in Settings.
+1. It has been raised to level 3.
+2. Unattended runs are switched on in Settings, and the highest level there is set to 4.
 3. Every effect of the routine is local and reversible.
 4. You have supervised at least 10 runs at level 3.
 5. It has at least 25 runs in the last 14 days.
@@ -26,7 +26,7 @@ The gate has eight conditions, and the automation's page shows each one:
 7. None of its runs was reverted in the last 14 days.
 8. None of its runs failed in the last 14 days.
 
-If a check fails or a run is undone, the automation drops back to level 3 at once.
+If a run fails, which includes a failed check, or if you undo a run, the automation drops back to level 3 at once. A blocked run is not a failure and does not lower the level.
 
 ## Steps
 
@@ -34,11 +34,30 @@ If a check fails or a run is undone, the automation drops back to level 3 at onc
 | --- | --- |
 | Focus an app | Everywhere app capture works: macOS, Windows, and Linux on X11 |
 | Check focus | Everywhere app capture works |
-| Open a link | macOS and Windows only |
-| Open a file | macOS and Windows only, and it asks each time |
+| Open a link | macOS, Windows, and Linux on X11 when gio is installed. The Linux adapter is tested with stand-in apps only. See below |
+| Open a file | macOS, Windows, and Linux on X11 when gio is installed. It asks each time. See below |
 | Press a shortcut | macOS and Windows, whose adapters are not yet tested on a real machine, and Linux on X11 through xdotool. The app is brought to the front first, and nothing is sent if it does not get there. Blocked on Wayland |
 
 Typing, clicking and sending are not built.
+
+## Opening links and files on Linux
+
+Linux has no command that opens a link in a named app, so the twin looks the app up itself. It reads the installed desktop entries (the `.desktop` files in the user and system `applications` folders) and finds the one entry the step names. Then it starts that entry with `gio launch`, with the checked address or file as the only argument. It uses an argument list, never a shell, and stops the launcher after 8 seconds. It never calls `xdg-open`, because that opens the target in the system's default app and not in the app you approved.
+
+The name is matched against the entry's window class (`StartupWMClass`), then its file name, then its `Name`. The first of these that matches decides. Name the app the way capture records it, which on X11 is the window class, such as `firefox`. A step that names an app by its menu name can open the link and then fail the check that the app is in front, because the front window reports its class.
+
+The step is refused, and nothing is launched, when:
+
+- no installed entry has that name;
+- more than one entry has that name at the same level;
+- the entry cannot take the target. A link needs a web browser entry that handles that scheme and has a `%u` or `%U` in its command. A file needs a `%f`, `%F`, `%u` or `%U`;
+- the entry runs in a terminal, is a terminal emulator, or starts a shell or a script interpreter. The path of a file can hold characters such as `$` and `;`, which a shell would read.
+
+A refused step is blocked, not failed, and it shows the reason. After the launch, the twin asks the window manager to bring the app forward, and the run then checks that it is in front, as it does on macOS and Windows.
+
+The steps are offered only on X11 and only when `gio` supports `launch` (GLib 2.50 or later, in the `libglib2.0-bin` package on Debian and Ubuntu). On Wayland they are blocked, as is all app capture.
+
+What is verified: the tests use a stand-in launcher and stand-in tools, and also run the real `gio launch` to check that a link, a file name with shell characters and a file URI arrive as one argument. A one-off run under Xvfb with Openbox, which is not part of the test suite, started stand-in apps from desktop entries, brought them to the front and passed the in-front check. What is not verified: real browsers and editors, Flatpak and Snap entries, and GNOME or KDE focus rules, which can refuse to raise a window that was not started by a click.
 
 ## Optional agent-desktop program
 

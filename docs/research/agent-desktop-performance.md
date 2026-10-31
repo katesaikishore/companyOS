@@ -136,3 +136,63 @@ The scripts are in `scripts/agent-desktop-bench/`. They need the Linux packages 
 - `run.sh` runs the executor benchmark. Set `AGENT_DESKTOP_BIN` to the binary's path, then run it under `xvfb-run` with
   `dbus-run-session`. It reports if the test app died during the run, and those results must be discarded.
 - `stress.sh` runs each call type 60 times against a fresh app and reports whether the app survived.
+
+## Provenance
+
+Checked 2026-10-31 for `agent-desktop@1.0.2` on a Linux x86_64 container. The package was installed into a scratch folder
+outside the repository, and the release files were downloaded into separate scratch folders. The only code that ran was
+the package's own postinstall script (during `npm install`) and `agent-desktop --version`, which printed
+`agent-desktop 1.0.2`.
+
+### Verified
+
+- **Registry signature.** `npm audit signatures` (npm 10.9.9) reported "1 package has a verified registry signature".
+- **Provenance attestation.** The same command reported "1 package has a verified attestation". The attestations endpoint
+  (`https://registry.npmjs.org/-/npm/v1/attestations/agent-desktop@1.0.2`) returned two bundles:
+  - an npm publish attestation, and
+  - a SLSA provenance v1 attestation signed through Sigstore, with a certificate that names
+    `https://github.com/vercel-labs/agent-desktop/.github/workflows/release.yml@refs/heads/main`. It records git commit
+    `a47ed664e0db00d1d4df364eb3fe8a5599882f3c`, a GitHub-hosted runner, and run 41127710341.
+- **The attested file is the file we have.** Both bundles name the package by its SHA-512, and that digest equals the
+  SHA-512 of the tarball downloaded from the registry (`936422dd...e34d7d3`).
+- **Publisher.** The registry shows the publish was made by GitHub Actions through npm trusted publishing (OIDC), not by a
+  person's token. The one npm maintainer is `lahfir`. The package licence is Apache-2.0.
+- **Tag and commit agree.** `git ls-remote` shows tag `v1.0.2` of `vercel-labs/agent-desktop` at
+  `a47ed664e0db00d1d4df364eb3fe8a5599882f3c`, the commit named in the provenance.
+- **Shipped binaries against their `.sha256` files.** All 10 binaries in the tarball match the digest in the `.sha256`
+  file next to them: the CLI for `darwin-arm64`, `darwin-x64`, `linux-arm64`, `linux-x64`, `win32-arm64` and `win32-x64`,
+  the two Linux clipboard helpers, and the two macOS helpers.
+- **Shipped binaries against the GitHub release.** The release `v1.0.2` has a `checksums.txt`. The six CLI archives
+  downloaded from the release match it, and the binaries inside them are byte-identical to the ones in the npm package
+  (10 of 10, compared by SHA-256). SHA-256 of the Linux x64 CLI: `05427281a6746489bc0e15c16698a70a86322125c76c7a9e2f4c2d7a12bf7c5b`.
+- **Install behaviour.** The postinstall script found the bundled binary's digest equal to its `.sha256` file, so it made
+  no download. Otherwise it downloads the release archive and checks it against `checksums.txt`. It then replaces the
+  Node launcher `bin/agent-desktop` (5,041 bytes in the tarball) with a hard link to the native binary.
+
+### Not verified, and why
+
+- **The `.sha256` files are not independent.** They ship inside the same tarball as the binaries, so they catch a damaged
+  download, not a tampered package. The independent checks are the Sigstore attestation and the release comparison above.
+- **GitHub's own attestations for the release archives.** The release workflow attests the archives and `checksums.txt`,
+  and its comment says to check them with `gh attestation verify`. That call and the GitHub REST API were refused from this
+  container (HTTP 403, repository access not enabled for this session), so the release assets were checked only against
+  `checksums.txt`. `checksums.txt` is published by the same workflow, so it is the same trust root as the npm package.
+  Run `gh attestation verify <archive> --repo vercel-labs/agent-desktop` on a machine with GitHub access to close this.
+- **The release page itself.** Who published it, when, and whether it is marked immutable were not read, for the same
+  reason. The tag commit was read through git only.
+- **The source code.** No audit was made of what the binary does. The provenance says where it was built, not that it is
+  safe. The build container image and Rust toolchain pins in `release.yml` were seen but not reviewed.
+- **Platform signing of the binaries.** The binaries are not signed by a platform vendor. The two macOS arm64 binaries
+  carry only an ad-hoc signature (a code directory and no certificate chain). The macOS x64 binaries and both Windows
+  `.exe` files carry no signature. With no Developer ID signature, none can be notarised. A copy placed inside companyOS's
+  own signed and notarised macOS app would have to be re-signed with our certificate, and Windows would treat it as an
+  unsigned program.
+- **macOS and Windows binaries were not run.** They were compared by hash only. Only the Linux x64 binary was started.
+- **Later versions.** All of this applies to 1.0.2. A new version needs the same checks.
+
+### What this means for enabling it
+
+The package is traceable to a public workflow and commit, and the binaries we would use match the published release. That
+is enough to use it as an optional, user-installed program, which is how companyOS treats it today. It is not enough to
+bundle a copy: that needs the release attestation check above, a source review, and a decision on re-signing. Performance
+on macOS and Windows is still unmeasured (see Limits).

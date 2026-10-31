@@ -8,3 +8,4 @@ export * from './select';
 export * from './protocol';
 export * from './client';
 export * from './paths';
+export * from './threads';
