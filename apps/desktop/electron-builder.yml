@@ -15,6 +15,10 @@ extraResources:
     to: browser-ext/native-host
   - from: ../browser-ext/dist
     to: browser-ext/extension
+    # The Firefox build stays out of the app until Firefox visits are accepted and its add-on ID is set.
+    filter:
+      - "**/*"
+      - "!firefox/**"
 asar: true
 # The encrypted store's native module (better-sqlite3-multiple-ciphers) ships Node-API prebuilds for every platform,
 # so it runs unchanged in Electron. A rebuild would compile the bundled SQLite from source for no benefit.
