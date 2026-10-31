@@ -158,16 +158,26 @@ function scorePill(score: number): HTMLElement {
   return h('span', { class: 'sg-score mono' }, `score ${score.toFixed(2)}`);
 }
 
-/** Times seen and the hand-time estimate. The estimate is not measured from the person, so it carries a tilde. */
+/**
+ * Times seen, the hand-time estimate and the usual time. The estimate is not measured from the person,
+ * so it carries a tilde.
+ */
 function figures(item: SuggestionView): HTMLElement {
   return h(
     'span',
     { class: 'sg-figures' },
     figure('Seen', `${item.support}× · ${plural(item.days, 'day')}`),
     figure('By hand', `~${Math.round(item.minutesPerWeek)} min / wk`),
+    figure('When', item.when, true),
   );
 }
 
-function figure(label: string, value: string): HTMLElement {
-  return h('span', { class: 'sg-figure' }, h('span', { class: 'sg-figure-label' }, label), h('span', { class: 'sg-figure-value' }, value));
+/** A label and a value. The wide one spans both columns, for a value too long to share a row. */
+function figure(label: string, value: string, wide = false): HTMLElement {
+  return h(
+    'span',
+    { class: wide ? 'sg-figure sg-figure-wide' : 'sg-figure' },
+    h('span', { class: 'sg-figure-label' }, label),
+    h('span', { class: 'sg-figure-value' }, value),
+  );
 }
