@@ -29,7 +29,7 @@ npm start
 
 ## End-to-end tests
 
-The end-to-end script launches the built app through Electron and drives it with Playwright. It covers setup, the overview, suggestions, automations, the tray, the network ledger, and the fixed 900 by 600 window. It checks that every main route fits the window with no sideways scroll, and that the window cannot be resized, maximised or made full screen.
+The end-to-end script launches the built app through Electron and drives it with Playwright. It covers setup (including the optional decision-model step), the overview, suggestions, automations, the tray, the network ledger, Delete everything, and the fixed 900 by 600 window. It checks that every main route fits the window with no sideways scroll, and that the window cannot be resized, maximised or made full screen.
 
 Playwright is not a dependency of the repository, so install it outside the tree:
 
@@ -39,7 +39,17 @@ npm install --no-save playwright
 NODE_PATH=$(npm root)/node_modules node apps/desktop/test/e2e.cjs
 ```
 
-The script uses a temporary data folder, and it needs network access to huggingface.co to download the embedding model.
+The script uses a temporary data folder, and it needs network access to huggingface.co to download the embedding model. The decision-model step does not use the network: the script starts a local server with a 3 MB bundle and points the app at it through `COMPANYOS_TEST_LAYA_FIXTURE`, which a packaged build ignores.
+
+## Decision-model tests
+
+`apps/desktop/test/laya.test.ts` tests the bundle manager against a local server that stands in for Hugging Face. It never downloads the real bundle. One opt-in test uses the real bundle already on your machine. It reads the files, checks them against the pinned digests, loads the model and asks one question:
+
+```bash
+COMPANYOS_REAL_LAYA=1 COMPANYOS_LAYA_CACHE=/path/to/cache npm test -w @companyos/desktop -- laya
+```
+
+The cache folder holds `receptron--laya-onnx/<commit>/`, the layout the `@receptron/laya` package uses. The test only reads it.
 
 ## Continuous integration
 
