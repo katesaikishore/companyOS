@@ -1,24 +1,48 @@
-# Title: `press` crashes a GTK 3 application (SIGSEGV in libgtk-3, gtk_main_do_event) on Linux/X11
+# agent-desktop `press` crash: upstream status
 
-## Summary
+Recorded 2026-11-01. Follows `docs/research/agent-desktop-performance.md` on the `agent-desktop-executor` branch.
 
-On Ubuntu 24.04 (X11, openbox), repeated `agent-desktop press <chord> --app <name>` calls make a GTK 3 window die with a
-segmentation fault inside `gtk_main`. Focus, `status`, `snapshot` and `list-apps` do not reproduce it. Key injection with
+**Status: tracked upstream. Our draft issue was not posted.** The same crash is reported in
+[vercel-labs/agent-desktop#384](https://github.com/vercel-labs/agent-desktop/pull/384), an open pull request with a
+proposed fix. Posting our draft as a new issue would duplicate it. Our evidence is kept below because it matches the
+cause given there.
+
+## The crash
+
+On Linux/X11, repeated `agent-desktop press <chord> --app <name>` calls make a GTK 3 window die with a segmentation
+fault inside `gtk_main`. Focus, `status`, `snapshot` and `list-apps` do not reproduce it. Key injection with
 `xdotool key` does not reproduce it either.
 
-## Environment
+## Cause given upstream
 
-- agent-desktop 1.0.2 (npm `agent-desktop@1.0.2`)
-- Ubuntu 24.04, x86_64; at-spi2-core 2.52.0; GTK 3.24.41; Python 3.12 with PyGObject 3.48.2
-- xdotool 3.20160805.1; Xvfb; openbox as window manager
+From #384 and its follow-up comment:
 
-## Reproduction
+- Each `agent-desktop` call is a short-lived process. It registers with the AT-SPI registry as a client, sends the key
+  and exits.
+- When the last AT-SPI client leaves the bus, at-spi2's ATK bridge in the app removes its key listener
+  (`spi_atk_deregister_event_listeners`, then `atk_remove_key_event_listener`).
+- The app can still be inside that listener at that moment. The listener waits for the registry in a nested main loop
+  (`send_and_allow_reentry`), so the removal frees the listener while it is on the stack. GTK then crashes on return.
+- The author read this path in the at-spi2-core source and did not capture the crash inside that exact call. They tied
+  it to the process exit by measurement: waiting 200 ms before exit gave 0 of 24 crashes against 5 of 24, and
+  `NO_AT_BRIDGE=1` gave 0 of 8 against 3 of 8. A second AT-SPI client that stays on the bus also stopped it.
 
-1. Start a GTK 3 window whose title is `ADTestApp` (any window with an accessible Entry and Button works).
-2. Run `agent-desktop press ctrl+a --app python3.12` 60 times in a row, against a fresh window.
-3. The window dies in most trials, usually within 10 to 30 presses. `--headed` dies too.
+## How our evidence fits
 
-Stress results, 60 calls per trial, fresh window each trial:
+- **Backtrace.** Our `gdb` backtrace shows SIGSEGV at `gtk_main_do_event+3488` in libgtk-3, with no libatspi or
+  libatk-bridge frame on the stack. That fits GTK touching the removed listener after the bridge code has returned,
+  rather than a crash inside the bridge.
+- **Press only.** Only `press` sends a key, so only `press` can leave the bus while the app is inside the key
+  listener. Focus, snapshot and status send no key.
+- **xdotool control.** `xdotool key` is not an AT-SPI client, so nothing leaves the bus after the key.
+- **Python replay.** Our replay of the same AT-SPI calls did not crash in 3 trials of 60 presses, and we could not
+  explain it. The replay script is not in the repo, so we cannot check whether it kept one bus connection across
+  presses. If it did, the cause above explains why it never crashed.
+- **Earlier window killed.** Killing an earlier test window raised the crash rate (3 of 3 against 1 of 3). The cause
+  above does not explain this, and the sample was small.
+
+Stress results we recorded, 60 calls per trial, fresh window each trial (Ubuntu 24.04, Xvfb, openbox, at-spi2-core
+2.52.0, GTK 3.24.41, agent-desktop 1.0.2):
 
 | Loop | Trial 1 | Trial 2 | Trial 3 |
 |---|---|---|---|
@@ -29,23 +53,8 @@ Stress results, 60 calls per trial, fresh window each trial:
 | press ctrl+a --headed | died | died | died |
 | focus-window, then press | died | died | alive |
 
-Controls that did not crash, 30 presses per mode: `xdotool key --clearmodifiers ctrl+a` with and without a focus change.
+## What this changes for companyOS
 
-## Backtrace
-
-`gdb` backtrace at the crash: SIGSEGV at `gtk_main_do_event+3488` in libgtk-3.so.0, under `gtk_main`, `g_main_loop_run`,
-libgdk and the Python interpreter. No libatspi, libatk-bridge, libxtst or libc frame is on the stack. The faulting
-instruction is a pointer load inside GTK's event dispatch.
-
-## Notes on what was ruled out
-
-- A Python client that replays the same AT-SPI calls as the press (two `window:activate` registrations, the same tree
-  reads, then the key) did not crash in 3 trials of 60 presses. This is unexplained: the crash still happens with the
-  stress script on the same machine.
-- Killing an earlier test window before starting the measured one raised the crash rate (3 of 3 trials, against 1 of 3
-  without). The sample is small.
-
-## Ask
-
-Is there a known issue with the press path against GTK 3 accessibility, or a recommended invocation that avoids it? We
-work around it by sending keys with xdotool after focus-window, which has not crashed in our tests.
+Nothing yet. Linux presses still go through `xdotool` after the focus check (`linux-press-xdotool`, merged in PR #4), and
+agent-desktop stays optional and off by default. Revisit when a fix is released upstream and verified against the
+stress script.
