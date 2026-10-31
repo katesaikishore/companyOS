@@ -114,7 +114,7 @@ describe('an empty or unusable path', () => {
     const log = useFake();
     // The built-in focus succeeds here, so a fall-through to it would show as a pass.
     const base: Executor = { focusApp: async () => true, frontmostApp: async () => undefined };
-    const executor = handsExecutor(base, { binary: '' });
+    const executor = handsExecutor(base, { binary: '' }, 'darwin');
     expect(executor.blockedReason?.('focus_app')).toMatch(/No agent-desktop program is set/);
     expect(executor.blockedReason?.('press_shortcut')).toMatch(/No agent-desktop program is set/);
     expect(await executor.focusApp('Microsoft Excel')).toBe(false);
@@ -264,7 +264,7 @@ describe('a failed call', () => {
 
   it('makes the executor step report false on a non-zero exit', async () => {
     useFake({ exit: 1 });
-    const executor = handsExecutor({ focusApp: async () => true, frontmostApp: async () => undefined }, { binary: program });
+    const executor = handsExecutor({ focusApp: async () => true, frontmostApp: async () => undefined }, { binary: program }, 'darwin');
     expect(await executor.pressShortcut?.('Microsoft Excel', 'cmd+shift+k')).toBe(false);
     expect(await executor.focusApp('Microsoft Excel')).toBe(false);
   });
@@ -314,11 +314,33 @@ describe('an executor with a usable path', () => {
         throw new Error('the built-in press must not run');
       },
     };
-    const executor = handsExecutor(base, { binary: program });
+    const executor = handsExecutor(base, { binary: program }, 'darwin');
     expect(executor.blockedReason?.('focus_app')).toBeUndefined();
     expect(await executor.focusApp('Microsoft Excel')).toBe(true);
     expect(await executor.pressShortcut?.('Microsoft Excel', 'cmd+shift+k')).toBe(true);
     expect(await executor.frontmostApp()).toBe('microsoft excel');
     expect(starts(log).map(args => args[0])).toEqual(['focus-window', 'focus-window', 'press']);
+  });
+
+  it('keeps key presses on Linux with the built-in adapter, even when the path is set, and still focuses through the program', async () => {
+    const log = useFake();
+    let builtInPresses = 0;
+    const base: Executor = {
+      focusApp: async () => {
+        throw new Error('the built-in focus must not run on this path');
+      },
+      frontmostApp: async () => undefined,
+      pressShortcut: async () => {
+        builtInPresses++;
+        return true;
+      },
+    };
+    const executor = handsExecutor(base, { binary: program }, 'linux');
+    expect(executor.blockedReason?.('press_shortcut')).toBeUndefined();
+    expect(await executor.pressShortcut?.('Microsoft Excel', 'cmd+shift+k')).toBe(true);
+    expect(builtInPresses).toBe(1);
+    expect(starts(log)).toEqual([]);
+    expect(await executor.focusApp('Microsoft Excel')).toBe(true);
+    expect(starts(log).map(args => args[0])).toEqual(['focus-window']);
   });
 });

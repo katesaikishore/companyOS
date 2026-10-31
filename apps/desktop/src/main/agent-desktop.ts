@@ -174,16 +174,21 @@ export async function pressWithAgentDesktop(
 }
 
 /**
- * The runner's executor when the program path is set. Focus and key steps go through the program. Frontmost-app checks,
- * links and files come from the built-in executor unchanged. While the path is unusable, both steps are blocked with the
- * reason before anyone is asked, and nothing starts.
+ * The runner's executor when the program path is set. Focus goes through the program on every platform. A key press goes
+ * through the program on macOS and Windows only. On Linux the program's press crashed a GTK 3 test window in most trials,
+ * so the built-in press (xdotool on X11) is used there, and the path does not block it. Frontmost-app checks, links and
+ * files come from the built-in executor unchanged. While the path is unusable, the focus step is blocked with the reason
+ * before anyone is asked, and nothing starts.
  */
-export function handsExecutor(base: Executor, options: HandsOptions): Executor {
+export function handsExecutor(base: Executor, options: HandsOptions, platform: NodeJS.Platform = process.platform): Executor {
+  const pressThroughProgram = platform !== 'linux';
   return {
     ...base,
     focusApp: async app => (await focusWithAgentDesktop(options, app)).ok,
-    pressShortcut: async (app, shortcut) => (await pressWithAgentDesktop(options, app, shortcut)).ok,
-    blockedReason: () => agentDesktopProblem(options.binary),
+    ...(pressThroughProgram
+      ? { pressShortcut: async (app: string, shortcut: string) => (await pressWithAgentDesktop(options, app, shortcut)).ok }
+      : {}),
+    blockedReason: op => (op === 'press_shortcut' && !pressThroughProgram ? undefined : agentDesktopProblem(options.binary)),
   };
 }
 

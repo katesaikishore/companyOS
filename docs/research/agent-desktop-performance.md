@@ -94,6 +94,17 @@ Follow-up checks:
   no earlier window. The sample is small, so this is a lead.
 - Until the cause is known, a press through agent-desktop on Linux should not be relied on.
 
+## Decision (2026-10-31)
+
+- Linux key presses do not go through agent-desktop. They use `xdotool` on X11, which the Linux platform already
+  requires. In the checks run, `xdotool` keys with the focus check first delivered 360 of 360 presses across six trials
+  (including after an earlier window was killed) with no crash. The same loops crashed the agent-desktop press in 3 of 3
+  trials. This is on the `linux-press-xdotool` branch, and the executor excludes Linux presses on this branch.
+- The root cause of the agent-desktop press crash is still not known. It was not reproduced by a replay of the AT-SPI
+  calls, so it may depend on something outside the replay. It is an upstream question, not a companyOS fix.
+- agent-desktop stays optional and off by default. Focus and press on macOS and Windows already have built-in adapters.
+  The program is not needed for them and is not enabled by default until it is measured there and its binary is verified.
+
 ## Findings
 
 1. **The executor's command shape was wrong.** It called commands the CLI does not have. This is fixed on this branch.
