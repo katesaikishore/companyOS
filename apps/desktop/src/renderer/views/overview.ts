@@ -1,26 +1,23 @@
-import type { AutomationView, DraftStep, SuggestionView, TwinStatus } from '@companyos/twin-core';
+import type { AutomationView, TwinStatus } from '@companyos/twin-core';
 import { h, type Child } from '../dom.js';
 import { button, emptyState, levelMeter } from '../components/ui.js';
 import { formatBytes, formatRate, percent, plural, titleCase, titleCaseSequence } from '../format.js';
 import { appsSummary, captureTitle, LEVEL_NAMES, levelLabel } from '../labels.js';
 import {
+  foundTitle,
   heroLede,
   ladderCounts,
-  lastSeenLabel,
   networkCallsThisWeek,
-  readyTitle,
   RHYTHM_DAYS,
   RHYTHM_HOURS,
   rhythmLevels,
-  routineApps,
-  routineEvidence,
 } from '../overview-model.js';
-import { call, go, pending, state } from '../store.js';
+import { call, go, state } from '../store.js';
 
-const APP_PATTERN_REVIEW_THRESHOLD = 0.8;
+const APP_PATTERN_STRONG_THRESHOLD = 0.8;
 
 export function overviewView(status: TwinStatus): HTMLElement {
-  const { stats, automations, suggestions, network } = status;
+  const { stats, automations, network } = status;
   return h(
     'div',
     { class: 'ov-page', 'data-testid': 'view-overview' },
@@ -34,8 +31,7 @@ export function overviewView(status: TwinStatus): HTMLElement {
         'div',
         { class: 'ov-main' },
         stats.routinesLearned === 0 ? learningPanel(status) : undefined,
-        waitingPanel(suggestions),
-        routinesPanel(automations, suggestions.length),
+        routinesPanel(automations),
         usagePanel(status.usage),
       ),
       h(
@@ -75,14 +71,6 @@ function overviewTop(status: TwinStatus): HTMLElement {
 }
 
 function overviewHero(status: TwinStatus): HTMLElement {
-  const { suggestions, automations } = status;
-  const primary =
-    suggestions.length > 0
-      ? button(`Review ${plural(suggestions.length, 'suggestion')}`, { variant: 'primary', onClick: () => go('#/suggestions') }, 'ov-cta')
-      : automations.length > 0
-        ? button('View automations', { variant: 'primary', onClick: () => go('#/automations') }, 'ov-cta')
-        : undefined;
-
   return h(
     'header',
     { class: 'ov-hero' },
@@ -90,14 +78,13 @@ function overviewHero(status: TwinStatus): HTMLElement {
       'div',
       { class: 'ov-hero-copy' },
       h('span', { class: 'ov-eyebrow' }, 'PRIVATE WORK TWIN'),
-      h('h1', { class: 'ov-title' }, readyTitle(suggestions.length)),
+      h('h1', { class: 'ov-title' }, foundTitle(status.suggestions.length)),
       h('p', { class: 'ov-lede' }, heroLede(status.recordedFocusEvents, status.stats.observedDays)),
       h('div', { class: 'ov-hero-actions' },
-        primary,
         button('Open network ledger', { onClick: () => go('#/ledger') }, 'ov-cta-quiet'),
       ),
     ),
-    ladderCard(automations),
+    ladderCard(status.automations),
   );
 }
 
@@ -139,12 +126,7 @@ function statsRow(status: TwinStatus): HTMLElement {
     'section',
     { class: 'ov-stats', 'data-testid': 'overview-stats', 'aria-label': 'Summary' },
     statCard({ label: 'Routines learned', value: String(stats.routinesLearned), note: 'Detected and not dismissed, or accepted' }),
-    statCard({
-      label: 'Waiting for you',
-      value: String(stats.waiting),
-      note: 'Suggestions and drafts',
-      tag: stats.waiting > 0 ? { text: 'review', review: true } : undefined,
-    }),
+    statCard({ label: 'Pending', value: String(stats.waiting), note: 'Suggestions and drafts' }),
     statCard({ label: 'Unattended ready', value: String(stats.unattendedReady), note: 'Level 4 · local and reversible', tag: { text: 'gated' } }),
   );
 }
@@ -154,7 +136,7 @@ interface StatCard {
   value: string;
   unit?: string;
   note: string;
-  tag?: { text: string; review?: boolean };
+  tag?: { text: string };
 }
 
 function statCard(card: StatCard): HTMLElement {
@@ -165,7 +147,7 @@ function statCard(card: StatCard): HTMLElement {
       'div',
       { class: 'ov-stat-head' },
       h('span', { class: 'ov-stat-label' }, card.label),
-      card.tag ? h('span', { class: card.tag.review ? 'ov-stat-tag is-review' : 'ov-stat-tag' }, card.tag.text) : undefined,
+      card.tag ? h('span', { class: 'ov-stat-tag' }, card.tag.text) : undefined,
     ),
     h(
       'div',
@@ -177,76 +159,8 @@ function statCard(card: StatCard): HTMLElement {
   );
 }
 
-function waitingPanel(suggestions: readonly SuggestionView[]): HTMLElement {
-  return h(
-    'section',
-    { class: 'ov-card', 'data-testid': 'overview-waiting', 'aria-labelledby': 'waiting-title' },
-    h(
-      'div',
-      { class: 'ov-card-head' },
-      h('h2', { class: 'ov-card-title', id: 'waiting-title' }, 'Waiting for you'),
-      h('span', { class: 'ov-card-note' }, 'Patterns your twin found. Accepting one creates a draft — it runs nothing.'),
-    ),
-    suggestions.length === 0
-      ? emptyState('Nothing to review yet.', 'The twin needs the same sequence on at least three different days to notice a routine.')
-      : h('div', { class: 'ov-routine-list' }, ...suggestions.map(routineCard)),
-  );
-}
-
-function routineCard(item: SuggestionView): HTMLElement {
-  const acceptKey = `accept:${item.routineId}`;
-  const dismissKey = `dismiss:${item.routineId}`;
-  const busy = pending(acceptKey) || pending(dismissKey);
-  return h(
-    'article',
-    { class: 'ov-routine', 'data-testid': 'overview-suggestion' },
-    h(
-      'div',
-      { class: 'ov-routine-copy' },
-      h('h3', { class: 'ov-routine-name' }, item.name),
-      h('p', { class: 'ov-routine-evidence' }, routineEvidence(item.support, item.days, item.minutesPerWeek)),
-    ),
-    appChain(item.drafted),
-    h(
-      'div',
-      { class: 'ov-routine-foot' },
-      h('span', { class: 'ov-when mono' }, lastSeenLabel(item.lastSeenAt)),
-      h('span', { class: 'ov-grow', 'aria-hidden': 'true' }),
-      button('Not useful', {
-        variant: 'ghost',
-        disabled: busy,
-        onClick: () => void call(dismissKey, twin => twin.dismissRoutine(item.routineId)),
-      }),
-      button('Accept as draft', {
-        variant: 'primary',
-        disabled: busy,
-        onClick: () => void call(acceptKey, twin => twin.acceptRoutine(item.routineId)),
-      }),
-    ),
-  );
-}
-
-function appChain(steps: readonly DraftStep[]): HTMLElement {
-  return h(
-    'div',
-    { class: 'ov-apps' },
-    ...routineApps(steps).flatMap((step, index) => [
-      index > 0 ? h('span', { class: 'ov-app-arrow', 'aria-hidden': 'true' }, '→') : undefined,
-      h(
-        'span',
-        { class: 'ov-app' },
-        h('span', { class: 'ov-app-mark', 'aria-hidden': 'true' }, step.app.charAt(0).toUpperCase()),
-        h('span', null, titleCase(step.app)),
-        step.alternatives > 0
-          ? h('span', { class: 'ov-app-more', title: `${plural(step.alternatives, 'other app')} seen here` }, `+${step.alternatives}`)
-          : undefined,
-      ),
-    ]),
-  );
-}
-
-function routinesPanel(views: readonly AutomationView[], suggestionCount: number): HTMLElement {
-  if (views.length === 0) return noAutomationsCard(suggestionCount);
+function routinesPanel(views: readonly AutomationView[]): HTMLElement {
+  if (views.length === 0) return noAutomationsCard();
   return h(
     'section',
     { class: 'ov-card', 'data-testid': 'overview-routines', 'aria-labelledby': 'routines-title' },
@@ -260,7 +174,7 @@ function routinesPanel(views: readonly AutomationView[], suggestionCount: number
   );
 }
 
-function noAutomationsCard(suggestionCount: number): HTMLElement {
+function noAutomationsCard(): HTMLElement {
   return h(
     'section',
     { class: 'ov-card ov-empty-card', 'data-testid': 'overview-routines', 'aria-labelledby': 'auto-title' },
@@ -273,7 +187,6 @@ function noAutomationsCard(suggestionCount: number): HTMLElement {
     h(
       'div',
       { class: 'ov-empty-actions' },
-      suggestionCount > 0 ? button('Review suggestions', { onClick: () => go('#/suggestions') }) : undefined,
       h('a', { class: 'ov-link', href: '#/automations' }, 'How levels work →'),
     ),
   );
@@ -364,7 +277,7 @@ function learningPanel(status: TwinStatus): HTMLElement {
       { class: 'ov-steps' },
       learningStep('01', 'Capture', captureDetail, status.capture.state === 'capturing'),
       learningStep('02', 'Repeat', 'Follow your normal app sequence', false),
-      learningStep('03', 'Review', 'You decide what becomes an automation', false),
+      learningStep('03', 'Decide', 'You decide what becomes an automation', false),
     ),
   );
 }
@@ -398,7 +311,7 @@ function usagePanel(usage: TwinStatus['usage']): HTMLElement {
           h(
             'p',
             { class: 'muted small ov-usage-note' },
-            'This repetition-based learning score is not model confidence or task accuracy. A pattern is offered for review once it repeats on at least three different days. 80% or more is marked Strong. Mail, chat and other external steps still ask; unattended runs must pass each routine\'s promotion gate.',
+            'This repetition-based learning score is not model confidence or task accuracy. A pattern is offered once it repeats on at least three different days. 80% or more is marked Strong. Mail, chat and other external steps still ask; unattended runs must pass each routine\'s promotion gate.',
           ),
         ),
   );
@@ -407,7 +320,7 @@ function usagePanel(usage: TwinStatus['usage']): HTMLElement {
 function appLearningRow(app: TwinStatus['usage'][number]): HTMLElement {
   const score = Math.round(app.learningScore * 100);
   const hasPattern = app.patternCount > 0;
-  const strongPattern = app.learningScore >= APP_PATTERN_REVIEW_THRESHOLD;
+  const strongPattern = app.learningScore >= APP_PATTERN_STRONG_THRESHOLD;
   const evidence = hasPattern
     ? `${plural(app.patternSupport, 'observation')} across ${plural(app.patternDays, 'day')} · ${plural(app.patternCount, 'pattern')}`
     : 'No repeated workflow pattern yet';

@@ -8,12 +8,12 @@ export const RHYTHM_DAYS: readonly string[] = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'
 /** The hours the rhythm grid shows, one column each. */
 export const RHYTHM_HOURS: readonly number[] = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
 
-/** The hero title. It counts the suggestions waiting for the person's review. Drafts are counted by the waiting card. */
-export function readyTitle(waiting: number): string {
-  if (waiting <= 0) return 'No new routines are ready for your review.';
-  if (waiting === 1) return 'One routine is ready for your review.';
-  const count = waiting < COUNT_WORDS.length ? COUNT_WORDS[waiting] : String(waiting);
-  return `${count} routines are ready for your review.`;
+/** The hero title. It counts the routines the twin has found and not yet accepted or dismissed. */
+export function foundTitle(found: number): string {
+  if (found <= 0) return 'No routines found yet.';
+  if (found === 1) return 'One routine found.';
+  const count = found < COUNT_WORDS.length ? COUNT_WORDS[found] : String(found);
+  return `${count} routines found.`;
 }
 
 /** The last sentence of the hero lede. It says when a run can start, and that is all it says. */

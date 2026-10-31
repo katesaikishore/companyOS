@@ -271,11 +271,6 @@
   white-space: nowrap;
 }
 
-.ov-stat-tag.is-review {
-  background: var(--warn-bg);
-  color: var(--warn-ink);
-}
-
 .ov-stat-value-row {
   display: flex;
   align-items: baseline;

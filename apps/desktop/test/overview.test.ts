@@ -2,30 +2,30 @@ import type { DraftStep } from '@companyos/twin-core';
 import { describe, expect, it } from 'vitest';
 import { DAY_MS, handoffStateLabel, noticedPerWeek, summarySourceLabel, titleCase, titleCaseSequence } from '../src/renderer/format';
 import {
+  foundTitle,
   heroLede,
   hoursBack,
   ladderCounts,
   lastSeenLabel,
   networkCallsThisWeek,
-  readyTitle,
   rhythmLevels,
   routineApps,
   routineEvidence,
 } from '../src/renderer/overview-model';
 
-describe('readyTitle', () => {
-  it('says no new routines are ready when there are no suggestions', () => {
-    expect(readyTitle(0)).toBe('No new routines are ready for your review.');
+describe('foundTitle', () => {
+  it('says no routines are found when there are none', () => {
+    expect(foundTitle(0)).toBe('No routines found yet.');
   });
 
   it('uses the singular for one routine', () => {
-    expect(readyTitle(1)).toBe('One routine is ready for your review.');
+    expect(foundTitle(1)).toBe('One routine found.');
   });
 
   it('spells out a small count and keeps the digits for a large one', () => {
-    expect(readyTitle(2)).toBe('Two routines are ready for your review.');
-    expect(readyTitle(3)).toBe('Three routines are ready for your review.');
-    expect(readyTitle(13)).toBe('13 routines are ready for your review.');
+    expect(foundTitle(2)).toBe('Two routines found.');
+    expect(foundTitle(3)).toBe('Three routines found.');
+    expect(foundTitle(13)).toBe('13 routines found.');
   });
 });
 
