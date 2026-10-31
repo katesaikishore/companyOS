@@ -11,6 +11,7 @@ import { chip, emptyState, pageHeader, panelHead, progressBar, type ChipTone } f
 import { plural, titleCase, titleCaseSequence } from '../format.js';
 import { levelLabel, levelTone } from '../labels.js';
 import { requestRender } from '../store.js';
+import { appTone } from '../tones.js';
 
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 /** The ring is drawn in a 120 unit box. Its arcs are lengths along a circle of this radius. */
@@ -230,7 +231,7 @@ function appRow(row: AppReadinessRow): HTMLElement {
     h(
       'span',
       { class: 'readiness-app' },
-      h('span', { class: 'readiness-mono', 'aria-hidden': 'true' }, monogram(row.app)),
+      h('span', { class: `readiness-mono tone-${appTone(row.app)}`, 'aria-hidden': 'true' }, monogram(row.app)),
       h(
         'span',
         { class: 'readiness-app-text' },
@@ -327,7 +328,7 @@ function detailPage(readiness: AppReadinessView, app: string): HTMLElement {
         'div',
         { class: 'readiness-detail-title' },
         backLink(),
-        h('span', { class: 'readiness-mono readiness-mono-lg', 'aria-hidden': 'true' }, monogram(row.app)),
+        h('span', { class: `readiness-mono readiness-mono-lg tone-${appTone(row.app)}`, 'aria-hidden': 'true' }, monogram(row.app)),
         h(
           'div',
           { class: 'page-head-text' },

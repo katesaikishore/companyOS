@@ -5,6 +5,7 @@ import { captureTitle } from '../labels.js';
 import { plural } from '../format.js';
 import { button, logo } from './ui.js';
 import { openCommandPalette } from '../commands.js';
+import type { Tone } from '../tones.js';
 
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 
@@ -64,6 +65,8 @@ interface NavItem {
   href: string;
   testid: string;
   icon: Shape[];
+  /** The section's colour: its icon tile, and the tint and marker when it is the current page. */
+  tone: Tone;
   count?: number;
   /** Shown instead of the count, for a figure such as a percentage. */
   badge?: string;
@@ -74,12 +77,13 @@ interface NavItem {
 
 export function shell(status: TwinStatus, route: Route, content: Child): HTMLElement {
   const items: NavItem[] = [
-    { label: 'Overview', href: '#/overview', testid: 'nav-overview', icon: OVERVIEW, active: route.name === 'overview' },
+    { label: 'Overview', href: '#/overview', testid: 'nav-overview', icon: OVERVIEW, tone: 'blue', active: route.name === 'overview' },
     {
       label: 'Suggestions',
       href: '#/suggestions',
       testid: 'nav-suggestions',
       icon: SUGGEST,
+      tone: 'orange',
       count: status.suggestions.length,
       pill: true,
       active: route.name === 'suggestions',
@@ -89,6 +93,7 @@ export function shell(status: TwinStatus, route: Route, content: Child): HTMLEle
       href: '#/automations',
       testid: 'nav-automations',
       icon: AUTOMATE,
+      tone: 'green',
       count: status.automations.length,
       active: route.name === 'automations' || route.name === 'automation',
     },
@@ -97,6 +102,7 @@ export function shell(status: TwinStatus, route: Route, content: Child): HTMLEle
       href: '#/readiness',
       testid: 'nav-readiness',
       icon: READINESS,
+      tone: 'purple',
       badge: `${status.readiness.automatablePct}%`,
       active: route.name === 'readiness',
     },
@@ -105,10 +111,11 @@ export function shell(status: TwinStatus, route: Route, content: Child): HTMLEle
       href: '#/ledger',
       testid: 'nav-ledger',
       icon: LEDGER,
+      tone: 'cyan',
       count: status.network.length,
       active: route.name === 'ledger',
     },
-    { label: 'Settings', href: '#/settings', testid: 'nav-settings', icon: SETTINGS, active: route.name === 'settings' },
+    { label: 'Settings', href: '#/settings', testid: 'nav-settings', icon: SETTINGS, tone: 'steel', active: route.name === 'settings' },
   ];
 
   return h(
@@ -165,12 +172,12 @@ function navLink(item: NavItem): HTMLElement {
   return h(
     'a',
     {
-      class: item.active ? 'nav-item is-active' : 'nav-item',
+      class: `nav-item tone-${item.tone}${item.active ? ' is-active' : ''}`,
       href: item.href,
       'aria-current': item.active ? 'page' : undefined,
       'data-testid': item.testid,
     },
-    outlineIcon(16, item.icon, 'nav-icon'),
+    h('span', { class: 'nav-tile' }, outlineIcon(14, item.icon, 'nav-icon')),
     h('span', { class: 'nav-label' }, item.label),
     item.badge !== undefined
       ? h('span', { class: 'nav-count mono' }, item.badge)
