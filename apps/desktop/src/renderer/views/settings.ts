@@ -208,7 +208,7 @@ function capturePanel(watchBrowsers: boolean, excluded: readonly string[], idleG
     block(
       textBlock(
         'Excluded apps',
-        'The twin forgets anything it recorded from an excluded app and never records it again. Handoff records saved by an earlier version may still name the app until you delete everything.',
+        'The twin forgets anything it recorded from an excluded app and never records it again. Handoff records saved by an earlier version may still name the app until they are removed after 90 days, or until you delete everything.',
       ),
       exclusionEditor('exclusions:settings', excluded, 'settings-exclusions', next =>
         void saveConfig('exclusions:settings', { excludedApps: next }),

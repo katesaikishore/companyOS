@@ -17,7 +17,7 @@ It never records window titles, page text, typed text, the clipboard, screenshot
 - One encrypted database (SQLCipher). Its 32-byte key is sealed by the operating system's keychain.
 - If the keychain cannot protect the key, the app does not start, rather than storing data unprotected.
 - Raw events are kept for 90 days, then removed. Routines and automations are kept until you remove them.
-- Handoff records saved by an earlier version of the app are no longer read or shown. They stay in the encrypted database until you delete everything.
+- Handoff records saved by an earlier version of the app are no longer read or shown. They are kept for 90 days from when they were sent, then removed. Delete everything removes them at once.
 
 ## What leaves the device
 
@@ -37,4 +37,4 @@ The ledger lists every model download and update check the device made, as it wa
 
 ## Excluded apps
 
-An excluded app is not recorded from then on, and its recent events are removed. Handoff records saved by an earlier version may still name the app until you delete everything.
+An excluded app is not recorded from then on, and its recent events are removed. Handoff records saved by an earlier version may still name the app until they are removed after 90 days, or until you delete everything.

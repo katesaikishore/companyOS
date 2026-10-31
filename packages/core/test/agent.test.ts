@@ -124,30 +124,47 @@ describe('persistence and retention', () => {
     expect(kept.every(event => event.ts >= at(9, 0))).toBe(true);
   });
 
-  it('keeps handoff rows from earlier versions: prune does not delete them, and the export carries them as stored', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'twin-handoff-kept-'));
+  it('prunes handoff records from earlier versions past 90 days, and keeps the newer one as stored in the export', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'twin-handoff-retention-'));
     const key = randomBytes(32);
-    const sentAt = at(0, 9);
-    // Sent well past the retention window, so only a prune that still touched handoffs would remove them.
-    const rows = Array.from({ length: 3 }, (_, index) => ({
-      id: `old-${index}`,
+    const now = at(0, 9);
+    const handoff = (id: string, sentAt: number) => ({
+      id,
       automationId: 'auto_0123456789ab',
       routineName: 'Invoice follow-up',
       target: 'Lead Bot',
       brief: 'Summarise the follow-ups',
       apps: ['Slack'],
-      sentAt: sentAt - (RETENTION_DAYS + 10) * DAY + index,
+      sentAt,
       state: 'completed',
       summary: 'Done.',
       localFailure: false,
-    }));
+    });
+    const old = handoff('old', now - (RETENTION_DAYS + 1) * DAY);
+    const recent = handoff('recent', now - 2 * DAY);
     const store = new EncryptedStore(dir, key);
-    for (const row of rows) store.append('handoffs', row);
+    store.append('handoffs', old);
+    store.append('handoffs', recent);
     store.close();
 
-    const later = openAgent(dir, key, sentAt + 5 * DAY);
+    const later = openAgent(dir, key, now);
+    expect(later.prune()).toBe(1);
+    expect((later.exportAll() as { handoffs: unknown[] }).handoffs).toEqual([recent]);
+    later.close();
+  });
+
+  it('keeps a handoff row with no readable send time, since prune cannot date it', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'twin-handoff-undated-'));
+    const key = randomBytes(32);
+    const now = at(0, 9);
+    const undated = { id: 'undated', summary: 'Done.' };
+    const store = new EncryptedStore(dir, key);
+    store.append('handoffs', undated);
+    store.close();
+
+    const later = openAgent(dir, key, now + (RETENTION_DAYS + 10) * DAY);
     expect(later.prune()).toBe(0);
-    expect((later.exportAll() as { handoffs: unknown[] }).handoffs).toEqual(rows);
+    expect((later.exportAll() as { handoffs: unknown[] }).handoffs).toEqual([undated]);
     later.close();
   });
 

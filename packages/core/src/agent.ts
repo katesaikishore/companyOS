@@ -30,7 +30,7 @@ import {
 
 const DAY_MS = 86_400_000;
 const ANALYSIS_DAYS = 30;
-/** Raw events older than this are pruned. The desktop status reports the same figure to the Overview. */
+/** Raw events and handoff records older than this are pruned. The desktop status reports the same figure to the Overview. */
 export const RETENTION_DAYS = 90;
 /** Names kept in memory for detected routines. The oldest are dropped first. */
 const MAX_ROUTINE_NAMES = 200;
@@ -72,6 +72,15 @@ function withoutRetiredKeys(saved: unknown): unknown {
   const kept: Record<string, unknown> = { ...(saved as Record<string, unknown>) };
   for (const key of RETIRED_CONFIG_KEYS) delete kept[key];
   return kept;
+}
+
+/**
+ * The send time of a stored handoff record from an earlier version, or undefined when the row has none readable. Such a
+ * row cannot be dated, so pruning keeps it as it is.
+ */
+function handoffSentAt(row: unknown): number | undefined {
+  const sentAt = typeof row === 'object' && row !== null ? (row as { sentAt?: unknown }).sentAt : undefined;
+  return typeof sentAt === 'number' && Number.isFinite(sentAt) ? sentAt : undefined;
 }
 
 /**
@@ -421,13 +430,13 @@ export class TwinAgent {
     return this.store.sizeBytes();
   }
 
-  /** Drops events older than the retention window. Returns how many were removed. */
+  /** Drops events and handoff records older than the retention window. Returns how many records were removed. */
   prune(): number {
     const cutoff = this.now() - RETENTION_DAYS * DAY_MS;
     const all = this.store.readAll<TwinEvent>('events');
     const kept = all.filter(event => event.ts >= cutoff);
     if (kept.length !== all.length) this.store.replaceAll('events', kept);
-    return all.length - kept.length;
+    return all.length - kept.length + this.pruneHandoffs(cutoff);
   }
 
   /**
@@ -472,6 +481,20 @@ export class TwinAgent {
 
   private readStates(): AutonomyState[] {
     return this.store.readAll<AutonomyState>('autonomy');
+  }
+
+  /**
+   * A handoff record is kept for the same window as an event, counted from the time it was sent. A row with no readable
+   * send time is kept as it is. Returns how many were removed.
+   */
+  private pruneHandoffs(cutoff: number): number {
+    const rows = this.store.readAll<unknown>('handoffs');
+    const kept = rows.filter(row => {
+      const sentAt = handoffSentAt(row);
+      return sentAt === undefined || sentAt >= cutoff;
+    });
+    if (kept.length !== rows.length) this.store.replaceAll('handoffs', kept);
+    return rows.length - kept.length;
   }
 
   private requireAutomation(automationId: string): Automation {

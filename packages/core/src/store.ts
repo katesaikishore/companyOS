@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 /**
  * 'handoffs' is no longer written, since the OpenMausBot integration was removed. Its rows from earlier versions are
- * kept, not deleted, and the data export carries them as stored. Nothing else reads them.
+ * pruned once they are past the retention window, and the data export carries the rest as stored. Nothing else reads them.
  */
 export const COLLECTIONS = ['events', 'ledger', 'automations', 'autonomy', 'settings', 'handoffs'] as const;
 export type Collection = (typeof COLLECTIONS)[number];
