@@ -12,7 +12,7 @@ name: release
 on:
   push:
     tags:
-      - 'v*.*.*'
+      - 'v*'
 
 permissions:
   contents: read
@@ -161,9 +161,11 @@ jobs:
       - name: Create the draft release
         shell: bash
         run: |
-          # Stop rather than change a release that already exists, whether it is a draft or published.
-          if gh release view "$TAG" > /dev/null 2>&1; then
-            echo "A release for $TAG already exists. Nothing was changed. Delete it on GitHub to run this again."
+          # Stop rather than change a release that already exists. gh release view only finds published releases, so
+          # this reads the full list, which also includes drafts.
+          releases="$(gh api --paginate "repos/$GH_REPO/releases" --jq '.[].tag_name')"
+          if grep -Fxq -- "$TAG" <<< "$releases"; then
+            echo "A release for $TAG already exists, as a draft or published. Nothing was changed. Delete it on GitHub to run this again."
             exit 1
           fi
           gh release create "$TAG" release-files/* \
