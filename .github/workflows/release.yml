@@ -1,7 +1,7 @@
 name: release
 
-# Builds the installers when a version tag such as v0.2.0 is pushed. Each platform signs only when its certificate
-# secret exists, and otherwise builds unsigned. Nothing here publishes a release: installers and the update files that
+# Builds the installers when a version tag such as v0.2.0 is pushed. macOS must be Developer ID signed and notarised,
+# so its job fails without the secrets. Windows builds unsigned when its certificate secret is missing. Nothing here publishes a release: installers and the update files that
 # electron-updater reads (latest*.yml and *.blockmap) are uploaded as workflow artifacts. Secrets are referenced by
 # name only and never stored in the repository (see electron-builder.yml).
 
@@ -80,15 +80,16 @@ jobs:
           } >> "$GITHUB_ENV"
           echo "Notarisation: enabled."
 
-      - name: Package macOS (signed only when CSC_LINK is set)
+      - name: Package macOS (release build, signed, notarised and checked)
         if: runner.os == 'macOS'
         shell: bash
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-        run: |
-          if [ -n "$CSC_LINK" ]; then echo "Signing: a certificate is set."; else echo "Signing: no certificate, building unsigned."; fi
-          npm run dist -w @companyos/desktop
+          # The build stops without the certificate and the App Store Connect key, rather than shipping a copy that
+          # Gatekeeper would flag. scripts/package.mjs runs the checks.
+          COMPANYOS_RELEASE: '1'
+        run: npm run dist -w @companyos/desktop
 
       - name: Package Windows (signed only when WIN_CSC_LINK is set)
         if: runner.os == 'Windows'

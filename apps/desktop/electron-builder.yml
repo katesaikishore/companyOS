@@ -27,6 +27,8 @@ npmRebuild: false
 #   Windows, signing:     WIN_CSC_LINK, WIN_CSC_KEY_PASSWORD (Azure Artifact Signing is not configured yet)
 # Local builds (npm run dist, npm run dist:dir) go through scripts/package.mjs, which keeps auto-discovery off, so a
 # keychain identity is used only when CSC_LINK, CSC_NAME or WIN_CSC_LINK is set.
+# A release build (COMPANYOS_RELEASE=1, set by the release workflow) also needs the macOS certificate and the App
+# Store Connect key, and it fails without them. See scripts/package.mjs.
 # Icons: build/icon.icns, build/icon.ico and build/icons/*.png come from scripts/make-icons.mjs.
 # Auto-update: the placeholder feed below does not resolve, and no feed exists yet. A packaged build checks the feed in
 # COMPANYOS_UPDATE_URL when that variable is set (src/main/updater.ts). It checks nothing otherwise.
@@ -43,12 +45,18 @@ mac:
   target:
     - dmg
     - zip
+  # distribution stops electron-builder from signing with a Mac Developer identity when no Developer ID is found.
+  type: distribution
   hardenedRuntime: true
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
     # macOS shows this text when the twin first asks to see the frontmost app through System Events.
     NSAppleEventsUsageDescription: companyOS Twin asks macOS which app is in front, so it can understand your routines on this device.
+dmg:
+  # Signed when a Developer ID identity is configured. electron-builder does not notarise the image, so
+  # scripts/package.mjs does that in a release build.
+  sign: true
 win:
   icon: build/icon.ico
   target:
