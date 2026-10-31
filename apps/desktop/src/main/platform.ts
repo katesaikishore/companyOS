@@ -1,6 +1,14 @@
 import { execFile } from 'node:child_process';
 import { readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
-import { openableFilePath, parseWebAddress, type Executor, type FileStat } from '@companyos/twin-core';
+import {
+  isShellApp,
+  macKeyStroke,
+  openableFilePath,
+  parseWebAddress,
+  windowsSendKeys,
+  type Executor,
+  type FileStat,
+} from '@companyos/twin-core';
 
 /**
  * Per-OS access to the frontmost application and to focusing one. This is the only place that
@@ -18,6 +26,11 @@ export interface Platform {
   openUrl?(app: string, url: string): Promise<boolean>;
   /** Opens one checked file in the named application. Absent where the adapter cannot do it. */
   openFile?(app: string, path: string): Promise<boolean>;
+  /**
+   * Presses a checked key chord in the named application. The adapter brings that app forward and sends the keys only
+   * once it is in front. It returns false if the app never comes forward. Absent where the adapter cannot do it.
+   */
+  pressShortcut?(app: string, shortcut: string): Promise<boolean>;
   /** Milliseconds between polls. Windows is slower because each PowerShell call is expensive. */
   readonly pollMs: number;
 }
@@ -42,12 +55,12 @@ function statFile(path: string): FileStat | undefined {
   }
 }
 
-function run(file: string, args: readonly string[], env?: NodeJS.ProcessEnv): Promise<string> {
+function run(file: string, args: readonly string[], env?: NodeJS.ProcessEnv, timeoutMs = 4000): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(
       file,
       [...args],
-      { timeout: 4000, windowsHide: true, env: env ?? process.env, maxBuffer: 64 * 1024 },
+      { timeout: timeoutMs, windowsHide: true, env: env ?? process.env, maxBuffer: 64 * 1024 },
       (error, stdout) => (error ? reject(error) : resolve(stdout.trim())),
     );
   });
@@ -62,6 +75,32 @@ function run() {
 const MAC_FOCUS = `
 function run(argv) {
   Application(argv[0]).activate();
+  return 'ok';
+}`;
+
+/**
+ * Brings the app forward, waits until System Events reports it frontmost, and only then sends the key. The request is
+ * one JSON argument built from the checked chord. Nothing from the step is ever placed in the script text.
+ */
+const MAC_PRESS = `
+function run(argv) {
+  const request = JSON.parse(argv[0]);
+  const wanted = request.app.toLowerCase();
+  Application(request.app).activate();
+  const events = Application('System Events');
+  let front = '';
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const found = events.processes.whose({ frontmost: true });
+    front = found.length ? found[0].name().toLowerCase() : '';
+    if (front === wanted) break;
+    delay(0.15);
+  }
+  if (front !== wanted) return 'not-front';
+  if (request.keyCode !== undefined) {
+    events.keyCode(request.keyCode, { using: request.using });
+  } else {
+    events.keystroke(request.character, { using: request.using });
+  }
   return 'ok';
 }`;
 
@@ -88,6 +127,17 @@ const macOS: Platform = {
     const file = openableFilePath(path, statFile);
     return file ? launch('open', ['-a', app, file]) : false;
   },
+  // Needs Accessibility permission for keystrokes through System Events. Not tested on macOS in the build sandbox.
+  async pressShortcut(app, shortcut) {
+    const stroke = macKeyStroke(shortcut);
+    if (!stroke || isShellApp(app)) return false;
+    try {
+      const request = JSON.stringify({ app, ...stroke });
+      return (await run('osascript', ['-l', 'JavaScript', '-e', MAC_PRESS, request])) === 'ok';
+    } catch {
+      return false;
+    }
+  },
 };
 
 const WIN_FRONTMOST = `
@@ -111,6 +161,34 @@ if ($shell.AppActivate($process.Id)) { 'ok' } else { exit 3 }
 const WIN_OPEN = `
 $ErrorActionPreference = 'Stop'
 Start-Process -FilePath $env:TWIN_APP -ArgumentList ('"' + $env:TWIN_TARGET + '"')
+'ok'
+`;
+
+/**
+ * Activates the app, waits until its window is the foreground window, and only then sends the keys. The keys come from
+ * the environment as a SendKeys string built from the checked chord. Exit codes: 2 not running, 3 not activated,
+ * 4 never in front.
+ */
+const WIN_PRESS = `
+$ErrorActionPreference = 'Stop'
+$process = Get-Process -Name $env:TWIN_APP -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+if (-not $process) { exit 2 }
+Add-Type -Namespace Twin -Name Keys -MemberDefinition @'
+[DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+[DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+'@
+Add-Type -AssemblyName System.Windows.Forms
+$shell = New-Object -ComObject WScript.Shell
+if (-not $shell.AppActivate($process.Id)) { exit 3 }
+$inFront = $false
+for ($attempt = 0; $attempt -lt 10; $attempt++) {
+  $foreground = [uint32]0
+  [void][Twin.Keys]::GetWindowThreadProcessId([Twin.Keys]::GetForegroundWindow(), [ref]$foreground)
+  if ($foreground -eq [uint32]$process.Id) { $inFront = $true; break }
+  Start-Sleep -Milliseconds 150
+}
+if (-not $inFront) { exit 4 }
+[System.Windows.Forms.SendKeys]::SendWait($env:TWIN_KEYS)
 'ok'
 `;
 
@@ -153,6 +231,18 @@ const windows: Platform = {
     const file = openableFilePath(path, statFile);
     return file ? openWindows(app, file) : false;
   },
+  // Not tested on Windows in the build sandbox. SendKeys cannot reach an elevated window from a normal process.
+  async pressShortcut(app, shortcut) {
+    const keys = windowsSendKeys(shortcut);
+    if (!keys || isShellApp(app)) return false;
+    const env = { ...process.env, TWIN_APP: app, TWIN_KEYS: keys };
+    try {
+      // Longer than the default: PowerShell starts slowly and compiles a small type before it sends any keys.
+      return (await run('powershell.exe', [...POWERSHELL, encode(WIN_PRESS)], env, 10_000)) === 'ok';
+    } catch {
+      return false;
+    }
+  },
 };
 
 function escapeRegex(text: string): string {
@@ -188,7 +278,8 @@ async function hasXdotool(): Promise<boolean> {
 
 /**
  * The runner's executor for one platform. An optional step is offered only where the adapter has it, so the runner
- * blocks the rest before anyone is asked. Pressing shortcuts has no adapter on any OS yet, so it is always blocked.
+ * blocks the rest before anyone is asked. Pressing a shortcut is offered on macOS and Windows. Linux has no adapter yet,
+ * so the runner blocks that step there before anyone is asked.
  */
 export function executorFor(platform: Platform): Executor {
   return {
@@ -196,6 +287,9 @@ export function executorFor(platform: Platform): Executor {
     frontmostApp: () => platform.frontmost(),
     ...(platform.openUrl ? { openUrl: (app: string, url: string) => platform.openUrl?.(app, url) ?? Promise.resolve(false) } : {}),
     ...(platform.openFile ? { openFile: (app: string, path: string) => platform.openFile?.(app, path) ?? Promise.resolve(false) } : {}),
+    ...(platform.pressShortcut
+      ? { pressShortcut: (app: string, shortcut: string) => platform.pressShortcut?.(app, shortcut) ?? Promise.resolve(false) }
+      : {}),
   };
 }
 

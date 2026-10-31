@@ -203,6 +203,12 @@ describe('StepSchema', () => {
     expect(() => StepSchema.parse({ op: 'press_shortcut', app: 'Microsoft Excel', shortcut: 'shift+cmd+k' })).toThrow();
   });
 
+  it('gives a key press no field for typed text, so no recorded keystrokes can be stored in a step', () => {
+    expect(StepSchema.safeParse({ op: 'press_shortcut', app: 'Microsoft Excel', shortcut: 'cmd+shift+k', text: 'secret' }).success).toBe(false);
+    expect(StepSchema.safeParse({ op: 'press_shortcut', app: 'Microsoft Excel', shortcut: 'cmd+shift+k', keys: ['s', 'e', 'c'] }).success).toBe(false);
+    expect(StepSchema.safeParse({ op: 'press_shortcut', app: 'Microsoft Excel', shortcut: 'return' }).success).toBe(false);
+  });
+
   it('refuses unknown operations and unknown fields', () => {
     expect(() => StepSchema.parse({ op: 'type_text', app: 'Slack', text: 'hi' })).toThrow();
     expect(() => StepSchema.parse({ op: 'open_url', app: 'Google Chrome', url: 'https://example.com/doc', query: 'x' })).toThrow();

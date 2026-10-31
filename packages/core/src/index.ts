@@ -5,6 +5,7 @@ export * from './store';
 export * from './segment';
 export * from './mine';
 export * from './automation';
+export * from './keys';
 export * from './policy';
 export * from './runner';
 export * from './autonomy';

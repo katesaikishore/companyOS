@@ -63,6 +63,27 @@ describe('press_shortcut', () => {
   it('refuses a chord that is not in canonical form', () => {
     expect(evaluateStep({ ...chord, shortcut: 'shift+cmd+k' }, ctx()).decision).toBe('deny');
   });
+
+  it('still asks at level 4 when supervised, since what a shortcut does is never known to be local', () => {
+    expect(evaluateStep(chord, ctx({ level: 4, maxLevel: 4 }))).toMatchObject({ decision: 'ask', effect: 'external_effect' });
+  });
+
+  it('refuses anything that is not a chord, so no typed text or single key can be sent', () => {
+    for (const shortcut of ['a', 'return', 'cmd+', 'cmd+k+k', 'cmd+hello']) {
+      expect(evaluateStep({ ...chord, shortcut } as Step, ctx())).toMatchObject({
+        decision: 'deny',
+        reason: 'Only a key chord with a modifier and one key can be pressed.',
+      });
+    }
+  });
+
+  it('draft level never presses a key, and an excluded app is refused before anything else', () => {
+    expect(evaluateStep(chord, ctx({ level: 2 })).decision).toBe('deny');
+    expect(evaluateStep({ ...chord, app: '1password' }, ctx())).toMatchObject({
+      decision: 'deny',
+      reason: 'This app is on your exclusion list, so the twin never touches it.',
+    });
+  });
 });
 
 describe('shell targets', () => {
