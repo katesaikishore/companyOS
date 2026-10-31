@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { isShellApp, isSystemProcess, normalizeAppName } from './classify';
 import type { Segment } from './segment';
 import type { WindowClass } from './types';
 
@@ -51,19 +52,71 @@ interface Group {
   occurrences: Step[][];
 }
 
+/** The name an unknown app keys under: its normalised name, with any '>' removed, because keys are joined with it. */
+function unknownName(app: string): string {
+  return normalizeAppName(app).replace(/>/g, '');
+}
+
 /**
- * Collapses consecutive focus events of the same window class. 'other' apps are not mined. Each step keeps the
+ * The key a step is grouped under. A catalogued app keys as its window class, so known routines keep their keys. An
+ * unknown app keys as its own name, so two unknown apps at one position never merge into one step.
+ */
+export function stepKey(windowClass: WindowClass, app: string): string {
+  return windowClass === 'other' ? `other:${unknownName(app)}` : windowClass;
+}
+
+/**
+ * The unknown apps that recur: used in at least minSupport stretches of work, on at least minDays days. An app seen once,
+ * or on one day, is noise. As a step it would also break the routine around it, so it is not mined.
+ */
+export function recurringUnknownApps(segments: readonly Segment[], options: MiningOptions): Set<string> {
+  const seen = new Map<string, { segments: Set<string>; days: Set<string> }>();
+  for (const segment of segments) {
+    const day = dayOf(segment.startTs);
+    for (const event of segment.events) {
+      if (!event.app || event.windowClass !== 'other' || unknownName(event.app) === '') continue;
+      const key = stepKey(event.windowClass, event.app);
+      const entry = seen.get(key) ?? { segments: new Set<string>(), days: new Set<string>() };
+      entry.segments.add(segment.id);
+      entry.days.add(day);
+      seen.set(key, entry);
+    }
+  }
+  return new Set(
+    [...seen]
+      .filter(([, entry]) => entry.segments.size >= options.minSupport && entry.days.size >= options.minDays)
+      .map(([key]) => key),
+  );
+}
+
+/**
+ * The key a focus event is mined under, or undefined when mining does not read it. A system process is never read. A
+ * catalogued app is read as before, terminals included. An unknown app is read only when it recurs, and never when it is
+ * a shell or a script host, which can run commands. Readiness uses this too, so the two read the same events.
+ */
+export function minedKeyOf(windowClass: WindowClass, app: string, recurring: ReadonlySet<string>): string | undefined {
+  if (isSystemProcess(app)) return undefined;
+  if (windowClass !== 'other') return windowClass;
+  if (isShellApp(app)) return undefined;
+  const key = stepKey(windowClass, app);
+  return recurring.has(key) ? key : undefined;
+}
+
+/**
+ * Collapses consecutive focus events of the same key. Apps that mining does not read are skipped. Each step keeps the
  * time it started and the time the next app took focus, so routine durations can be estimated.
  */
-function collapse(segment: Segment): Step[] {
+function collapse(segment: Segment, recurring: ReadonlySet<string>): Step[] {
   const steps: Step[] = [];
   const events = segment.events;
   for (let index = 0; index < events.length; index++) {
     const event = events[index];
-    if (!event.app || !event.windowClass || event.windowClass === 'other') continue;
+    if (!event.app || !event.windowClass) continue;
+    const key = minedKeyOf(event.windowClass, event.app, recurring);
+    if (key === undefined) continue;
     const endTs = events[index + 1]?.ts ?? segment.endTs;
     const last = steps[steps.length - 1];
-    if (last && last.windowClass === event.windowClass) {
+    if (last && stepKey(last.windowClass, last.app) === key) {
       last.endTs = endTs;
       continue;
     }
@@ -137,23 +190,25 @@ function toRoutine(key: string, group: Group, weeks: number): Routine {
 }
 
 /**
- * Finds contiguous sequences of window classes that recur across segments and days.
+ * Finds contiguous sequences of steps that recur across segments and days.
  * Routines are keyed by window class, so an app that changes at a position (Excel vs Calc)
- * becomes an option at that position rather than splitting the routine.
+ * becomes an option at that position rather than splitting the routine. An unknown app is keyed
+ * by its name instead, so it never becomes an option.
  * Only maximal routines are returned: a shorter routine that sits inside a longer one with
  * the same support is dropped.
  */
 export function mineRoutines(segments: readonly Segment[], options: MiningOptions = DEFAULT_MINING): Routine[] {
   const groups = new Map<string, Group>();
+  const recurring = recurringUnknownApps(segments, options);
 
   for (const segment of segments) {
-    const steps = collapse(segment);
+    const steps = collapse(segment, recurring);
     const day = dayOf(segment.startTs);
     const seenInSegment = new Set<string>();
     for (let length = options.minLength; length <= options.maxLength; length++) {
       for (let start = 0; start + length <= steps.length; start++) {
         const window = steps.slice(start, start + length);
-        const key = window.map(step => step.windowClass).join('>');
+        const key = window.map(step => stepKey(step.windowClass, step.app)).join('>');
         if (seenInSegment.has(key)) continue;
         seenInSegment.add(key);
 

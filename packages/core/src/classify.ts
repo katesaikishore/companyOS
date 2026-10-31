@@ -68,6 +68,53 @@ const CATALOG: Readonly<Record<string, WindowClass>> = {
   sketch: 'design',
 };
 
+/**
+ * Processes of the desktop itself: the shell, the launcher and search, the lock and login screens, the window manager
+ * and the authentication prompts. They take focus all the time, so a routine built from them is noise. Matched by
+ * normalised name, as the catalogue is. Shells and terminals are not listed here: isShellApp covers them.
+ */
+const SYSTEM_PROCESSES: ReadonlySet<string> = new Set([
+  // macOS
+  'finder',
+  'dock',
+  'loginwindow',
+  'securityagent',
+  'systemuiserver',
+  'spotlight',
+  'control center',
+  'controlcenter',
+  'notification center',
+  'notificationcenter',
+  'window server',
+  'windowserver',
+  // Windows
+  'explorer',
+  'shellexperiencehost',
+  'startmenuexperiencehost',
+  'searchhost',
+  'searchapp',
+  'lockapp',
+  'textinputhost',
+  'credentialuibroker',
+  // Linux desktops, and the file managers that play the same part as Finder and Explorer
+  'gnome-shell',
+  'plasmashell',
+  'kwin',
+  'kwin_x11',
+  'kwin_wayland',
+  'mutter',
+  'xfwm4',
+  'xfce4-panel',
+  'gnome-screensaver',
+  'xscreensaver',
+  'polkit-gnome-authentication-agent-1',
+  'polkit-kde-authentication-agent-1',
+  'nautilus',
+  'dolphin',
+  'nemo',
+  'thunar',
+]);
+
 export function normalizeAppName(name: string): string {
   return name.trim().toLowerCase().replace(/\.(app|exe)$/, '').replace(/\s+/g, ' ');
 }
@@ -125,6 +172,15 @@ export function isShellApp(name: string): boolean {
   // A second cut catches a space left in front of the extension, as in "wscript .exe.".
   const normalized = normalizeAppName(windowsName).replace(TRAILING_DOTS_AND_SPACES, '');
   return classifyApp(windowsName) === 'terminal' || SHELL_APPS.includes(normalized) || /^python[\d.]*$/.test(normalized);
+}
+
+/**
+ * True for a process of the desktop itself, by name. The name is cut the way Windows cuts it, as isShellApp does, so
+ * "explorer.exe." counts as explorer.
+ */
+export function isSystemProcess(name: string): boolean {
+  const windowsName = name.replace(TRAILING_DOTS_AND_SPACES, '');
+  return SYSTEM_PROCESSES.has(normalizeAppName(windowsName).replace(TRAILING_DOTS_AND_SPACES, ''));
 }
 
 /**
