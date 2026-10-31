@@ -30,6 +30,7 @@ import {
 } from '@companyos/twin-core';
 import { APP_ORIGIN, IPC } from '../shared/ipc';
 import { SecureStorageUnavailableError } from './keys';
+import { readLayaFixture } from './laya';
 import { nativeHostScript } from './native-host-install';
 import { TwinRuntime } from './runtime';
 import { startAutoUpdates } from './updater';
@@ -93,6 +94,9 @@ function registerIpc(): void {
   handle(IPC.installModel, id => requireRuntime().installModel(modelId(id)));
   handle(IPC.cancelDownload, id => requireRuntime().cancelDownload(modelId(id)));
   handle(IPC.removeModel, id => requireRuntime().removeModel(modelId(id)));
+  handle(IPC.installLaya, () => requireRuntime().installLaya());
+  handle(IPC.cancelLaya, () => requireRuntime().cancelLaya());
+  handle(IPC.removeLaya, () => requireRuntime().removeLaya());
   handle(IPC.completeSetup, () => requireRuntime().completeSetup());
 
   handle(IPC.setPaused, value => {
@@ -160,7 +164,7 @@ function registerIpc(): void {
       defaultId: 1,
       cancelId: 1,
       message: 'Delete everything the twin knows about you?',
-      detail: 'This removes all events, automations, the network ledger, any handoff records saved by an earlier version, and the installed models on this device. It cannot be undone.',
+      detail: 'This removes all events, automations, the network ledger, any handoff records saved by an earlier version, and the installed models on this device, including the optional decision model and any partial download of it. It cannot be undone.',
     };
     const parent = parentWindow();
     const choice = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
@@ -377,6 +381,8 @@ async function boot(): Promise<void> {
     runtime = await TwinRuntime.create({
       userData,
       browserHostScript: nativeHostScript({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, mainDir: __dirname }),
+      // Test-only, and ignored in a packaged build: a local server stands in for Hugging Face in the end-to-end test.
+      laya: !app.isPackaged && process.env.COMPANYOS_TEST_LAYA_FIXTURE ? readLayaFixture(process.env.COMPANYOS_TEST_LAYA_FIXTURE) : undefined,
       approve: approveStep,
       // The test platform has no real input device, so idle time is pinned to zero for it.
       idleSeconds: () => (process.env.COMPANYOS_TEST_FAKE_PLATFORM ? 0 : powerMonitor.getSystemIdleTime()),

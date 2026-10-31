@@ -17,6 +17,15 @@ export function formatBytes(bytes: number): string {
   return `${rounded} ${UNITS[unit]}`;
 }
 
+/** Decimal units (1 GB is 10^9 bytes), as the Hugging Face page and the disk-space check count. Used for the decision model. */
+export function formatDecimalBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return '—';
+  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
+  if (bytes >= 1e6) return `${Math.round(bytes / 1e6)} MB`;
+  if (bytes >= 1e3) return `${Math.round(bytes / 1e3)} KB`;
+  return `${Math.round(bytes)} B`;
+}
+
 /** Minutes shown as hours with one decimal place. */
 export function formatHours(minutes: number): string {
   return `${(minutes / 60).toFixed(1)} h`;

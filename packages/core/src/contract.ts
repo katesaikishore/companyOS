@@ -1,7 +1,7 @@
 import type { AutomationView } from './agent';
 import type { GateRequirement } from './autonomy';
 import type { EffectClass, TwinConfig, AutonomyLevel } from './types';
-import type { DownloadState, HardwareProfile, InstalledModel, NetworkEntry, SetupPlan } from './models/types';
+import type { DownloadState, HardwareProfile, InstalledModel, LayaBundleView, NetworkEntry, SetupPlan } from './models/types';
 import type { RunResult } from './runner';
 
 /**
@@ -151,6 +151,8 @@ export interface TwinStatus {
   retentionDays: number;
   stats: StatsView;
   downloads: DownloadState[];
+  /** The optional decision-model bundle. Nothing in the app uses it yet. */
+  laya: LayaBundleView;
   /** Offers waiting for an answer. Expired offers are removed. */
   pendingRuns: PendingRunView[];
   /** How much of each app's repeated work could run on its own, over the last seven days. */
@@ -165,6 +167,12 @@ export interface TwinBridge {
   installModel(modelId: string): Promise<void>;
   cancelDownload(modelId: string): Promise<void>;
   removeModel(modelId: string): Promise<void>;
+  /** Starts or resumes the optional decision-model download. Progress arrives through status().laya. */
+  installLaya(): Promise<void>;
+  /** Stops the download. What was already downloaded stays, so installLaya() continues from there. */
+  cancelLaya(): Promise<void>;
+  /** Deletes the bundle and any partial download. */
+  removeLaya(): Promise<void>;
   completeSetup(): Promise<void>;
 
   setPaused(paused: boolean): Promise<void>;
@@ -190,4 +198,4 @@ export interface TwinBridge {
   onNavigate(listener: (route: string) => void): () => void;
 }
 
-export type { InstalledModel, DownloadState, HardwareProfile, SetupPlan, NetworkEntry };
+export type { InstalledModel, DownloadState, HardwareProfile, SetupPlan, NetworkEntry, LayaBundleView };

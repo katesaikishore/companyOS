@@ -116,7 +116,7 @@ export function saveConfig(key: string, patch: Partial<TwinConfig>): Promise<voi
 }
 
 export function confirmDeleteAll(): void {
-  if (!window.confirm('Delete everything the twin knows about you? This removes all events, automations, any handoff records saved by an earlier version, and installed models on this device. It cannot be undone.')) {
+  if (!window.confirm('Delete everything the twin knows about you? This removes all events, automations, any handoff records saved by an earlier version, and installed models on this device, including the optional decision model. It cannot be undone.')) {
     return;
   }
   void call('delete', twin => twin.deleteAll());

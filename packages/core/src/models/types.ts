@@ -74,9 +74,39 @@ export interface NetworkEntry {
   modelId?: string;
   host: string;
   path: string;
-  /** Bytes received. An update check records zero, since electron-updater does not report the channel file's size. */
+  /** The file name within a multi-file download, such as `laya.onnx.data`. Single-file model downloads leave it out. */
+  file?: string;
+  /**
+   * Bytes received by this call. An update check records zero, since electron-updater does not report the channel file's
+   * size. A resumed download records only the bytes it fetched, not the part already on disk.
+   */
   bytes: number;
   /** Model downloads only. An update check has no checksum to verify. */
   sha256Verified?: boolean;
   outcome: 'ok' | 'failed' | 'cancelled';
+}
+
+export type LayaBundleStatus = 'not_installed' | 'downloading' | 'verifying' | 'installed' | 'failed' | 'cancelled';
+
+/**
+ * The optional decision-model bundle (Laya), as the page sees it. It is several files, so it is not one catalog model.
+ * `receivedBytes` counts every file of the bundle, including a partial file kept from an earlier attempt.
+ */
+export interface LayaBundleView {
+  status: LayaBundleStatus;
+  /** The file being downloaded or verified. */
+  file?: string;
+  receivedBytes: number;
+  totalBytes: number;
+  /** Free space needed before a download may start, in bytes. */
+  requiredFreeBytes: number;
+  /** The pinned Hugging Face repository and commit. */
+  repo: string;
+  revision: string;
+  /** Why the last attempt failed, in words that are safe to show. A partial file is kept after most failures, so Resume continues it. */
+  message?: string;
+  /** True when a partial file from an earlier attempt is on disk. */
+  hasPartial: boolean;
+  /** False where onnxruntime-node has no prebuilt binding, such as Intel Macs. The bundle is not offered there. */
+  supported: boolean;
 }

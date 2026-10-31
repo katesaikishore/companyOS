@@ -22,6 +22,9 @@ extraResources:
 asar: true
 # The encrypted store's native module (better-sqlite3-multiple-ciphers) ships Node-API prebuilds for every platform,
 # so it runs unchanged in Electron. A rebuild would compile the bundled SQLite from source for no benefit.
+# The same holds for onnxruntime-node 1.31.1: it ships Node-API (napi-v6) bindings for darwin/arm64, linux/x64,
+# linux/arm64, win32/x64 and win32/arm64, so no Electron rebuild is needed. It ships none for Intel Macs, and the app
+# does not offer the decision model there (src/main/laya.ts).
 npmRebuild: false
 # Code signing is off unless a certificate is configured in the environment. No secret or password lives in this file.
 # Set these in CI (or locally) to sign and notarise:
@@ -43,7 +46,15 @@ asarUnpack:
   # node-llama-cpp loads its native addon and llama.cpp libraries from disk, which asar cannot serve.
   # On Electron it maps the .asar path to .asar.unpacked itself, so these files must be unpacked.
   - "**/node_modules/@node-llama-cpp/**"
+  # onnxruntime-node (the Laya decision model's runtime) loads onnxruntime_binding.node, and that file links the runtime
+  # library that sits beside it (libonnxruntime.so.1, libonnxruntime.1.dylib, onnxruntime.dll). Both must be real files on
+  # disk, so the whole bin folder is unpacked. The package's JavaScript stays inside the archive.
+  - "**/node_modules/onnxruntime-node/bin/**"
 mac:
+  # onnxruntime-node holds the bindings of every platform in one package. Each build keeps only its own.
+  files:
+    - "!**/node_modules/onnxruntime-node/bin/napi-v6/{linux,win32}/**"
+    - "!**/node_modules/onnxruntime-node/bin/napi-v6/darwin/!(${arch})/**"
   category: public.app-category.productivity
   icon: build/icon.icns
   target:
@@ -62,11 +73,20 @@ dmg:
   # scripts/package.mjs does that in a release build.
   sign: true
 win:
+  files:
+    - "!**/node_modules/onnxruntime-node/bin/napi-v6/{darwin,linux}/**"
+    - "!**/node_modules/onnxruntime-node/bin/napi-v6/win32/!(${arch})/**"
   icon: build/icon.ico
   target:
     - nsis
   signAndEditExecutable: true
 linux:
+  files:
+    - "!**/node_modules/onnxruntime-node/bin/napi-v6/{darwin,win32}/**"
+    - "!**/node_modules/onnxruntime-node/bin/napi-v6/linux/!(${arch})/**"
+    # npm install fetches these two GPU providers (about 285 MB) for linux/x64. The decision model runs on the CPU, so they stay out.
+    - "!**/node_modules/onnxruntime-node/bin/napi-v6/linux/*/libonnxruntime_providers_cuda.so"
+    - "!**/node_modules/onnxruntime-node/bin/napi-v6/linux/*/libonnxruntime_providers_tensorrt.so"
   icon: build/icons
   category: Utility
   maintainer: companyOS <packages@companyos.invalid>

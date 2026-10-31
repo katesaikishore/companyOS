@@ -33,6 +33,7 @@ import { BROWSER_APP_NAMES, startBrowserBridge, type BrowserBridge, type Browser
 import { CaptureService } from './capture';
 import { destroyStoredSecrets, loadOrCreateDataKey } from './keys';
 import { detectHardware } from './hardware';
+import { LayaBundleManager, type LayaTestOptions } from './laya';
 import { ModelManager, createRoutineNamer } from './models';
 import { browserCapturePaths, installNativeHost, isBrowserCaptureSupported, removeNativeHost } from './native-host-install';
 import { handsExecutor } from './agent-desktop';
@@ -55,6 +56,8 @@ export interface RuntimeOptions {
   /** The native messaging host script shipped with the app. Browser capture cannot start without it. */
   browserHostScript?: string;
   fetchImpl?: typeof fetch;
+  /** Test-only. Points the decision-model download at a local server. The main process never sets it in a packaged build. */
+  laya?: LayaTestOptions;
 }
 
 const NO_CONTROL: Executor = {
@@ -75,6 +78,8 @@ export class TwinRuntime {
   private readonly capture: CaptureService;
   private readonly platform: Platform | undefined;
   private readonly models: ModelManager;
+  /** The optional decision-model bundle. Nothing in the app asks it for a decision. */
+  private readonly laya: LayaBundleManager;
   /** Listens for visits from the browser extension. Exists only while browser capture is on. */
   private browserBridge: BrowserBridge | undefined;
   private browserChanges: Promise<void> = Promise.resolve();
@@ -112,6 +117,14 @@ export class TwinRuntime {
       onChange: options.onChange,
       fetchImpl: options.fetchImpl,
     });
+    // Inside the models folder, so wiping that folder removes the bundle with it.
+    this.laya = new LayaBundleManager({
+      rootDir: join(options.userData, 'models', 'laya'),
+      record: entry => this.agent.recordNetworkCall(entry),
+      onChange: options.onChange,
+      fetchImpl: options.fetchImpl,
+      ...options.laya,
+    });
     this.namer = createRoutineNamer({
       agent: this.agent,
       models: this.models,
@@ -131,6 +144,7 @@ export class TwinRuntime {
   async start(): Promise<void> {
     this.agent.prune();
     await this.models.reconcile();
+    await this.laya.reconcile();
     this.capture.start();
     // A bridge that cannot start leaves the setting on with no browser URLs. The app still starts, and the capture card says why.
     if (this.agent.configuration.watchBrowsers) {
@@ -178,6 +192,18 @@ export class TwinRuntime {
     return this.models.remove(modelId);
   }
 
+  installLaya(): void {
+    this.laya.install();
+  }
+
+  cancelLaya(): void {
+    this.laya.cancel();
+  }
+
+  removeLaya(): Promise<void> {
+    return this.laya.remove();
+  }
+
   completeSetup(): void {
     this.agent.completeSetup();
   }
@@ -223,6 +249,7 @@ export class TwinRuntime {
         observedDays: observed.observedDays,
       },
       downloads: this.models.states(),
+      laya: this.laya.view(),
       pendingRuns: this.livePending(),
     };
   }
@@ -417,12 +444,13 @@ export class TwinRuntime {
   }
 
   /**
-   * Destroys the stored data, the key and the installed models. Downloads are cancelled before the models folder goes,
-   * so none can write back into it. Nothing can be recovered afterwards.
+   * Destroys the stored data, the key and the installed models, including the decision-model bundle. Downloads are
+   * cancelled before the models folder goes, so none can write back into it. Nothing can be recovered afterwards.
    */
   async deleteAll(): Promise<void> {
     this.stop();
     this.disableBrowserCapture();
+    await this.laya.wipe();
     await this.models.wipe();
     this.agent.wipe();
     destroyStoredSecrets(this.options.userData);
