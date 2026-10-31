@@ -178,7 +178,7 @@ function registerIpc(): void {
       defaultId: 1,
       cancelId: 1,
       message: 'The export is not encrypted',
-      detail: 'It includes every recorded app switch with timestamps, URL shapes, your settings, your OpenMausBot handoffs (briefs, replies, job trees, thread ids), and any configured OpenMausBot executable and target. Keep it somewhere private, and do not put it in a synced folder.',
+      detail: 'It includes every recorded app switch with timestamps, URL shapes, your settings, your OpenMausBot handoffs (briefs, replies, job trees, thread ids), and any configured OpenMausBot executable and target, and any agent-desktop program path. Keep it somewhere private, and do not put it in a synced folder.',
     };
     const parent = parentWindow();
     const warned = parent ? await dialog.showMessageBox(parent, warning) : await dialog.showMessageBox(warning);

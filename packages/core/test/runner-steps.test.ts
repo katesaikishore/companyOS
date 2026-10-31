@@ -204,6 +204,50 @@ describe('open_file', () => {
   });
 });
 
+describe('an executor that blocks its own focus and key steps', () => {
+  const blockedFor = (reason: string | undefined): Executor => ({
+    focusApp: async () => true,
+    frontmostApp: async () => 'microsoft excel',
+    pressShortcut: async () => true,
+    blockedReason: () => reason,
+  });
+
+  it('blocks a key press with its own reason, before anyone is asked', async () => {
+    const approve = vi.fn(async () => true);
+    const result = await runAutomation(
+      automation([CHORD]),
+      { mode: 'supervised', policy: ctx(), approve, settleMs: 0 },
+      blockedFor('The agent-desktop program is not set.'),
+    );
+    expect(result.status).toBe('blocked');
+    expect(result.steps[0].reason).toBe('The agent-desktop program is not set.');
+    expect(approve).not.toHaveBeenCalled();
+  });
+
+  it('blocks a focus step with its own reason, and runs nothing', async () => {
+    const focusApp = vi.fn(async () => true);
+    const result = await runAutomation(
+      automation([{ op: 'focus_app', app: 'microsoft excel' }]),
+      { mode: 'supervised', policy: ctx(), settleMs: 0 },
+      { focusApp, frontmostApp: async () => undefined, blockedReason: () => 'The agent-desktop program is not set.' },
+    );
+    expect(result.status).toBe('blocked');
+    expect(result.steps[0].reason).toBe('The agent-desktop program is not set.');
+    expect(focusApp).not.toHaveBeenCalled();
+  });
+
+  it('runs the steps as usual when the executor reports no block', async () => {
+    const approve = vi.fn(async () => true);
+    const result = await runAutomation(
+      automation([CHORD]),
+      { mode: 'supervised', policy: ctx(), approve, settleMs: 0 },
+      blockedFor(undefined),
+    );
+    expect(result.status).toBe('completed');
+    expect(approve).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('press_shortcut', () => {
   it('is blocked on a system with no key adapter, before anyone is asked', async () => {
     const executor: Executor = { focusApp: async () => true, frontmostApp: async () => 'microsoft excel' };

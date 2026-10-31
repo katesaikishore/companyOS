@@ -36,9 +36,21 @@ If a check fails or a run is undone, the automation drops back to level 3 at onc
 | Check focus | Everywhere app capture works |
 | Open a link | macOS and Windows only |
 | Open a file | macOS and Windows only, and it asks each time |
-| Press a shortcut | Not available on any system yet, so it is always blocked |
+| Press a shortcut | macOS and Windows, whose adapters are not yet tested on a real machine. Blocked on Linux, unless an agent-desktop program is set. |
 
 Typing, clicking and sending are not built.
+
+## Optional agent-desktop program
+
+Focusing an app and pressing a shortcut can run through an external agent-desktop program instead of the built-in adapters. The program is not bundled with companyOS, and the option is off by default. Set the absolute path of an installed program under Automations in Settings to turn it on. With the path left empty, those two steps use the built-in adapters above.
+
+When a path is set:
+
+- Focus and press steps start the program with a fixed argument list and never through a shell: `focus --app <name>`, or `press --app <name> --shortcut <chord>`. A step succeeds only when the program exits with status 0.
+- An application name or key chord must match a strict pattern before the program starts. Anything else is refused, and nothing runs.
+- A path that is not an existing file blocks both steps, and the run says why.
+- Each call is stopped after 10 seconds, and its output is capped. The log keeps only the step name, the exit status and the duration.
+- A press still asks you first, as it does without the program. Opening a link or a file is not affected.
 
 ## Stop
 

@@ -21,6 +21,12 @@ export interface Executor {
    * takes focus, so a check made before approval would be wrong by the time the keys are sent.
    */
   pressShortcut?(app: string, shortcut: string): Promise<boolean>;
+  /**
+   * Why this executor cannot carry out a focus or key step right now, or undefined when it can. The runner asks only for
+   * those two steps, before anyone is asked, and a reason blocks the step. The desktop app uses it when its optional
+   * agent-desktop program is set but unusable.
+   */
+  blockedReason?(op: 'focus_app' | 'press_shortcut'): string | undefined;
 }
 
 export type RunMode = 'dry_run' | 'supervised' | 'unattended';
@@ -76,6 +82,10 @@ function sameApp(observed: string | undefined, expected: string): boolean {
 
 /** Why this system cannot carry out a step at all, or undefined when it can. */
 function unsupportedReason(step: Step, executor: Executor): string | undefined {
+  if (step.op === 'focus_app' || step.op === 'press_shortcut') {
+    const blocked = executor.blockedReason?.(step.op);
+    if (blocked) return blocked;
+  }
   if (step.op === 'open_url' && !executor.openUrl) return 'This system cannot open web addresses yet.';
   if (step.op === 'open_file' && !executor.openFile) return 'This system cannot open files yet.';
   if (step.op === 'press_shortcut' && !executor.pressShortcut) return 'This system cannot press shortcuts yet.';

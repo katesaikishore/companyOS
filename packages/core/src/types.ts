@@ -92,6 +92,8 @@ export const TwinConfigSchema = z
     openMausBotCommand: z.string().trim().min(1).max(512).default('openmausbot'),
     /** Existing OpenMausBot lead bot or room; blank disables delegation. */
     openMausBotTarget: z.string().trim().max(120).default(''),
+    /** Optional agent-desktop program for the focus and key steps. Blank keeps the built-in adapters. The app does not bundle it. */
+    agentDesktopPath: z.string().trim().max(512).default(''),
   })
   .strict();
 export type TwinConfig = z.infer<typeof TwinConfigSchema>;
@@ -122,4 +124,5 @@ export const DEFAULT_CONFIG: TwinConfig = {
   dismissedRoutineIds: [],
   openMausBotCommand: 'openmausbot',
   openMausBotTarget: '',
+  agentDesktopPath: '',
 };
