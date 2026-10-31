@@ -246,7 +246,15 @@ async function main() {
     await page.waitForSelector('[data-testid="run-result"]', { timeout: 15_000 });
     assert.match(await page.textContent('[data-testid="run-result"]'), /dry_run/);
     assert.equal(await page.isDisabled('[data-testid="automation-run"]'), true, 'run is disabled at draft');
+    const windowHeight = await page.evaluate(() => window.innerHeight);
+    for (const selector of ['.auto-ladder-wrap', '.auto-tabs', '[data-testid="run-panel"]']) {
+      const bottom = await page.$eval(selector, element => element.getBoundingClientRect().bottom);
+      assert.ok(bottom <= windowHeight, `${selector} sits above the fold: bottom ${bottom}px of ${windowHeight}px`);
+    }
     await shot(page, '07-automation-detail-light');
+    await page.getByRole('tab', { name: 'Autonomy', exact: true }).click();
+    await page.waitForSelector('[data-testid="automation-autonomy"]');
+    await shot(page, 'automation-autonomy-900');
 
     // 9. The network ledger shows the verified model download, with no personal data in the request.
     await page.click('[data-testid="nav-ledger"]');

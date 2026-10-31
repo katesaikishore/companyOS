@@ -273,11 +273,17 @@
   font-size: 13px;
 }
 
+/* The empty state fills the page column below the header, as the readiness list does. */
+.sg-fill {
+  height: calc(100vh - 42px);
+}
+
 .sg-empty {
+  flex: 1;
+  min-height: 0;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-height: 240px;
   padding: 32px;
   text-align: center;
 }

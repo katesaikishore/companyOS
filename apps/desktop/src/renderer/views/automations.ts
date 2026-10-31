@@ -3,7 +3,7 @@ import { h, type Child } from '../dom.js';
 import { button, emptyState, levelMeter, pageHeader, panel } from '../components/ui.js';
 import { formatRate, formatWhen, handoffStateLabel, noticedPerWeek, plural, summarySourceLabel, titleCase } from '../format.js';
 import { LEVEL_NAMES, levelLabel, paramFor, runOutcomeLabel, stepDetail, stepTitle } from '../labels.js';
-import { call, go, pending, requestRender, setNotice, state } from '../store.js';
+import { call, go, pending, requestRender, setNotice, state, type StoredRun } from '../store.js';
 
 type AutomationTab = 'workflow' | 'autonomy' | 'delegate';
 
@@ -28,9 +28,6 @@ const FLOOR_ROWS: readonly { effect: EffectClass; label: string }[] = [
 const RUN_HINT_ID = 'automation-run-hint';
 
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
-
-/** The tab the detail shows. It lives here, not in the store, so a refresh of the status keeps the tab the person chose. */
-let activeTab: AutomationTab = 'workflow';
 
 export function automationsView(status: TwinStatus): HTMLElement {
   if (status.automations.length === 0) {
@@ -132,7 +129,7 @@ function routineDetail(status: TwinStatus, view: AutomationView): HTMLElement {
     disabled: !canRun || pending(runKey),
     onClick: () =>
       void call(runKey, async twin => {
-        state.runResults.set(automation.id, await twin.supervisedRun(automation.id));
+        keepResult(automation.id, await twin.supervisedRun(automation.id));
       }),
   });
   if (!canRun) runButton.setAttribute('aria-describedby', RUN_HINT_ID);
@@ -162,7 +159,7 @@ function routineDetail(status: TwinStatus, view: AutomationView): HTMLElement {
           disabled: pending(dryKey),
           onClick: () =>
             void call(dryKey, async twin => {
-              state.runResults.set(automation.id, await twin.dryRun(automation.id));
+              keepResult(automation.id, await twin.dryRun(automation.id));
             }),
         }),
         runButton,
@@ -171,9 +168,14 @@ function routineDetail(status: TwinStatus, view: AutomationView): HTMLElement {
     ),
     ladderSection(view),
     tabStrip(),
+    result ? resultStrip(result) : undefined,
     tabBody(status, view),
-    result ? resultPanel(result) : undefined,
   );
+}
+
+/** Keeps a run's result with the time it arrived. The strip shows that time, so a repeat run redraws it. */
+function keepResult(automationId: string, result: RunResult): void {
+  state.runResults.set(automationId, { ...result, at: Date.now() });
 }
 
 function tabStrip(): HTMLElement {
@@ -187,9 +189,9 @@ function tabStrip(): HTMLElement {
           type: 'button',
           role: 'tab',
           class: 'auto-tab',
-          'aria-selected': String(tab.id === activeTab),
+          'aria-selected': String(tab.id === state.automationTab),
           onclick: () => {
-            activeTab = tab.id;
+            state.automationTab = tab.id;
             requestRender();
           },
         },
@@ -200,7 +202,7 @@ function tabStrip(): HTMLElement {
 }
 
 function tabBody(status: TwinStatus, view: AutomationView): HTMLElement {
-  switch (activeTab) {
+  switch (state.automationTab) {
     case 'workflow':
       return h('div', { class: 'auto-two' }, workflowPanel(view), runsPanel(view));
     case 'autonomy':
@@ -316,13 +318,23 @@ function agentTaskResultPanel(handoff: HandoffView): HTMLElement {
   );
 }
 
-function resultPanel(result: RunResult): HTMLElement {
-  return panel(
-    { testid: 'run-panel', extra: 'run-panel' },
-    h('span', { class: 'eyebrow' }, 'Last result'),
+/**
+ * The last result as a strip under the tabs, so it shows at every tab and inside the window. The label and the time share
+ * one line; the full text sits in a box with a max height and its own scroll.
+ */
+function resultStrip(result: StoredRun): HTMLElement {
+  return h(
+    'section',
+    { class: 'auto-result run-panel', 'data-testid': 'run-panel' },
     h(
       'div',
-      { class: 'run-result', 'data-testid': 'run-result' },
+      { class: 'auto-result-line' },
+      h('span', { class: 'eyebrow' }, 'Last result'),
+      h('span', { class: 'mono muted' }, formatWhen(result.at)),
+    ),
+    h(
+      'div',
+      { class: 'run-result auto-result-text', 'data-testid': 'run-result' },
       h(
         'div',
         { class: 'run-result-head mono' },

@@ -91,7 +91,7 @@ function signature(status: TwinStatus | undefined): string {
     pending: [...state.pending].sort(),
     wizard: [state.wizardForced, state.wizardStep, state.altOpen],
     setup: state.setup,
-    selection: [state.selectedSuggestion, state.selectedLedger, state.selectedHandoff],
+    selection: [state.selectedSuggestion, state.selectedLedger, state.selectedHandoff, state.automationTab],
     runs: [...state.runResults.entries()],
   });
 }

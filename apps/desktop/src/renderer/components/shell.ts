@@ -73,7 +73,7 @@ interface NavItem {
   count?: number;
   /** Shown instead of the count, for a figure such as a percentage. */
   badge?: string;
-  /** A count that needs attention is drawn as an accent pill. */
+  /** A count that needs attention is drawn as an accent pill, and no pill is drawn at zero. */
   pill?: boolean;
   active: boolean;
 }
@@ -181,9 +181,9 @@ function navLink(item: NavItem): HTMLElement {
     h('span', { class: 'nav-label' }, item.label),
     item.badge !== undefined
       ? h('span', { class: 'nav-count mono' }, item.badge)
-      : item.count !== undefined
-        ? h('span', { class: item.pill ? 'nav-count nav-pill mono' : 'nav-count mono' }, String(item.count))
-        : undefined,
+      : item.count === undefined || (item.pill && item.count === 0)
+        ? undefined
+        : h('span', { class: item.pill ? 'nav-count nav-pill mono' : 'nav-count mono' }, String(item.count)),
   );
 }
 

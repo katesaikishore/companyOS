@@ -1,7 +1,6 @@
 import type { TwinConfig, TwinStatus } from '@companyos/twin-core';
 import { h, type Child } from '../dom.js';
 import { button, chip, exclusionEditor, toggleRow } from '../components/ui.js';
-import { browserCaptureNote } from '../labels.js';
 import { formatBytes } from '../format.js';
 import { act, bridge, confirmDeleteAll, pending, saveConfig, setNotice, state } from '../store.js';
 import { openSetup } from './setup.js';
@@ -59,7 +58,7 @@ export function settingsView(status: TwinStatus): HTMLElement {
       h(
         'div',
         { class: 'settings-card' },
-        capturePanel(config.watchBrowsers, config.excludedApps, config.idleGapMs, status.browserCaptureSupported),
+        capturePanel(config.watchBrowsers, config.excludedApps, config.idleGapMs),
         automationsPanel(config),
         openMausBotPanel(config),
         modelsPanel(status),
@@ -262,14 +261,14 @@ function appearancePanel(current: Theme): HTMLElement {
   );
 }
 
-function capturePanel(watchBrowsers: boolean, excluded: readonly string[], idleGapMs: number, bridgeSupported: boolean): HTMLElement {
+function capturePanel(watchBrowsers: boolean, excluded: readonly string[], idleGapMs: number): HTMLElement {
   return sectionCard(
     { id: 'capture', testid: 'settings-capture', title: 'Capture', note: 'App names and timing only. No titles, keystrokes or screenshots.' },
     row(
       toggleRow({
         testid: 'settings-browsers',
         label: 'Watch browsers',
-        note: `${browserCaptureNote(bridgeSupported)} Off by default.`,
+        note: 'Off by default. Browser names are recorded like app names.',
         checked: watchBrowsers,
         onChange: checked => void saveConfig('browsers', { watchBrowsers: checked }),
       }),

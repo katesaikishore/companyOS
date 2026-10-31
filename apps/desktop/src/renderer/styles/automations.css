@@ -277,6 +277,35 @@
   font-weight: 600;
 }
 
+/* Last result: a strip under the tabs. The label and the time share a line; the text scrolls in a box of its own. */
+
+.auto-result {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 6px 12px;
+  border: 1px solid var(--accent-soft-2);
+  border-radius: 10px;
+  background: var(--card);
+}
+
+.auto-result-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+/* Short on purpose: the ladder, the tabs and this strip all sit above the fold at 900 by 600. */
+.auto-result-text {
+  gap: 2px;
+  max-height: 40px;
+  overflow-y: auto;
+  font-size: 12px;
+}
+
 /* Tab bodies: two cards side by side when the detail is wide enough */
 
 .auto-two {

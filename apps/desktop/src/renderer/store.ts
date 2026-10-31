@@ -23,6 +23,9 @@ export interface SetupData {
   error?: string;
 }
 
+/** A run result and when it arrived. The time is part of the stored value, so a repeat with the same steps still redraws. */
+export type StoredRun = RunResult & { at: number };
+
 /** Page state shared by the views. It lives in memory only; the twin's data stays in the main process. */
 export const state = {
   status: undefined as TwinStatus | undefined,
@@ -39,7 +42,9 @@ export const state = {
   setup: { loading: false } as SetupData,
   selectedSuggestion: undefined as string | undefined,
   selectedLedger: undefined as string | undefined,
-  runResults: new Map<string, RunResult>(),
+  /** The tab the automation detail shows. It is here, with the other selections, so a tab click redraws the page. */
+  automationTab: 'workflow' as 'workflow' | 'autonomy' | 'delegate',
+  runResults: new Map<string, StoredRun>(),
   /** Briefs typed for OpenMausBot, by automation. The replies come from the twin's handoffs, not from here. */
   agentTaskBriefs: new Map<string, string>(),
   /** The handoff the harness page shows in its conversation. Unset means the newest. */

@@ -114,19 +114,19 @@ function leadColumn(target: string, groups: RoutineGroup[], selectedId: string |
   return h(
     'aside',
     { class: 'harness-list', 'aria-label': 'Lead bot and handoffs', 'data-testid': 'harness-list' },
-    h(
-      'section',
-      { class: 'harness-lead' },
-      h('span', { class: 'eyebrow' }, 'Lead bot or room'),
-      target
-        ? h('span', { class: 'harness-lead-name', 'data-testid': 'harness-target' }, target)
-        : h('span', { class: 'muted small' }, 'Not set. Choose one in Settings to send handoffs.'),
-      target ? h('span', { class: 'muted small' }, 'Current setting. New handoffs go here.') : undefined,
-      target ? undefined : button('Open Settings', { onClick: () => go('#/settings') }, 'btn-small'),
-    ),
+    target
+      ? h(
+          'section',
+          { class: 'harness-lead' },
+          h('span', { class: 'eyebrow' }, 'Lead bot or room'),
+          h('span', { class: 'harness-lead-name', 'data-testid': 'harness-target' }, target),
+          h('span', { class: 'muted small' }, 'Current setting. New handoffs go here.'),
+        )
+      : h('section', { class: 'harness-lead' }, button('Open Settings', { onClick: () => go('#/settings') }, 'btn-small')),
     h('div', { class: 'harness-tabs' }, h('span', { class: 'harness-tab' }, 'Automations')),
+    // The main pane says "No handoffs yet." once. The empty list keeps its test id.
     groups.length === 0
-      ? h('p', { class: 'muted small', 'data-testid': 'harness-no-handoffs' }, 'No handoffs yet.')
+      ? h('div', { class: 'harness-groups', 'data-testid': 'harness-no-handoffs' })
       : h('div', { class: 'harness-groups' }, ...groups.map(group => routineGroup(group, selectedId))),
   );
 }
@@ -196,8 +196,15 @@ function threadHead(item: HandoffView): HTMLElement {
       h('h1', { class: 'harness-thread-title' }, title),
       item.target ? h('span', { class: 'mono small muted' }, 'Lead bot or room when sent') : undefined,
     ),
-    button('New task', { testid: 'harness-new-task', onClick: () => go('#/automations') }, 'btn-small harness-new-task'),
+    taskButton(),
   );
+}
+
+/** The header's Task button, with a plus glyph as the design has it. The glyph is hidden from screen readers. */
+function taskButton(): HTMLButtonElement {
+  const control = button('Task', { testid: 'harness-new-task', onClick: () => go('#/automations') }, 'btn-small harness-new-task');
+  control.prepend(h('span', { class: 'harness-plus', 'aria-hidden': 'true' }, '+'));
+  return control;
 }
 
 /** The OpenMausBot mark at the head of the conversation. Its colours come from the stylesheet. */

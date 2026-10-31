@@ -15,7 +15,7 @@ export function suggestionsView(status: TwinStatus): HTMLElement {
   if (list.length === 0) {
     return h(
       'div',
-      { class: 'stack sg-view', 'data-testid': 'view-suggestions' },
+      { class: 'stack sg-view sg-fill', 'data-testid': 'view-suggestions' },
       header,
       panel(
         { testid: 'suggestions-empty', extra: 'sg-empty' },
