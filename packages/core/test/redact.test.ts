@@ -100,4 +100,11 @@ describe('browser capture is opt-in', () => {
     const off = normalizeSignal({ kind: 'focus', ts: 1, app: 'Google Chrome' }, { excludedApps: [], watchBrowsers: false });
     expect(off).toBeNull();
   });
+
+  it('drops focus from a browser the catalogue does not list, unless browsers are watched', () => {
+    for (const app of ['Vivaldi', 'Arc', 'Opera GX', 'DuckDuckGo', 'Brave-browser']) {
+      expect(normalizeSignal({ kind: 'focus', ts: 1, app }, { excludedApps: [], watchBrowsers: false })).toBeNull();
+      expect(normalizeSignal({ kind: 'focus', ts: 1, app }, { excludedApps: [], watchBrowsers: true })).not.toBeNull();
+    }
+  });
 });

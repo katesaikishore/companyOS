@@ -1,5 +1,5 @@
 import { createHmac, randomUUID } from 'node:crypto';
-import { classifyApp, isExcludedApp, normalizeAppName } from './classify';
+import { classifyApp, isBrowserApp, isExcludedApp, normalizeAppName } from './classify';
 import { RawSignalSchema, type TwinEvent } from './types';
 
 /** The first path segment is kept only when it is a plain lowercase word, such as "doc" or "wiki". */
@@ -58,8 +58,8 @@ export function normalizeSignal(input: unknown, options: NormalizeOptions): Twin
   }
 
   if (!signal.app || isExcludedApp(signal.app, options.excludedApps)) return null;
+  if (!options.watchBrowsers && isBrowserApp(signal.app)) return null;
   const windowClass = classifyApp(signal.app);
-  if (windowClass === 'browser' && !options.watchBrowsers) return null;
 
   const urlTemplate = signal.url && windowClass === 'browser' ? templateUrl(signal.url) : undefined;
   return {

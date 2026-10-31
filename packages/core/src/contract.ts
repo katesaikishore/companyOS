@@ -149,7 +149,10 @@ export interface AppReadinessView {
 export interface UsualHoursView {
   /** 0 is Monday. */
   weekday: number;
-  /** Local days in the window with an app switch on this weekday. */
+  /**
+   * Whole local days in the window with an app switch on this weekday. A day the window cuts, or today before it
+   * ends, is left out.
+   */
   days: number;
   /** False when too few days were seen to name an hour. The hours are then null, so the twin does not guess. */
   enoughData: boolean;

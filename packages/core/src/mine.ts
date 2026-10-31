@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { isShellApp, isSystemProcess, normalizeAppName } from './classify';
+import { isShellApp, isSiteLikeName, isSystemProcess, normalizeAppName } from './classify';
 import type { Segment } from './segment';
 import type { WindowClass } from './types';
 
@@ -96,25 +96,45 @@ export function recurringUnknownApps(segments: readonly Segment[], options: Mini
 }
 
 /**
- * The key a focus event is mined under, or undefined when mining does not read it. A system process is never read. A
- * catalogued app is read as before, terminals included. An unknown app is read only when it recurs, and never when it is
- * a shell or a script host, which can run commands. Readiness uses this too, so the two read the same events.
+ * The key a focus event is mined under, or undefined when mining does not read it. A system process, a shell and a
+ * terminal are never read, whether the catalogue lists them or not, since a shell or terminal can run commands. A
+ * catalogued app is read as before. An unknown app is read only when it recurs, and never when its name carries a host.
+ * Readiness uses this too, so the two read the same events.
  */
 export function minedKeyOf(
   step: { windowClass: WindowClass; app: string; urlTemplate?: string },
   recurring: ReadonlySet<string>,
 ): string | undefined {
-  if (isSystemProcess(step.app)) return undefined;
+  if (isSystemProcess(step.app) || isShellApp(step.app)) return undefined;
   if (step.windowClass !== 'other') return stepKey(step);
-  if (isShellApp(step.app)) return undefined;
+  if (isSiteLikeName(step.app)) return undefined;
   const key = stepKey(step);
   return recurring.has(key) ? key : undefined;
 }
 
+/** True for the key of a browser step, with or without a site. */
+function isBrowserKey(key: string): boolean {
+  return key === 'browser' || key.startsWith('browser@');
+}
+
 /**
- * Collapses consecutive focus events with the same mining key, so a run on one site is one step. Apps that mining does
- * not read are skipped (see minedKeyOf). Each step keeps the time it started and the time the next app took focus, so
- * routine durations can be estimated.
+ * The key a focus event joins when it follows a run keyed `last`, or undefined when it starts a new run. A browser visit
+ * with no site joins a browser run whatever its site, and a visit with a site takes over a browser run that has none yet.
+ * So a new tab between two site visits does not split them. Any other event joins only a run with the same key.
+ */
+export function joinedKey(last: string, key: string): string | undefined {
+  if (last === key) return key;
+  if (!isBrowserKey(last) || !isBrowserKey(key)) return undefined;
+  if (key === 'browser') return last;
+  if (last === 'browser') return key;
+  return undefined;
+}
+
+/**
+ * Collapses consecutive focus events into steps. Two events join one step when joinedKey says so, so a run on one site
+ * is one step, and a visit with no site does not split a run of site visits. Apps that mining does not read are skipped
+ * (see minedKeyOf). Each step keeps the time it started and the time the next app took focus, so routine durations can
+ * be estimated.
  */
 function collapse(segment: Segment, recurring: ReadonlySet<string>): Step[] {
   const steps: Step[] = [];
@@ -129,7 +149,10 @@ function collapse(segment: Segment, recurring: ReadonlySet<string>): Step[] {
     if (key === undefined) continue;
     const endTs = events[index + 1]?.ts ?? segment.endTs;
     const last = steps[steps.length - 1];
-    if (last && stepKey(last) === key) {
+    const joined = last ? joinedKey(stepKey(last), key) : undefined;
+    if (last && joined !== undefined) {
+      // A visit with a site gives its site to a browser step that has none, so the step is keyed by that site from then on.
+      if (event.urlTemplate && last.urlTemplate === undefined) last.urlTemplate = event.urlTemplate;
       last.endTs = endTs;
       continue;
     }

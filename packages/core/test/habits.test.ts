@@ -273,6 +273,49 @@ describe('field names', () => {
   });
 });
 
+describe('partial days', () => {
+  /** 10:00 on Thursday 15 October, so today has only its morning so far. */
+  const THURSDAY_MORNING = at(14, 10);
+
+  it('leaves out a day that is not whole, so a part day sets no usual hour', () => {
+    const events = [
+      // 17 September opens the window at 10:00. Its 09:00 switch is cut, so that day is not whole.
+      app(at(-14, 9), 'microsoft excel', 'spreadsheet'),
+      app(at(-14, 16, 30), 'slack', 'chat'),
+      // Five whole days. Thursday 1 October ends at 16:30 and Thursday 8 October at 17:00.
+      app(at(0, 9), 'microsoft excel', 'spreadsheet'),
+      app(at(0, 16, 30), 'slack', 'chat'),
+      app(at(4, 9), 'microsoft excel', 'spreadsheet'),
+      app(at(4, 16, 30), 'slack', 'chat'),
+      app(at(5, 9), 'microsoft excel', 'spreadsheet'),
+      app(at(5, 16, 30), 'slack', 'chat'),
+      app(at(6, 9), 'microsoft excel', 'spreadsheet'),
+      app(at(6, 16, 30), 'slack', 'chat'),
+      app(at(7, 9), 'microsoft excel', 'spreadsheet'),
+      app(at(7, 17), 'slack', 'chat'),
+      // Today, so far: 09:00 to 09:50.
+      app(at(14, 9), 'microsoft excel', 'spreadsheet'),
+      app(at(14, 9, 50), 'slack', 'chat'),
+    ];
+
+    const view = ready(habits(events, THURSDAY_MORNING));
+    expect(view.observedDays).toBe(5);
+    expect(view.usualHours[3]).toEqual({ weekday: 3, days: 2, enoughData: true, startHour: 9, endHour: 16.75 });
+  });
+
+  it('does not count today, so a part day cannot open the five-day gate', () => {
+    const events = Array.from({ length: 4 }, (_, offset) => [
+      app(at(offset + 4, 9), 'microsoft excel', 'spreadsheet'),
+      app(at(offset + 4, 16), 'slack', 'chat'),
+    ]).flat();
+
+    expect(habits([...events, app(at(14, 9), 'microsoft excel', 'spreadsheet')], THURSDAY_MORNING)).toMatchObject({
+      state: 'not_enough_data',
+      observedDays: 4,
+    });
+  });
+});
+
 describe('TwinAgent.habits', () => {
   it('summarises the stored events as the pure function does, and writes nothing', () => {
     const now = at(6, 0);

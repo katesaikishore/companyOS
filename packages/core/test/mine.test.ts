@@ -116,6 +116,32 @@ describe('browser steps are keyed by site', () => {
     expect(routines[0].steps[1].site).toBe('mail.google.com/mail');
   });
 
+  it('keeps a visit with no site from splitting the site visits around it', () => {
+    // On two days Chrome comes to the front on a new tab, which has no site, before it visits mail.
+    const signals: RawSignal[] = [];
+    for (let day = 0; day < 4; day++) {
+      signals.push({ kind: 'focus', ts: at(day, 9), app: 'Microsoft Excel' });
+      if (day < 2) signals.push({ kind: 'focus', ts: at(day, 9, 5), app: 'Google Chrome' });
+      signals.push(
+        { kind: 'focus', ts: at(day, 9, 10), app: 'Google Chrome', url: 'https://mail.google.com/mail/u/0/#inbox' },
+        { kind: 'focus', ts: at(day, 9, 20), app: 'Google Chrome', url: 'https://docs.google.com/spreadsheets/d/1ab2cd3ef4567890' },
+        { kind: 'focus', ts: at(day, 9, 30), app: 'Slack' },
+        { kind: 'idle_start', ts: at(day, 9, 40) },
+      );
+    }
+    const routines = mineRoutines(segment(events(signals), 60 * 60_000));
+
+    expect(routines).toHaveLength(1);
+    expect(routines[0]).toMatchObject({ support: 4, days: 4 });
+    expect(routines[0].steps.map(step => step.windowClass)).toEqual(['spreadsheet', 'browser', 'browser', 'chat']);
+    expect(routines[0].steps.map(step => step.site)).toEqual([
+      undefined,
+      'mail.google.com/mail',
+      'docs.google.com/spreadsheets',
+      undefined,
+    ]);
+  });
+
   it('gives a site routine the id of the hash of its key', () => {
     const routines = mineRoutines(segment(events(siteWorkdays(4)), 60 * 60_000));
     const mail = routines.find(routine => routine.steps.some(step => step.site === 'mail.google.com/mail'));

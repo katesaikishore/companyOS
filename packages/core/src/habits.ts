@@ -30,6 +30,9 @@ interface DaySpan {
   weekday: number;
   firstTs: number;
   lastTs: number;
+  /** Local midnight at the start of the day, and at the start of the next day. */
+  startTs: number;
+  endTs: number;
 }
 
 /** Consecutive switches into one app, kept as one run from the time of its first switch. */
@@ -48,7 +51,9 @@ export function habits(events: readonly TwinEvent[], now: number, idleGapMs = DE
   const since = now - HABITS_WINDOW_DAYS * DAY_MS;
   const inWindow = events.filter(event => event.ts >= since && event.ts <= now);
   const switches = inWindow.filter(isAppSwitch);
-  const spans = daySpans(switches);
+  // Only whole days count: a day the window cuts, or today before it ends, would set the usual hours
+  // from part of a day.
+  const spans = daySpans(switches).filter(span => span.startTs >= since && span.endTs <= now);
   if (spans.length < MIN_OBSERVED_DAYS) {
     return {
       state: 'not_enough_data',
@@ -86,7 +91,9 @@ function daySpans(switches: readonly AppSwitch[]): DaySpan[] {
       span.firstTs = Math.min(span.firstTs, event.ts);
       span.lastTs = Math.max(span.lastTs, event.ts);
     } else {
-      spans.set(key, { weekday: mondayFirst(date), firstTs: event.ts, lastTs: event.ts });
+      const startTs = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+      const endTs = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1).getTime();
+      spans.set(key, { weekday: mondayFirst(date), firstTs: event.ts, lastTs: event.ts, startTs, endTs });
     }
   }
   return [...spans.values()];

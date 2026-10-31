@@ -8,7 +8,7 @@ import type {
   AppReadinessStatus,
   AppReadinessView,
 } from './contract';
-import { DEFAULT_MINING, minedKeyOf, recurringUnknownApps, stepKey, type Routine } from './mine';
+import { DEFAULT_MINING, joinedKey, minedKeyOf, recurringUnknownApps, stepKey, type Routine } from './mine';
 import { segment, type Segment } from './segment';
 import type { TwinEvent, WindowClass } from './types';
 
@@ -239,8 +239,8 @@ function coverRoutines(
 }
 
 /**
- * Collapses a stretch into runs of one mining key, as mining does. Apps that mining does not read are skipped and
- * do not break a run.
+ * Collapses a stretch into runs of one mining key, as mining does (see joinedKey). Apps that mining does not read are
+ * skipped and do not break a run.
  */
 function runsOf(stretch: Segment, recurring: ReadonlySet<string>): Run[] {
   const runs: Run[] = [];
@@ -252,8 +252,13 @@ function runsOf(stretch: Segment, recurring: ReadonlySet<string>): Run[] {
     );
     if (key === undefined) continue;
     const last = runs.at(-1);
-    if (last && last.key === key) last.events.push(event);
-    else runs.push({ key, events: [event] });
+    const joined = last ? joinedKey(last.key, key) : undefined;
+    if (last && joined !== undefined) {
+      last.key = joined;
+      last.events.push(event);
+    } else {
+      runs.push({ key, events: [event] });
+    }
   }
   return runs;
 }

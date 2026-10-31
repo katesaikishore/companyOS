@@ -106,8 +106,31 @@ describe('an unknown app that recurs', () => {
 });
 
 describe('what mining never reads', () => {
-  /** Shells that the catalogue does not know. A catalogued terminal is mined as before, so it is not listed here. */
-  const SHELLS = ['bash', 'zsh', 'sh', 'fish', 'pwsh', 'cmd', 'osascript', 'wscript', 'python3', 'node', 'perl'];
+  /** Shells, script hosts and terminals that the catalogue does not know. */
+  const SHELLS = [
+    'bash',
+    'zsh',
+    'sh',
+    'fish',
+    'pwsh',
+    'cmd',
+    'osascript',
+    'wscript',
+    'python3',
+    'node',
+    'perl',
+    'warp',
+    'ghostty',
+    'wezterm',
+    'xterm',
+    'mintty',
+    'conhost',
+    'powershell_ise',
+    'tmux',
+    'ssh',
+  ];
+  /** Terminals the catalogue does know. Their window class is terminal, and mining still never reads them. */
+  const CATALOGUED_TERMINALS = ['Terminal', 'iTerm2', 'Windows Terminal', 'Konsole', 'gnome-terminal', 'alacritty', 'kitty'];
   const SYSTEM = [
     'Finder',
     'Dock',
@@ -151,6 +174,19 @@ describe('what mining never reads', () => {
       agent.close();
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it.each(CATALOGUED_TERMINALS)('never mines the catalogued terminal %s, even when it recurs', terminal => {
+    const routines = routinesOf([0, 1, 2].flatMap(day => plantedDay(day, terminal)));
+    expect(appsIn(routines)).not.toContain(terminal.toLowerCase());
+    expect(routines.find(routine => routine.steps.length === 4)?.steps.map(step => step.app)).toEqual(PLANTED);
+  });
+
+  it('never mines an unknown app whose name carries a host, such as a Chromium web app window', () => {
+    // A Chromium web app's window class carries the site's host, and the naming model would be shown that name.
+    const routines = routinesOf([0, 1, 2].flatMap(day => plantedDay(day, 'Chrome-web.whatsapp.com__-Default')));
+    expect(JSON.stringify(routines)).not.toContain('whatsapp');
+    expect(routines.find(routine => routine.steps.length === 4)?.steps.map(step => step.app)).toEqual(PLANTED);
   });
 
   it('lets a one-off unknown app pass without breaking the routine around it', () => {
