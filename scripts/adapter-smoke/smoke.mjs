@@ -11,8 +11,8 @@ import {
   IS_WIN,
   MARKER,
   OUT_DIR,
-  bringOtherForward,
   launchOtherApp,
+  makeOtherFront,
   launchTestApp,
   cleanStderr,
   readClipboard,
@@ -144,8 +144,7 @@ try {
   // 1. Press with another app in front. The adapter has to bring the app forward by itself.
   if (otherName) {
     await step(`focus other app (${otherName})`, () => executor.focusApp(otherName), withApp);
-    await bringOtherForward(otherName);
-    await sleep(500);
+    await step('make other app front (direct OS call)', () => makeOtherFront(otherName));
   }
   await step('frontmost before press from other app', front);
   const press1 = await step(`pressShortcut ${SELECT_ALL} while other app in front`, () => executor.pressShortcut?.(name, SELECT_ALL), withApp);
@@ -153,10 +152,7 @@ try {
 
   // 2. Focus three times, each time after another app was in front. Timing and whether the app ended up in front.
   for (let index = 1; index <= 3; index++) {
-    if (otherName) {
-      await bringOtherForward(otherName);
-      await sleep(700);
-    }
+    if (otherName) await step(`make other app front #${index} (direct OS call)`, () => makeOtherFront(otherName));
     await step(`frontmost before focus #${index}`, front);
     await step(`focus ${name} #${index}`, () => executor.focusApp(name), withApp);
   }
@@ -187,7 +183,11 @@ try {
 
   // 7. openFile: opens the marker file again in the app, through the adapter's own launch command. Last, because it can
   // add a second window.
+  const openBefore = await step('state before openFile', () => openProbe());
   await step(`openFile ${name} (adapter launch command)`, () => executor.openFile?.(name, launched.file), withApp);
+  await sleep(1500);
+  const openAfter = await step('state after openFile', () => openProbe(true));
+  report.openFileProbe = { before: openBefore.result, after: openAfter.result };
 
   // 8. Windows only: variants of the same launch command, to find out why openFile can fail.
   if (IS_WIN) {

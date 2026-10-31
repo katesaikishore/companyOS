@@ -344,10 +344,30 @@ export async function bringOtherForward(otherApp) {
   return ps(
     `$p = Get-Process -Name $env:TWIN_APP -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
 if (-not $p) { 'no-window'; exit 2 }
-(New-Object -ComObject WScript.Shell).AppActivate($p.Id)`,
+$shell = New-Object -ComObject WScript.Shell
+$activated = $shell.AppActivate($p.Id)
+if (-not $activated -and $p.MainWindowTitle) { $activated = $shell.AppActivate($p.MainWindowTitle) }
+"activated=$activated"`,
     { TWIN_APP: otherApp },
     { timeoutMs: 30_000 },
   );
+}
+
+/**
+ * Tries up to four times to make the other app the front app, and says whether it worked. A caller that wants to test a
+ * focus change needs to know that the app was really not in front before. The attempts are kept as data.
+ */
+export async function makeOtherFront(otherApp) {
+  const attempts = [];
+  let front = (await frontmostDirect()).stdout.trim();
+  const isOther = value => value.toLowerCase().replace(/\.exe$/, '') === String(otherApp ?? '').toLowerCase();
+  for (let attempt = 0; otherApp && attempt < 4 && !isOther(front); attempt++) {
+    const result = await bringOtherForward(otherApp);
+    await sleep(700);
+    front = (await frontmostDirect()).stdout.trim();
+    attempts.push({ stdout: result?.stdout.trim(), exitCode: result?.exitCode, frontAfter: front });
+  }
+  return { front, otherInFront: Boolean(otherApp) && isOther(front), attempts };
 }
 
 export async function stopApps(names) {
@@ -424,4 +444,28 @@ Get-Process -Name OpenWith -ErrorAction SilentlyContinue | Stop-Process -Force`,
     });
   }
   return { lookup, results };
+}
+
+/**
+ * What is open right now, for judging openFile: Windows counts Notepad processes and looks for the "Select an app" picker
+ * (OpenWith). macOS counts TextEdit windows. The picker is closed after it is read when `closePicker` is set.
+ */
+export async function openProbe(closePicker = false) {
+  if (IS_MAC) {
+    const windows = await capture('osascript', ['-e', 'tell application "System Events" to count windows of process "TextEdit"'], { timeoutMs: 15_000 });
+    return { textEditWindows: windows.stdout.trim(), error: windows.exitCode === 0 ? undefined : windows.stderr };
+  }
+  const result = await ps(
+    `$notepad = @(Get-Process -Name notepad -ErrorAction SilentlyContinue)
+$picker = @(Get-Process -Name OpenWith -ErrorAction SilentlyContinue)
+[ordered]@{ notepadProcesses = $notepad.Count; notepadWindows = @($notepad | Where-Object { $_.MainWindowHandle -ne 0 }).Count; pickerShown = ($picker.Count -gt 0) } | ConvertTo-Json -Compress
+${closePicker ? '$picker | Stop-Process -Force -ErrorAction SilentlyContinue' : ''}`,
+    {},
+    { timeoutMs: 30_000 },
+  );
+  try {
+    return JSON.parse(result.stdout);
+  } catch {
+    return { raw: result.stdout, error: result.stderr };
+  }
 }

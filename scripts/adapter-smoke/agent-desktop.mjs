@@ -9,12 +9,12 @@ import {
   IS_MAC,
   IS_WIN,
   OUT_DIR,
-  bringOtherForward,
   capture,
   frontmostDirect,
   fileSize,
   launchOtherApp,
   launchTestApp,
+  makeOtherFront,
   MARKER,
   ps,
   readClipboard,
@@ -166,17 +166,33 @@ try {
   appName ??= names[0];
   report.appName = appName;
 
+  // TextEdit can reopen a window from an earlier launch, so the app can have two windows with the same title. The CLI
+  // refuses a focus by app name then (AMBIGUOUS_TARGET), which is what the product's executor expects. That refusal is
+  // recorded once. Then the extra window is closed so the timings below are for one window.
+  if (IS_MAC) {
+    const count = async () => {
+      const probe = await capture(binary, ['list-windows', '--app', appName], { env, timeoutMs: 30_000 });
+      return parseEnvelope(probe.stdout)?.windowCount;
+    };
+    const windowsBefore = await count();
+    report.macWindows = { before: windowsBefore };
+    if ((windowsBefore ?? 0) > 1) {
+      const refused = await capture(binary, ['focus-window', '--app', appName], { env, timeoutMs: 30_000, outputLimit: 1500 });
+      report.macWindows.focusWithTwoWindows = { exitCode: refused.exitCode, envelope: parseEnvelope(refused.stdout), stdout: refused.stdout };
+      report.macWindows.closeExtra = await capture('osascript', ['-e', 'tell application "TextEdit" to close window 2'], { timeoutMs: 15_000 });
+      await sleep(1000);
+      report.macWindows.after = await count();
+    }
+    log('MACWINDOWS', report.macWindows);
+  }
+
   await timed('status', binary, ['status'], 5, env);
   await timed('list-apps', binary, ['list-apps'], 5, env);
   await timed('list-windows', binary, ['list-windows', '--app', appName], 5, env);
 
   // Focus: put the other app in front first, so a focus has something to change. Record who was in front before and after.
   await timed('focus-window', binary, ['focus-window', '--app', appName], 3, env, {
-    before: async () => {
-      await bringOtherForward(other?.app);
-      await sleep(700);
-      return (await frontmostDirect()).stdout.trim();
-    },
+    before: async () => (await makeOtherFront(other?.app)).front,
     after: async () => {
       await sleep(300);
       return (await frontmostDirect()).stdout.trim();
@@ -186,12 +202,12 @@ try {
   // Press: always after a focus-window call, as the product's executor does. Keep who was in front afterwards.
   const press = [];
   for (let index = 0; index < 3; index++) {
-    await bringOtherForward(other?.app);
-    await sleep(700);
+    const otherFront = await makeOtherFront(other?.app);
     const focusCall = await capture(binary, ['focus-window', '--app', appName], { env, timeoutMs: 30_000 });
     const pressCall = await capture(binary, ['press', CHORD, '--app', appName], { env, timeoutMs: 30_000, outputLimit: 3000 });
     const front = (await frontmostDirect()).stdout.trim();
     press.push({
+      otherWasInFront: otherFront.otherInFront,
       focusExit: focusCall.exitCode,
       focusMs: focusCall.durationMs,
       pressExit: pressCall.exitCode,
@@ -210,11 +226,11 @@ try {
   log('PRESS_AFTER_FOCUS', report.pressAfterFocus);
 
   // Press with the other app in front and no focus call, to see what the CLI does with a window that is not in front.
-  await bringOtherForward(other?.app);
-  await sleep(700);
-  const frontBefore = (await frontmostDirect()).stdout.trim();
+  const coldFront = await makeOtherFront(other?.app);
+  const frontBefore = coldFront.front;
   const cold = await capture(binary, ['press', CHORD, '--app', appName], { env, timeoutMs: 30_000, outputLimit: 3000 });
   report.pressWithoutFocus = {
+    otherWasInFront: coldFront.otherInFront,
     frontBefore,
     exitCode: cold.exitCode,
     durationMs: cold.durationMs,
@@ -228,23 +244,30 @@ try {
   // Did the keys reach the app? Put a sentinel on the clipboard, select all, copy, read the clipboard back. Once after a
   // focus-window call, and once with the other app in front and no focus call.
   report.deliveryChecks = [];
-  for (const withFocus of [true, false]) {
+  for (const variant of [
+    { withFocus: true, headed: false },
+    { withFocus: false, headed: false },
+    { withFocus: false, headed: true },
+  ]) {
+    const { withFocus, headed } = variant;
     await setClipboard('twin-smoke-sentinel');
-    await bringOtherForward(other?.app);
-    await sleep(700);
-    const frontBefore = (await frontmostDirect()).stdout.trim();
+    const otherFront = await makeOtherFront(other?.app);
+    const frontBefore = otherFront.front;
     const calls = [];
     const call = async args => {
       const result = await capture(binary, args, { env, timeoutMs: 30_000, outputLimit: 1500 });
       calls.push({ args: args.join(' '), exitCode: result.exitCode, durationMs: result.durationMs, envelope: parseEnvelope(result.stdout), stderr: result.stderr || undefined });
     };
     if (withFocus) await call(['focus-window', '--app', appName]);
-    await call(['press', CHORD, '--app', appName]);
-    await call(['press', COPY_CHORD, '--app', appName]);
+    const extra = headed ? ['--headed'] : [];
+    await call(['press', CHORD, '--app', appName, ...extra]);
+    await call(['press', COPY_CHORD, '--app', appName, ...extra]);
     await sleep(300);
     const clip = await readClipboard();
     const entry = {
       withFocusCall: withFocus,
+      headed,
+      otherWasInFront: otherFront.otherInFront,
       frontBefore,
       calls,
       frontAfter: (await frontmostDirect()).stdout.trim(),

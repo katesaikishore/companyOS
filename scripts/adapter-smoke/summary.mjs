@@ -106,7 +106,7 @@ if (desktop) {
     lines.push('| Key delivery check (select all, copy, read clipboard) | Front before | Calls (exit) | Front after | Clipboard matched marker |', '|---|---|---|---|---|');
     for (const check of desktop.deliveryChecks) {
       lines.push(
-        `| ${check.withFocusCall ? 'after focus-window' : 'no focus call'} | ${cell(check.frontBefore)} | ${check.calls.map(c => `${c.args.split(' ')[0]}:${c.exitCode}`).join(', ')} | ${cell(check.frontAfter)} | ${check.equalsMarker} |`,
+        `| ${check.withFocusCall ? 'after focus-window' : check.headed ? 'no focus call, --headed' : 'no focus call'} | ${cell(check.frontBefore)} | ${check.calls.map(c => `${c.args.split(' ')[0]}:${c.exitCode}`).join(', ')} | ${cell(check.frontAfter)} | ${check.equalsMarker} |`,
       );
     }
     lines.push('');

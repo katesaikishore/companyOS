@@ -199,9 +199,19 @@ function encode(script: string): string {
 
 const POWERSHELL = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand'];
 
+/**
+ * The program name that Start-Process is given. The shell looks a bare name up on PATH and accepts a file with no
+ * extension. Git for Windows puts a file named "notepad" with no extension in its usr\bin folder, and on a hosted runner
+ * the shell picked it instead of notepad.exe: it showed its "Select an app to open" picker and opened nothing. Adding
+ * ".exe" makes the shell look for the program only. A name that already has an extension, or that has a path, is not changed.
+ */
+export function windowsProgram(app: string): string {
+  return /[\\/:]/.test(app) || /\.[A-Za-z0-9]{1,5}$/.test(app) ? app : `${app}.exe`;
+}
+
 /** The target goes through the environment, never the script text, so a name or path cannot change the command. */
 async function openWindows(app: string, target: string): Promise<boolean> {
-  const env = { ...process.env, TWIN_APP: app, TWIN_TARGET: target };
+  const env = { ...process.env, TWIN_APP: windowsProgram(app), TWIN_TARGET: target };
   try {
     return (await run('powershell.exe', [...POWERSHELL, encode(WIN_OPEN)], env)) === 'ok';
   } catch {
