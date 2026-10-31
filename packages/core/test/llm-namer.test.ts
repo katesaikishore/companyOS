@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_CONFIG,
+  MAX_APP_NAME_CHARS,
+  MAX_WORKER_TEXT_CHARS,
   NAMING_SYSTEM_PROMPT,
   ROUTINE_NAME_JSON_SCHEMA,
   RoutineNameOutputSchema,
@@ -64,6 +66,40 @@ describe('naming prompt', () => {
   it('asks for a JSON name and turns off the reasoning block', () => {
     expect(NAMING_SYSTEM_PROMPT).toContain('{"name": "..."}');
     expect(namingPrompt(routine())).toContain('/no_think');
+  });
+
+  describe('size limit of the model worker', () => {
+    /** The most a routine can show: six steps, five apps in each, every name as long as a capture adapter may send. */
+    function widest(nameLength: number): Routine {
+      const name = (step: number, option: number) => `${step}${option}`.padEnd(nameLength, 'x');
+      return {
+        ...routine(),
+        steps: Array.from({ length: 6 }, (_, step) => {
+          const options = Array.from({ length: 5 }, (_, option) => name(step, option));
+          return { windowClass: 'other' as const, app: options[0], options };
+        }),
+      };
+    }
+
+    it('keeps the widest routine inside what the worker accepts', () => {
+      // 200 is the longest app name RawSignalSchema allows. Uncut, this prompt is about 6,100 characters.
+      const prompt = namingPrompt(widest(200));
+      expect(prompt.length).toBeLessThan(MAX_WORKER_TEXT_CHARS / 2);
+      expect(NAMING_SYSTEM_PROMPT.length).toBeLessThan(MAX_WORKER_TEXT_CHARS);
+    });
+
+    it('cuts a long app name with an ellipsis and keeps the rest of the name out of the prompt', () => {
+      const prompt = namingPrompt(widest(200));
+      const cut = `${'00'.padEnd(MAX_APP_NAME_CHARS - 1, 'x')}…`;
+      expect(prompt).toContain(`1. ${cut}`);
+      expect(prompt).not.toContain('x'.repeat(MAX_APP_NAME_CHARS));
+    });
+
+    it('leaves a name of exactly the limit as it is', () => {
+      const prompt = namingPrompt(widest(MAX_APP_NAME_CHARS));
+      expect(prompt).toContain(`1. ${'00'.padEnd(MAX_APP_NAME_CHARS, 'x')} (sometimes`);
+      expect(prompt).not.toContain('…');
+    });
   });
 });
 

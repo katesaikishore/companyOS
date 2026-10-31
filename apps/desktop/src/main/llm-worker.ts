@@ -6,7 +6,13 @@
  */
 import { pathToFileURL } from 'node:url';
 import type { Llama, LlamaContext, LlamaGrammar, LlamaModel } from 'node-llama-cpp';
-import { resolveModelPath, type WorkerRequest, type WorkerResponse } from '@companyos/twin-core';
+import {
+  MAX_WORKER_TEXT_CHARS,
+  modelThreads,
+  resolveModelPath,
+  type WorkerRequest,
+  type WorkerResponse,
+} from '@companyos/twin-core';
 
 type LlamaModule = typeof import('node-llama-cpp');
 type LoadRequest = Extract<WorkerRequest, { type: 'load' }>;
@@ -19,7 +25,6 @@ type CompleteRequest = Extract<WorkerRequest, { type: 'complete' }>;
 const importModule = new Function('url', 'return import(url)') as (url: string) => Promise<LlamaModule>;
 
 const MAX_PATH_CHARS = 1_024;
-const MAX_TEXT_CHARS = 4_000;
 const MAX_TOKENS_LIMIT = 256;
 
 let modulePromise: Promise<LlamaModule> | undefined;
@@ -58,7 +63,7 @@ function parseRequest(value: unknown): WorkerRequest | undefined {
   if (value.type === 'complete') {
     const { system, prompt, schema, maxTokens } = value;
     if (typeof system !== 'string' || typeof prompt !== 'string' || !isRecord(schema)) return undefined;
-    if (system.length > MAX_TEXT_CHARS || prompt.length > MAX_TEXT_CHARS) return undefined;
+    if (system.length > MAX_WORKER_TEXT_CHARS || prompt.length > MAX_WORKER_TEXT_CHARS) return undefined;
     if (!isIntegerIn(maxTokens, 1, MAX_TOKENS_LIMIT)) return undefined;
     return { type: 'complete', id, system, prompt, schema, maxTokens };
   }
@@ -84,7 +89,8 @@ async function load(request: LoadRequest): Promise<void> {
     logger: () => undefined,
   });
   model = await llama.loadModel({ modelPath: path });
-  context = await model.createContext({ contextSize: request.contextSize });
+  // Fewer threads than cores, so one busy program on the machine does not stall the model (see modelThreads).
+  context = await model.createContext({ contextSize: request.contextSize, threads: modelThreads(llama.cpuMathCores) });
   loadedPath = path;
 }
 
