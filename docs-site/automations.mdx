@@ -36,7 +36,7 @@ If a check fails or a run is undone, the automation drops back to level 3 at onc
 | Check focus | Everywhere app capture works |
 | Open a link | macOS and Windows only |
 | Open a file | macOS and Windows only, and it asks each time |
-| Press a shortcut | Not available on any system yet, so it is always blocked |
+| Press a shortcut | macOS, Windows, and Linux on X11 through xdotool. The app is brought to the front first, and nothing is sent if it does not get there. Blocked on Wayland |
 
 Typing, clicking and sending are not built.
 
