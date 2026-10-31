@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "companyOS Twin desktop app (Electron)",
+  "homepage": "https://github.com/katesaikishore/companyOS",
   "main": "dist/main/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.main.json && tsc -p tsconfig.renderer.json && node scripts/copy-assets.mjs",
