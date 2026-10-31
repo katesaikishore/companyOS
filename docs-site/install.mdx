@@ -19,7 +19,7 @@ description: "Install companyOS Twin on macOS, Windows or Linux, or build it fro
 ## Linux
 
 - **Packages.** The build produces a `.deb` and an `.rpm`.
-- **Session.** It needs an X11 session with `DISPLAY` set, and `xdotool` installed. Wayland is not supported, so app capture does not run there.
+- **Session.** It needs an X11 session with `DISPLAY` set, with `xdotool` and `xprop` installed (`xprop` comes from the `x11-utils` package). Wayland is not supported, so app capture does not run there.
 - **Keyring.** The app needs a keyring that Electron can use, such as GNOME Keyring or KWallet. Without one it does not start, because it cannot protect its data key.
 
 ## Build from source

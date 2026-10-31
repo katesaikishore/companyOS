@@ -255,7 +255,10 @@ const linuxX11: Platform = {
   pollMs: 3000,
   async frontmost() {
     const windowId = await run('xdotool', ['getactivewindow']);
-    const className = await run('xdotool', ['getwindowclassname', windowId]);
+    // xdotool on Ubuntu 24.04 has no getwindowclassname, so the class is read from the window's WM_CLASS property, the
+    // last quoted string in it: the class name, as xdotool reports it.
+    const wmClass = await run('xprop', ['-id', windowId, 'WM_CLASS']);
+    const className = /"([^"]*)"\s*$/.exec(wmClass)?.[1];
     return className || undefined;
   },
   async focus(app) {
@@ -288,9 +291,11 @@ const linuxX11: Platform = {
   },
 };
 
-async function hasXdotool(): Promise<boolean> {
+/** True when both X11 tools are installed: xdotool for windows and keys, and xprop (from x11-utils) for the class name. */
+async function hasX11Tools(): Promise<boolean> {
   try {
     await run('xdotool', ['version']);
+    await run('xprop', ['-version']);
     return true;
   } catch {
     return false;
@@ -355,8 +360,8 @@ export async function choosePlatform(): Promise<PlatformChoice> {
       return { detail: 'Wayland: app capture needs a compositor extension and is not available yet.' };
     }
     if (!process.env.DISPLAY) return { detail: 'No display found.' };
-    if (await hasXdotool()) return { platform: linuxX11, detail: 'X11 through xdotool' };
-    return { detail: 'Install xdotool to enable app capture on X11.' };
+    if (await hasX11Tools()) return { platform: linuxX11, detail: 'X11 through xdotool and xprop' };
+    return { detail: 'Install xdotool and x11-utils (xprop) to enable app capture on X11.' };
   }
   return { detail: `Unsupported platform: ${process.platform}` };
 }

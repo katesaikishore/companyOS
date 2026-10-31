@@ -25,6 +25,14 @@ const FAKE_XDOTOOL = [
   '',
 ].join('\n');
 
+/** A stand-in for xprop. It reports the WM_CLASS of any window the same way the real tool does. */
+const FAKE_XPROP = [
+  '#!/bin/bash',
+  'if [ "$1" = "-version" ]; then echo "xprop 1.2.6"; exit 0; fi',
+  "echo 'WM_CLASS(STRING) = \"testapp.py\", \"Testapp.py\"'",
+  '',
+].join('\n');
+
 const LINUX = process.platform === 'linux';
 let folder = '';
 const saved: Record<string, string | undefined> = {};
@@ -35,6 +43,8 @@ beforeAll(() => {
   folder = mkdtempSync(join(tmpdir(), 'linux-press-'));
   writeFileSync(join(folder, 'xdotool'), FAKE_XDOTOOL);
   chmodSync(join(folder, 'xdotool'), 0o755);
+  writeFileSync(join(folder, 'xprop'), FAKE_XPROP);
+  chmodSync(join(folder, 'xprop'), 0o755);
 });
 
 afterEach(() => {
@@ -72,6 +82,14 @@ async function linuxExecutor() {
   if (!choice.platform) throw new Error(`no X11 platform: ${choice.detail}`);
   return executorFor(choice.platform);
 }
+
+describe.skipIf(!LINUX)('X11 frontmost app', () => {
+  it('reads the class of the active window from its WM_CLASS, since xdotool here has no getwindowclassname', async () => {
+    useFake({ active: '4194307', match: '4194307' });
+    const executor = await linuxExecutor();
+    expect(await executor.frontmostApp()).toBe('Testapp.py');
+  });
+});
 
 describe.skipIf(!LINUX)('X11 key press through xdotool', () => {
   it('activates the app, confirms it is the active window, then sends the chord as one argument', async () => {
