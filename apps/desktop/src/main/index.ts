@@ -279,6 +279,12 @@ function createMainWindow(): void {
     show: false,
     webPreferences: WEB_PREFERENCES,
   });
+  // The constructor options are not enough on every platform, so the lock is also set on the window itself.
+  mainWindow.setResizable(false);
+  mainWindow.setMaximizable(false);
+  mainWindow.setFullScreenable(false);
+  // Linux window managers can still maximise a window that reports it cannot be, so any maximise is undone.
+  mainWindow.on('maximize', () => mainWindow?.unmaximize());
   mainWindow.once('ready-to-show', () => mainWindow?.show());
   mainWindow.webContents.setVisualZoomLevelLimits(1, 1);
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));

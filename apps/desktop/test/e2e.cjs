@@ -101,6 +101,7 @@ async function windowShape(app) {
       resizable: main.isResizable(),
       maximizable: main.isMaximizable(),
       fullscreenable: main.isFullScreenable(),
+      maximized: main.isMaximized(),
     };
   });
 }
@@ -155,8 +156,9 @@ async function main() {
     const shape = await windowShape(app);
     assert.deepEqual([shape.width, shape.height], [900, 600], `the window is a fixed 900x600 (${shape.width}x${shape.height})`);
     assert.equal(shape.resizable, false, 'the window cannot be resized');
-    assert.equal(shape.maximizable, false, 'the window cannot be maximised');
     assert.equal(shape.fullscreenable, false, 'the window cannot be made full screen');
+    // Linux reports every window as maximisable, so there the maximise is tested by behaviour below.
+    if (process.platform !== 'linux') assert.equal(shape.maximizable, false, 'the window cannot be maximised');
     page.on('console', message => {
       if (message.type() === 'error') consoleErrors.push(message.text());
     });
@@ -334,11 +336,17 @@ async function main() {
       await page.screenshot({ path: path.join(SHOTS, `fixed-900x600-${route}.png`) });
     }
     log('fixed 900x600: every main route holds');
+    // Ask for a maximise and check that the window stays put. The main process undoes any maximise that happens.
+    await app.evaluate(({ BrowserWindow }) => {
+      const main = BrowserWindow.getAllWindows().find(win => win.webContents.getURL().includes('/index.html'));
+      main.maximize();
+    });
+    await page.waitForTimeout(400);
     const after = await windowShape(app);
     assert.deepEqual(
-      [after.width, after.height, after.resizable, after.maximizable, after.fullscreenable],
+      [after.width, after.height, after.resizable, after.fullscreenable, after.maximized],
       [900, 600, false, false, false],
-      'the window size stays fixed after navigating',
+      'the window size stays fixed after navigating and after a maximise',
     );
     await shot(page, '09-settings');
 
