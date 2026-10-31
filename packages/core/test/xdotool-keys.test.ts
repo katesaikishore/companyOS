@@ -27,6 +27,15 @@ describe('xdotoolChord', () => {
     }
   });
 
+  it('never produces super, whatever modifiers the chord has', () => {
+    expect(xdotoolChord('cmd+ctrl+alt+shift+a')).toBe('ctrl+alt+shift+a');
+    for (const modifier of ['cmd', 'ctrl', 'alt', 'shift']) {
+      const built = xdotoolChord(`${modifier}+a`);
+      expect(built, modifier).toBeDefined();
+      expect(built, modifier).not.toMatch(/super/i);
+    }
+  });
+
   it('maps the primary modifier cmd to Control, as Windows does, and writes Control once', () => {
     expect(xdotoolChord('cmd+c')).toBe('ctrl+c');
     expect(xdotoolChord('cmd+ctrl+c')).toBe('ctrl+c');

@@ -2,7 +2,7 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { choosePlatform, executorFor } from '../src/main/platform';
+import { choosePlatform, executorFor, wmClassName } from '../src/main/platform';
 
 /**
  * A stand-in for xdotool. Every call is appended to FAKE_XDO_LOG as one line. FAKE_XDO_ACTIVE is the window the active
@@ -14,7 +14,7 @@ const FAKE_XDOTOOL = [
   'echo "$*" >> "$FAKE_XDO_LOG"',
   'case "$1" in',
   '  version) exit 0 ;;',
-  '  getactivewindow) echo "$FAKE_XDO_ACTIVE"; exit 0 ;;',
+  '  getactivewindow) [ "$FAKE_XDO_ACTIVE" = "__fail__" ] && exit 1; echo "$FAKE_XDO_ACTIVE"; exit 0 ;;',
   '  search)',
   '    if [[ "$*" == *windowactivate* ]]; then [ "$FAKE_XDO_ACTIVATE" = fail ] && exit 1; exit 0; fi',
   '    [ -z "$FAKE_XDO_MATCH" ] && exit 1',
@@ -123,6 +123,43 @@ describe.skipIf(!LINUX)('X11 frontmost app', () => {
     const executor = await linuxExecutor();
     expect(await executor.frontmostApp()).toBe('back\\slash');
   });
+
+  it('decodes the octal escapes xprop writes for non-ASCII bytes, so the class is the UTF-8 name', async () => {
+    useFake({ active: '4194307', match: '4194307', wmClass: 'WM_CLASS(STRING) = "xterm", "Caf\\303\\251"' });
+    const executor = await linuxExecutor();
+    expect(await executor.frontmostApp()).toBe('Café');
+  });
+
+  it('reports no app in front when the active window cannot be read, rather than throwing', async () => {
+    useFake({ active: '__fail__', match: '' });
+    const executor = await linuxExecutor();
+    expect(await executor.frontmostApp()).toBeUndefined();
+  });
+
+  it('reports no app in front when there is no active window', async () => {
+    useFake({ active: '', match: '' });
+    const executor = await linuxExecutor();
+    expect(await executor.frontmostApp()).toBeUndefined();
+  });
+});
+
+describe('wmClassName', () => {
+  it('reads the second quoted string', () => {
+    expect(wmClassName('WM_CLASS(STRING) = "testapp.py", "Testapp.py"')).toBe('Testapp.py');
+  });
+
+  it('reads nothing from a line with one string, or an empty class', () => {
+    expect(wmClassName('WM_CLASS(STRING) = "solo"')).toBeUndefined();
+    expect(wmClassName('WM_CLASS(STRING) = "a", ""')).toBeUndefined();
+    expect(wmClassName('not a WM_CLASS line')).toBeUndefined();
+  });
+
+  it('decodes quote, backslash and octal escapes, and reads octal bytes as UTF-8', () => {
+    expect(wmClassName('WM_CLASS(STRING) = "i", "My\\"App"')).toBe('My"App');
+    expect(wmClassName('WM_CLASS(STRING) = "i", "back\\\\slash"')).toBe('back\\slash');
+    expect(wmClassName('WM_CLASS(STRING) = "i", "Caf\\303\\251"')).toBe('Café');
+    expect(wmClassName('WM_CLASS(STRING) = "i", "\\342\\202\\254uro"')).toBe('€uro');
+  });
 });
 
 describe.skipIf(!LINUX)('X11 key press through xdotool', () => {
@@ -155,6 +192,13 @@ describe.skipIf(!LINUX)('X11 key press through xdotool', () => {
 
   it('sends nothing when the app cannot be brought forward', async () => {
     const log = useFake({ active: '4194307', match: '4194307', activate: 'fail' });
+    const executor = await linuxExecutor();
+    expect(await executor.pressShortcut?.('Microsoft Excel', 'ctrl+a')).toBe(false);
+    expect(calls(log).some(line => line.startsWith('key'))).toBe(false);
+  });
+
+  it('sends nothing when the active window cannot be read', async () => {
+    const log = useFake({ active: '__fail__', match: '4194307' });
     const executor = await linuxExecutor();
     expect(await executor.pressShortcut?.('Microsoft Excel', 'ctrl+a')).toBe(false);
     expect(calls(log).some(line => line.startsWith('key'))).toBe(false);

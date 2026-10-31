@@ -250,18 +250,46 @@ function escapeRegex(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/**
+ * The class name in an xprop WM_CLASS line, such as: WM_CLASS(STRING) = "instance", "Class". xprop writes a quote or a
+ * backslash as a backslash escape, and a byte outside ASCII as a three-digit octal escape. The escapes are decoded to
+ * bytes, and the bytes are read as UTF-8. A line with one string has an instance name only, so it has no class.
+ */
+export function wmClassName(line: string): string | undefined {
+  const quoted = [...line.matchAll(/"((?:[^"\\]|\\.)*)"/g)];
+  if (quoted.length < 2) return undefined;
+  const chars = Array.from(quoted[1][1]);
+  const bytes: number[] = [];
+  for (let i = 0; i < chars.length; i++) {
+    if (chars[i] !== '\\') {
+      bytes.push(...Buffer.from(chars[i], 'utf8'));
+      continue;
+    }
+    const octal = chars.slice(i + 1, i + 4).join('');
+    if (/^[0-7]{3}$/.test(octal)) {
+      bytes.push(parseInt(octal, 8));
+      i += 3;
+    } else {
+      bytes.push(...Buffer.from(chars[i + 1] ?? '', 'utf8'));
+      i += 1;
+    }
+  }
+  return Buffer.from(bytes).toString('utf8') || undefined;
+}
+
 const linuxX11: Platform = {
   name: 'linux-x11',
   pollMs: 3000,
   async frontmost() {
-    const windowId = await run('xdotool', ['getactivewindow']);
-    // xdotool on Ubuntu 24.04 has no getwindowclassname, so the class is read from the window's WM_CLASS property.
-    // It is the second quoted string, as xdotool reports it. xprop escapes a quote or backslash inside it with a
-    // backslash. A value with one string has an instance name only, so it has no class.
-    const wmClass = await run('xprop', ['-id', windowId, 'WM_CLASS']);
-    const escaped = /,\s*"((?:[^"\\]|\\.)*)"\s*$/.exec(wmClass)?.[1];
-    const className = escaped?.replace(/\\(.)/g, '$1');
-    return className || undefined;
+    // xdotool on Ubuntu 24.04 has no getwindowclassname, so the class is read from the window's WM_CLASS property. A
+    // failed lookup means no app is in front, so it is reported as undefined rather than thrown.
+    try {
+      const windowId = await run('xdotool', ['getactivewindow']);
+      if (!windowId) return undefined;
+      return wmClassName(await run('xprop', ['-id', windowId, 'WM_CLASS']));
+    } catch {
+      return undefined;
+    }
   },
   async focus(app) {
     try {
