@@ -1,1 +1,232 @@
-/* Network ledger screen. Styles for its view in views/ledger.ts only; shared tokens and components live in tokens.css and app.css. */
+/* Network ledger screen. Styles for its view in views/ledger.ts only; shared tokens and components live in tokens.css and app.css.
+   The split stacks by default and sits side by side only when the view's own container is wide enough. */
+
+.ledger-view {
+  container: ledger / inline-size;
+  --ledger-cols: 112px minmax(0, 1fr) 84px 150px;
+  gap: 16px;
+}
+
+/* Gives the table its name for screen readers without a visible title. */
+.ledger-view .ledger-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Summary tiles */
+
+.ledger-view .ledger-tile {
+  gap: 2px;
+  padding: 14px 16px;
+}
+
+.ledger-view .ledger-tile-value {
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.ledger-view .ledger-tile.is-hosts .ledger-tile-value {
+  margin-top: 6px;
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  letter-spacing: 0;
+}
+
+.ledger-view .ledger-tile.is-clear {
+  border-color: var(--accent-soft-2);
+  background: var(--accent-soft);
+}
+
+.ledger-view .ledger-tile.is-clear .stat-label,
+.ledger-view .ledger-tile.is-clear .stat-note {
+  color: var(--accent-ink);
+}
+
+/* Table and detail */
+
+.ledger-view .ledger-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 16px;
+}
+
+@container ledger (min-width: 720px) {
+  .ledger-view .ledger-split {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  }
+}
+
+.ledger-view .ledger-table {
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.ledger-view .ledger-head,
+.ledger-view .ledger-entry {
+  display: grid;
+  grid-template-columns: var(--ledger-cols);
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+}
+
+.ledger-view .ledger-head {
+  height: 36px;
+  border-bottom: 1px solid var(--divider);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.ledger-view .ledger-rows {
+  max-height: 240px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.ledger-view .ledger-entry {
+  width: 100%;
+  min-height: 52px;
+  padding: 8px 16px;
+  border: 0;
+  border-bottom: 1px solid var(--divider);
+  border-radius: 0;
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ledger-view .ledger-entry:hover,
+.ledger-view .ledger-entry.is-selected {
+  background: var(--inset);
+}
+
+.ledger-view .ledger-cell-purpose {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ledger-view .ledger-purpose {
+  font-size: 13px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.ledger-view .ledger-when {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.ledger-view .ledger-item {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ledger-view .ledger-size {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.ledger-view .ledger-result {
+  justify-self: start;
+  max-width: 100%;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--neutral-soft);
+  color: var(--ink-2);
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.ledger-view .ledger-result.is-teal {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.ledger-view .ledger-result.is-danger {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--danger);
+  color: var(--danger);
+}
+
+.ledger-view .ledger-result.is-muted {
+  color: var(--muted);
+}
+
+.ledger-view .ledger-detail {
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.ledger-view .ledger-detail-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.ledger-view .ledger-detail-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.ledger-view .ledger-detail-note {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.ledger-view .ledger-raw {
+  margin: 12px 16px 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--code-bg);
+  color: var(--code-ink);
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ledger-view .ledger-facts {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: 8px 12px;
+  padding: 12px 16px 14px;
+  font-size: 13px;
+}
+
+/* Each label and value pair sits in the grid of the list above it. */
+.ledger-view .ledger-fact {
+  display: contents;
+}
+
+.ledger-view .ledger-facts dt {
+  color: var(--muted);
+}
+
+.ledger-view .ledger-facts dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
