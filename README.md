@@ -54,7 +54,9 @@ the owner's Mintlify account.
   used yet. Windows installers are unsigned, so SmartScreen warns about them.
 - **Updates.** Auto-update checks run only when `COMPANYOS_UPDATE_URL` is set to an HTTPS feed. No feed exists yet.
 - **Company mode** is not built. `packages/core/src/company` holds only the aggregate release arithmetic.
-- **Releases** are built by CI and uploaded as artifacts. Creating the GitHub Release from them is not automated yet.
+- **Releases.** Pushing a version tag builds the installers on macOS, Windows and Linux and creates a draft GitHub
+  Release from them. A person reviews the draft and publishes it by hand. No tag has been pushed yet, so no release
+  exists. The macOS job fails until the signing and notarisation secrets are added, and then no draft is created.
 
 ## Install
 
@@ -109,10 +111,12 @@ them in full.
 ## Releases
 
 A release is a version tag that matches `apps/desktop/package.json`, for example `v0.1.0`. Pushing it starts
-`.github/workflows/release.yml`, which builds on Ubuntu, macOS and Windows. A macOS release needs these repository
-secrets, and it fails without them: `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_API_KEY_P8`, `APPLE_API_KEY_ID` and
-`APPLE_API_ISSUER`. Windows signing, `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD`, is optional. The
-[releasing page](docs-site/releasing.mdx) explains each step.
+`.github/workflows/release.yml`, which builds the installers on Ubuntu, macOS and Windows and then creates a draft
+GitHub Release from them. Nothing is published automatically: review the draft and publish it by hand. A macOS release
+needs these repository secrets, and its job fails without them, so no draft is created: `CSC_LINK`, `CSC_KEY_PASSWORD`,
+`APPLE_API_KEY_P8`, `APPLE_API_KEY_ID` and `APPLE_API_ISSUER`. Windows signing, `WIN_CSC_LINK` and
+`WIN_CSC_KEY_PASSWORD`, is optional. The [releasing page](docs-site/releasing.mdx) has the checklist for the first
+release and the update feed recipe.
 
 ## More
 

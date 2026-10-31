@@ -1,33 +1,115 @@
 ---
 title: "Releasing"
-description: "How a version becomes installers, and what macOS needs before a build can ship"
+description: "How a version tag becomes a draft GitHub Release, what to set up before the first one, and how an update feed can use it"
 ---
 
 A release is a version tag. The tag must match `apps/desktop/package.json`, so `v0.1.0` builds version `0.1.0`.
 
 ## How it runs
 
-Pushing a tag such as `v0.1.0` starts `.github/workflows/release.yml`. The workflow checks the tag against the version, then builds the installers on Ubuntu, macOS and Windows. The installers and their update files are uploaded as workflow artifacts.
+Pushing a tag that starts with `v` starts `.github/workflows/release.yml`. It has two jobs.
+
+1. **package** runs on Ubuntu, macOS and Windows. Each run checks the tag against the version, installs, runs the typecheck and the unit tests (`npm test`), builds, and then packages with `npm run dist`. The privacy suite and the end-to-end script do not run here, so check that CI is green on the commit before you tag it. The installers, their `.blockmap` files and the `latest*.yml` update files are uploaded as workflow artifacts.
+2. **draft-release** runs on Ubuntu after all three package jobs succeed. It checks that `latest-mac.yml`, `latest.yml` and `latest-linux.yml` are all present, then creates a **draft** GitHub Release for the tag with every file and generated release notes.
+
+Nothing publishes by itself. The draft stays private until a person reviews it on GitHub and publishes it. The workflow also refuses to touch a release that already exists for the tag, draft or published.
+
+Files are named `companyOS-Twin-<version>-<arch>.<ext>`, with no spaces. `apps/desktop/electron-builder.yml` sets this on purpose. See [Update feed](#update-feed) for why.
+
+## Before the first release
+
+No tag has been pushed yet, so none of this has been run end to end. Go through the list in order.
+
+1. **Add the repository secrets.** In the repository on GitHub, open **Settings**, then **Secrets and variables**, then **Actions**, then **New repository secret**. Add each name below exactly as written. This needs the Apple Developer account for the macOS ones, so it is a job for the repository owner.
+
+   | Secret | What to put in it | Needed |
+   | --- | --- | --- |
+   | `CSC_LINK` | A Developer ID Application certificate, as a `.p12` file turned into base64 text (on a Mac, `base64 -i certificate.p12`). | macOS, required |
+   | `CSC_KEY_PASSWORD` | The password of that `.p12`. | macOS, required if the file has one |
+   | `APPLE_API_KEY_P8` | The full text of the App Store Connect API key file (`AuthKey_<id>.p8`), including its first and last lines. | macOS, required |
+   | `APPLE_API_KEY_ID` | The key ID of that API key. | macOS, required |
+   | `APPLE_API_ISSUER` | The issuer ID, which App Store Connect shows for a team key. | macOS, required |
+   | `WIN_CSC_LINK` | A Windows code-signing certificate, as base64 text. | Windows, optional |
+   | `WIN_CSC_KEY_PASSWORD` | The password of that certificate. | Windows, optional |
+
+   The Apple and Windows certificate steps themselves have not been checked here. The workflow only reads these names. No secret is stored in the repository.
+
+2. **Set the version.** Change `version` in `apps/desktop/package.json`, commit it, and get it onto the branch you will tag. Every package job compares the tag with that file first, and fails on a mismatch with "The tag v0.2.0 does not match apps/desktop/package.json version 0.1.0". The root `package.json` version is not checked.
+
+3. **Check CI.** The `ci` workflow should be green on that commit.
+
+4. **Push the tag.** From a clean checkout of that commit:
+
+   ```bash
+   git tag v0.1.0
+   git push origin v0.1.0
+   ```
+
+5. **Watch the run** on the **Actions** tab. The installers are large. A Linux `.deb` built on a test machine was about 626 MB.
+
+6. **Review the draft.** Open **Releases** on GitHub and find the draft. Check that it lists the macOS `.dmg` and `.zip`, the Windows `.exe`, the Linux `.deb` and `.rpm`, the `.blockmap` files that go with them, and the three `latest*.yml` files. Read the generated notes, then publish it by hand. Publishing is also what makes it the "latest" release for the update feed.
+
+If a job failed before the draft was made, for example because a secret was missing, add the secret and use **Re-run failed jobs** on the Actions page. That path was not tested. To start over after a draft exists, delete the draft release and the tag, fix the problem, and tag the fixed commit, or use the next version number. A run for a tag that already has a release stops on purpose.
+
+### Without the secrets
+
+- **macOS.** The release build stops before it builds. The workflow sets `COMPANYOS_RELEASE=1` for the macOS job, and in that mode `scripts/package.mjs` needs a certificate (`CSC_LINK` or `CSC_NAME`) and all three of `APPLE_API_KEY`, `APPLE_API_KEY_ID` and `APPLE_API_ISSUER`. It names what is missing and exits. This is by design: there is no unsigned macOS release.
+- **No draft either.** The draft job waits for all three package jobs. If the macOS job fails, no draft is created, even though the Windows and Linux installers were built. They remain as artifacts of the workflow run. Until the secrets exist, a tag cannot produce a release.
+- **Windows.** Without `WIN_CSC_LINK` the installer is built unsigned, and SmartScreen warns about it.
+- **Linux.** The `.deb` and `.rpm` are always unsigned.
 
 ## macOS
 
-The macOS build is for Apple silicon (arm64). It runs in release mode (`COMPANYOS_RELEASE=1`), and that mode refuses to build without these secrets:
+The macOS build is for Apple silicon (arm64). In release mode, Electron Builder signs the app with the hardened runtime and notarises it. `scripts/package.mjs` then checks the signature, the hardened runtime, the notarisation ticket and the Gatekeeper assessment, and it notarises and staples the disk image. A failed check fails the build.
 
-- `CSC_LINK` and `CSC_KEY_PASSWORD`: a Developer ID Application certificate, as a `.p12` file or its base64 text, and its password.
-- `APPLE_API_KEY_P8`, `APPLE_API_KEY_ID` and `APPLE_API_ISSUER`: an App Store Connect API key. The issuer ID is needed for a team key.
-
-Electron Builder signs the app with the hardened runtime and notarises it. `scripts/package.mjs` then checks the signature, the hardened runtime, the notarisation ticket and the Gatekeeper assessment, and it notarises and staples the disk image. A failed check fails the build.
-
-To build a signed release on your own Mac, set `CSC_NAME` to the name of the Developer ID Application identity in your keychain, and set the three `APPLE_API_*` variables to the key's path, key ID and issuer ID. Then run `COMPANYOS_RELEASE=1 npm run dist`.
+To build a signed release on your own Mac, set `CSC_NAME` to the name of the Developer ID Application identity in your keychain, and set `APPLE_API_KEY` (the path of the `.p8` file), `APPLE_API_KEY_ID` and `APPLE_API_ISSUER`. Then run `COMPANYOS_RELEASE=1 npm run dist`.
 
 ## Windows
 
-Installers are unsigned until `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD` are set. Until then SmartScreen warns about them.
+The installer is an NSIS `.exe` for 64-bit Windows. It is unsigned until `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD` are set. Until then SmartScreen warns about it.
 
 ## Linux
 
-The build produces a `.deb` and an `.rpm`. They are unsigned.
+The build produces a `.deb` and an `.rpm`. They are unsigned. The `rpm` tool is installed on the runner for the `.rpm`.
 
-## After the build
+## Update feed
 
-The workflow uploads the installers as artifacts. Creating a GitHub Release from them is a separate step, and the workflow does not do it yet.
+The app checks for updates only when it is a packaged build and `COMPANYOS_UPDATE_URL` is set to an HTTPS address. With the variable unset, or set to anything that is not a plain HTTPS address, it checks nothing and makes no request. The address must not carry a user name, a password or a query string. This is the default, and nothing on this page changes it.
+
+When the address is set, the app reads one channel file from it 30 seconds after start and then every six hours: `latest.yml` on Windows, `latest-mac.yml` on macOS, and `latest-linux.yml` on Linux (`latest-linux-arm64.yml` on arm64). A newer version downloads in the background and installs when the app quits. The app never restarts itself. Each check is written to the network ledger.
+
+### Use the GitHub Release as the feed
+
+Set the variable to the release download path:
+
+```text
+COMPANYOS_UPDATE_URL=https://github.com/katesaikishore/companyOS/releases/latest/download
+```
+
+GitHub answers a request for `latest/download/<file>` with a redirect to that file in the latest release. The release workflow already uploads the `latest*.yml` files and the installers that they name, so the same release serves as the feed. To try it, start the packaged app with the variable in its environment, for example from a terminal. There is no setting for it in the app yet.
+
+What was checked:
+
+- **The redirect works for an anonymous request.** On a public repository, `latest/download/checksums.txt` was followed by `curl`. It redirected to the tagged release URL, redirected again to GitHub's file host, and returned the file. A `?noCache=` query, which electron-updater adds to the channel file request, made no difference. A `Range` request returned `206`, so partial downloads work.
+- **The updater follows redirects.** In `electron-updater` 6.8.10 the channel file and the downloads both follow up to 10 redirects. This route uses two. The app does not limit which hosts the updater may reach. Only the model download has a host list.
+- **The app accepts the address.** `resolveUpdateFeed` returns an enabled feed for it, and a plain `http` address, or one with a query string, is refused.
+- **The names match.** electron-builder writes the file name into `latest*.yml` exactly as it built it. GitHub only keeps letters, digits, dots, underscores and dashes in an asset name, and electron-builder's own GitHub publisher renames files with spaces for that reason. The default names here start with "companyOS Twin", so they would not match what GitHub stores. `artifactName` in `electron-builder.yml` removes the space, and a unit test keeps it that way.
+
+What was not checked:
+
+- **No release exists yet.** `latest/download/latest.yml` on this repository returns 404 today. The whole loop, a packaged app finding a newer release, downloading it and installing it, has not been run. Test it with two real releases, for example `0.1.0` and `0.1.1`, before you tell anyone that updates work.
+- **Drafts and pre-releases are not served.** GitHub's "latest" is the newest release that is published and not marked as a pre-release. It is ordered by when the release was created, not by version number. This is GitHub's documented behaviour and was not tested here.
+- **The repository must be public.** An anonymous request to a private repository gets a 404. The repository page is public today.
+- **The `.rpm` name.** The Linux `.deb` was built and named as expected. The `.rpm` was not built here, because `rpmbuild` is not installed on the test machine. It uses the same pattern.
+
+### Privacy
+
+The ledger records the first request only: the host `github.com` and the path of the channel file. GitHub then redirects to its file host (`release-assets.githubusercontent.com` when this was checked), and that request is not listed. The installer download is not listed either, as the [privacy page](/privacy) says. GitHub sees the connection, including the IP address. The app sends no activity data.
+
+### Another host
+
+Any HTTPS folder works the same way. Upload the `latest*.yml` files and the installers that they name to the folder, and set `COMPANYOS_UPDATE_URL` to the folder's address. Keep the names as built.
+
+### Who gets updates
+
+Nobody, until the variable is set for them. There is no default feed. Turning updates on for everyone needs a decision from the owner: a setting in the app, or a default address in the code.
