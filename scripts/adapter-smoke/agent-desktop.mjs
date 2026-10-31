@@ -15,9 +15,12 @@ import {
   fileSize,
   launchOtherApp,
   launchTestApp,
+  MARKER,
   ps,
+  readClipboard,
   runMeta,
   screenshot,
+  setClipboard,
   sha256File,
   sleep,
   stats,
@@ -27,6 +30,7 @@ import {
 } from './lib.mjs';
 
 const CHORD = IS_MAC ? 'cmd+a' : 'ctrl+a';
+const COPY_CHORD = IS_MAC ? 'cmd+c' : 'ctrl+c';
 const report = { kind: 'agent-desktop', meta: runMeta(), version: '1.0.2', calls: [] };
 
 function log(label, value) {
@@ -220,6 +224,36 @@ try {
     frontAfter: (await frontmostDirect()).stdout.trim(),
   };
   log('PRESS_WITHOUT_FOCUS', report.pressWithoutFocus);
+
+  // Did the keys reach the app? Put a sentinel on the clipboard, select all, copy, read the clipboard back. Once after a
+  // focus-window call, and once with the other app in front and no focus call.
+  report.deliveryChecks = [];
+  for (const withFocus of [true, false]) {
+    await setClipboard('twin-smoke-sentinel');
+    await bringOtherForward(other?.app);
+    await sleep(700);
+    const frontBefore = (await frontmostDirect()).stdout.trim();
+    const calls = [];
+    const call = async args => {
+      const result = await capture(binary, args, { env, timeoutMs: 30_000, outputLimit: 1500 });
+      calls.push({ args: args.join(' '), exitCode: result.exitCode, durationMs: result.durationMs, envelope: parseEnvelope(result.stdout), stderr: result.stderr || undefined });
+    };
+    if (withFocus) await call(['focus-window', '--app', appName]);
+    await call(['press', CHORD, '--app', appName]);
+    await call(['press', COPY_CHORD, '--app', appName]);
+    await sleep(300);
+    const clip = await readClipboard();
+    const entry = {
+      withFocusCall: withFocus,
+      frontBefore,
+      calls,
+      frontAfter: (await frontmostDirect()).stdout.trim(),
+      clipboard: truncate(clip.stdout, 120),
+      equalsMarker: clip.stdout.trim() === MARKER,
+    };
+    report.deliveryChecks.push(entry);
+    log('DELIVERY', entry);
+  }
 
   // An app that is not running.
   await timed('focus-window (app not running)', binary, ['focus-window', '--app', 'TwinNoSuchApp'], 3, env);

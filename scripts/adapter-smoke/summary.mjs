@@ -27,6 +27,18 @@ function errorText(step) {
   return `${program} exit ${failed.exitCode ?? failed.errorCode}${failed.timedOut ? ' (timed out)' : ''}${text ? `: ${text}` : ''}`;
 }
 
+function openVariants(smoke) {
+  const step = (smoke.steps ?? []).find(item => item.name === 'Windows open variants');
+  const data = step?.result;
+  if (!data) return undefined;
+  return [
+    '| Windows open variant | Start-Process exit | Timed out | After (1.5 s) |',
+    '|---|---|---|---|',
+    ...data.results.map(r => `| ${cell(r.variant)} | ${r.start.exitCode} | ${r.start.timedOut} | ${clip(r.after, 100)} |`),
+    '',
+  ];
+}
+
 const lines = [];
 const smoke = load(`adapter-smoke-${process.platform}.json`);
 const desktop = load(`agent-desktop-${process.platform}.json`);
@@ -55,6 +67,7 @@ if (smoke) {
   }
   lines.push(
     '',
+    ...(openVariants(smoke) ?? []),
     `Key reached the app (clipboard copy matched the marker line): **${smoke.keyReachedApp}**. Press from another app left the app in front: **${smoke.pressFromOtherAppLeftAppInFront}**.`,
     '',
   );
@@ -89,6 +102,15 @@ if (desktop) {
     lines.push(`| press, other app in front, no focus call | ${p.exitCode} | ${p.envelope?.ok ?? '-'} | ${p.durationMs} | | |`);
   }
   lines.push('');
+  if (desktop.deliveryChecks?.length) {
+    lines.push('| Key delivery check (select all, copy, read clipboard) | Front before | Calls (exit) | Front after | Clipboard matched marker |', '|---|---|---|---|---|');
+    for (const check of desktop.deliveryChecks) {
+      lines.push(
+        `| ${check.withFocusCall ? 'after focus-window' : 'no focus call'} | ${cell(check.frontBefore)} | ${check.calls.map(c => `${c.args.split(' ')[0]}:${c.exitCode}`).join(', ')} | ${cell(check.frontAfter)} | ${check.equalsMarker} |`,
+      );
+    }
+    lines.push('');
+  }
 } else {
   lines.push('No agent-desktop JSON was written.', '');
 }

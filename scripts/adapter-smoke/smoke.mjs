@@ -8,6 +8,7 @@ import { dirname, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
+  IS_WIN,
   MARKER,
   OUT_DIR,
   bringOtherForward,
@@ -24,6 +25,7 @@ import {
   stopApps,
   systemInfo,
   truncate,
+  windowsOpenVariants,
   writeJson,
 } from './lib.mjs';
 
@@ -186,6 +188,12 @@ try {
   // 7. openFile: opens the marker file again in the app, through the adapter's own launch command. Last, because it can
   // add a second window.
   await step(`openFile ${name} (adapter launch command)`, () => executor.openFile?.(name, launched.file), withApp);
+
+  // 8. Windows only: variants of the same launch command, to find out why openFile can fail.
+  if (IS_WIN) {
+    await step('Windows open variants', () => windowsOpenVariants(launched.file));
+    await shot('after-open-variants');
+  }
 } catch (error) {
   report.fatal = { name: error?.name, message: truncate(error?.message ?? error, 1500) };
   console.log(`FATAL ${JSON.stringify(report.fatal)}`);

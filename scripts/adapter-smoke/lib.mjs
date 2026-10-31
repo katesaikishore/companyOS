@@ -244,20 +244,28 @@ $processId = [uint32]0
 
 /**
  * TextEdit reopens the windows it had when it was last killed. A second script in the same job would then see two
- * windows with the same title, so the saved state is removed before a launch and after a stop.
+ * windows with the same title. TextEdit is sandboxed, so its saved state lives in its container. Both the container path
+ * and the plain path are cleared, and window restoration is switched off for the test user.
  */
-function forgetTextEditState() {
+async function forgetTextEditState() {
   if (!IS_MAC) return;
-  try {
-    rmSync(join(process.env.HOME ?? '', 'Library/Saved Application State/com.apple.TextEdit.savedState'), { recursive: true, force: true });
-  } catch {
-    // Best effort. A leftover window shows up in the window count the scripts record.
+  const home = process.env.HOME ?? '';
+  for (const path of [
+    join(home, 'Library/Containers/com.apple.TextEdit/Data/Library/Saved Application State/com.apple.TextEdit.savedState'),
+    join(home, 'Library/Saved Application State/com.apple.TextEdit.savedState'),
+  ]) {
+    try {
+      rmSync(path, { recursive: true, force: true });
+    } catch {
+      // Best effort. A leftover window shows up in the window count the scripts record.
+    }
   }
+  await capture('defaults', ['write', 'com.apple.TextEdit', 'NSQuitAlwaysKeepsWindows', '-bool', 'false']);
 }
 
 /** Starts the test app on a temp file that holds a known marker line. Waits for its process and a window. */
 export async function launchTestApp() {
-  forgetTextEditState();
+  await forgetTextEditState();
   const dir = mkdtempSync(join(tmpdir(), 'twin-smoke-'));
   const file = join(dir, 'twin-smoke.txt');
   writeFileSync(file, `${MARKER}\n`);
@@ -346,7 +354,7 @@ export async function stopApps(names) {
   if (IS_MAC) {
     const results = await Promise.all(names.filter(name => name !== 'Finder').map(name => capture('pkill', ['-x', name])));
     await sleep(500);
-    forgetTextEditState();
+    await forgetTextEditState();
     return results;
   }
   const list = [...names, 'OpenWith'].map(name => `'${name}'`).join(',');
@@ -361,4 +369,59 @@ export async function setClipboard(text) {
 
 export async function readClipboard() {
   return IS_MAC ? capture('pbpaste') : ps('Get-Clipboard -Raw', {}, { timeoutMs: 30_000 });
+}
+
+/**
+ * Windows only. The adapter's openFile hung and returned false for the bare name "notepad" on the first hosted runner,
+ * and a "Select an app to open" picker appeared. These variants run the same Start-Process form the adapter uses
+ * (WIN_OPEN) with small changes, to find out what matters: the .exe suffix, the working directory, or the full path.
+ */
+export async function windowsOpenVariants(file) {
+  const lookup = await ps(
+    `
+$out = [ordered]@{}
+$out.cwd = (Get-Location).Path
+$out.commandApplication = @(Get-Command notepad -CommandType Application -All -ErrorAction SilentlyContinue | ForEach-Object { $_.Source })
+$dirs = @($env:PATH -split ';') + @($env:WINDIR, (Get-Location).Path) | Where-Object { $_ -and (Test-Path $_) }
+$out.extensionlessNotepad = @($dirs | ForEach-Object { Get-ChildItem -LiteralPath $_ -Filter notepad -File -ErrorAction SilentlyContinue } | ForEach-Object { $_.FullName })
+$out.pathExt = $env:PATHEXT
+$out | ConvertTo-Json -Compress
+`,
+    {},
+    { timeoutMs: 60_000 },
+  );
+  const variants = [
+    { name: 'notepad.exe, repo working directory', program: 'notepad.exe' },
+    { name: 'notepad, working directory C:\\Windows\\Temp', program: 'notepad', cwd: 'C:\\Windows\\Temp' },
+    { name: 'notepad, repo working directory (same as the adapter)', program: 'notepad' },
+    { name: 'full path C:\\Windows\\System32\\notepad.exe', program: 'C:\\Windows\\System32\\notepad.exe' },
+  ];
+  const results = [];
+  for (const variant of variants) {
+    const before = await ps('@(Get-Process -Name notepad -ErrorAction SilentlyContinue).Count', {}, { timeoutMs: 30_000 });
+    const start = await ps(
+      `
+$ErrorActionPreference = 'Stop'
+if ($env:TWIN_CWD) { Set-Location $env:TWIN_CWD }
+Start-Process -FilePath $env:TWIN_APP -ArgumentList ('"' + $env:TWIN_TARGET + '"')
+'ok'
+`,
+      { TWIN_APP: variant.program, TWIN_TARGET: file, TWIN_CWD: variant.cwd ?? '' },
+      { timeoutMs: 8000 },
+    );
+    await sleep(1500);
+    const after = await ps(
+      `[ordered]@{ notepadProcesses = @(Get-Process -Name notepad -ErrorAction SilentlyContinue).Count; pickerShown = (@(Get-Process -Name OpenWith -ErrorAction SilentlyContinue).Count -gt 0) } | ConvertTo-Json -Compress
+Get-Process -Name OpenWith -ErrorAction SilentlyContinue | Stop-Process -Force`,
+      {},
+      { timeoutMs: 30_000 },
+    );
+    results.push({
+      variant: variant.name,
+      notepadBefore: before.stdout.trim(),
+      start: { exitCode: start.exitCode, timedOut: start.timedOut, stdout: start.stdout.trim(), stderr: start.stderr, durationMs: start.durationMs },
+      after: after.stdout.trim(),
+    });
+  }
+  return { lookup, results };
 }
