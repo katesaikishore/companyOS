@@ -22,7 +22,7 @@ It never records window titles, page text, typed text, the clipboard, screenshot
 ## What leaves the device
 
 - **Model downloads.** Only when you install a model. The download comes from Hugging Face hosts, and its SHA-256 digest is checked before the model is used.
-- **Update checks.** Only in a packaged build with an HTTPS update feed set. No feed is configured yet.
+- **Update checks.** Only in a packaged build with an HTTPS update feed set. No feed is configured yet. A feed may redirect, as a GitHub Release does, and the ledger lists only the first address. See [Releasing](/releasing#update-feed).
 
 Update files downloaded automatically after a check are not listed in the network ledger. The model and update hosts see the connection, including your IP address, but they receive no activity data.
 
