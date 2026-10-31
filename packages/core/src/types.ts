@@ -73,6 +73,11 @@ export interface TwinEvent {
   urlTemplate?: string;
 }
 
+/** The most consecutive declines a routine's count holds. Past seven days of cooldown the count adds nothing. */
+export const MAX_DECLINE_STREAK = 32;
+/** The longest dismissed-routine signature kept. A longer one is not stored, so its routine is hidden by id only. */
+export const MAX_SIGNATURE_CHARS = 2048;
+
 export const TwinConfigSchema = z
   .object({
     excludedApps: z.array(z.string().min(1).max(100)).max(200),
@@ -88,6 +93,21 @@ export const TwinConfigSchema = z
       .array(z.object({ id: z.string().max(80), sha256: z.string().length(64), bytes: z.number().int().nonnegative(), installedAt: z.number() }).strict())
       .max(20),
     dismissedRoutineIds: z.array(z.string().max(40)).max(500),
+    /** The step keys of each dismissed routine, joined with '>'. A near copy of a dismissed routine is hidden too. */
+    dismissedRoutineSignatures: z.array(z.string().min(1).max(MAX_SIGNATURE_CHARS)).max(500).default([]),
+    /** When each routine was last declined or dismissed, and how many times in a row. Kept so a restart keeps the wait. */
+    declinedRoutines: z
+      .array(
+        z
+          .object({
+            routineId: z.string().min(1).max(40),
+            at: z.number().int().nonnegative(),
+            count: z.number().int().min(1).max(MAX_DECLINE_STREAK),
+          })
+          .strict(),
+      )
+      .max(500)
+      .default([]),
     /** Optional local OpenMausBot CLI bridge. The data export includes it, because the export carries the whole config. */
     openMausBotCommand: z.string().trim().min(1).max(512).default('openmausbot'),
     /** Existing OpenMausBot lead bot or room; blank disables delegation. */
@@ -120,6 +140,8 @@ export const DEFAULT_CONFIG: TwinConfig = {
   automationsEnabled: true,
   installedModels: [],
   dismissedRoutineIds: [],
+  dismissedRoutineSignatures: [],
+  declinedRoutines: [],
   openMausBotCommand: 'openmausbot',
   openMausBotTarget: '',
 };

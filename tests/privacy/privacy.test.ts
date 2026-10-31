@@ -79,6 +79,10 @@ describe('no canary appears on any output surface', () => {
     expectNoLeaks(run.surfaces, name => name === 'export:automations');
   });
 
+  it('the exported config, with the declines and dismissals it keeps', () => {
+    expectNoLeaks(run.surfaces, name => name === 'export:config');
+  });
+
   it('the habits summary', () => {
     expectNoLeaks(run.surfaces, name => name === 'habits');
   });

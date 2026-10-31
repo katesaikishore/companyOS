@@ -102,7 +102,7 @@ export interface AppReadinessRoutineView {
   switches: number;
   /** Automatable when every step is local and reversible. Approval when a step is not. */
   kind: 'automatable' | 'approval';
-  /** Suggested, accepted as an automation, or dismissed by the person. */
+  /** Suggested, accepted as an automation, or dismissed by the person. A near copy of a dismissed routine is dismissed too. */
   status: 'suggested' | 'accepted' | 'dismissed';
   automationId?: string;
   automationName?: string;

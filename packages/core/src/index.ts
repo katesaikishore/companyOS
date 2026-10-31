@@ -16,6 +16,7 @@ export * from './agent';
 export * from './handoff';
 export * from './models';
 export * from './triggers';
+export * from './dismissed';
 export * from './contract';
 export * from './readiness';
 export * from './habits';

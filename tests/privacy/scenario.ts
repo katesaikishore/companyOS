@@ -149,6 +149,8 @@ export async function runPlantedScenario(): Promise<ScenarioRun> {
     agent.setLevel(view.automation.id, 3);
     await agent.run(view.automation.id, { mode: 'dry_run' }, focusingExecutor());
     await agent.run(view.automation.id, { mode: 'supervised', approve: async () => true }, focusingExecutor());
+    // A decline is kept in the encrypted config, so the store and the export carry it. The canary checks read it there.
+    agent.recordDecline(view.automation.id);
 
     for (const attempt of [() => agent.setLevel('auto_unknown', 3), () => agent.acceptRoutine('routine_unknown')]) {
       try {
@@ -188,13 +190,14 @@ export async function runPlantedScenario(): Promise<ScenarioRun> {
       runOpenMausBotTask({ command: 'openmausbot', target: 'Lead Bot', automation: view.automation, taskBrief: HANDOFF_BRIEF }),
     );
 
-    const exported = agent.exportAll() as { events: TwinEvent[]; automations: Automation[] };
+    const exported = agent.exportAll() as { events: TwinEvent[]; automations: Automation[]; config: unknown };
     const surfaces: Surface[] = [
       ...diskSurfaces(root, storeDir, key),
       { name: 'console', text: capture.text() },
       { name: 'ledger', text: JSON.stringify({ network: agent.networkLedger(), downloads: models.states() }, null, 2) },
       { name: 'export', text: JSON.stringify(exported, null, 2) },
       { name: 'export:automations', text: JSON.stringify(exported.automations, null, 2) },
+      { name: 'export:config', text: JSON.stringify(exported.config, null, 2) },
       { name: 'habits', text: JSON.stringify(agent.habits(), null, 2) },
       { name: 'prompt:openmausbot', text: prompt },
       { name: 'errors', text: thrown.map(errorText).join('\n') },

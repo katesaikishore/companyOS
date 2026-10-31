@@ -1,5 +1,6 @@
 import type { Automation } from './automation';
 import { normalizeAppName } from './classify';
+import { MAX_DECLINE_STREAK } from './types';
 
 /**
  * When the twin may offer to run a routine. An offer only ever asks; a person approves each run.
@@ -8,8 +9,13 @@ import { normalizeAppName } from './classify';
 export const TRIGGER_RULES = {
   /** After an offer, the same routine is not offered again for this long. */
   offerCooldownMs: 60 * 60_000,
-  /** After "Not now", the routine is left alone for this long. */
+  /**
+   * After "Not now" or a dismissal, the routine is left alone for this long. Each decline in a row, with no accept or
+   * completed run in between, doubles the wait, up to declineCooldownCapMs.
+   */
   declineCooldownMs: 4 * 60 * 60_000,
+  /** The longest a decline cooldown grows to: seven days. */
+  declineCooldownCapMs: 7 * 24 * 60 * 60_000,
   /** At most this many offers per routine per local day. */
   maxOffersPerDay: 6,
   /** An offer nobody answers expires after this long. */
@@ -33,40 +39,83 @@ function dayKey(ts: number): string {
   return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
 }
 
+/** The most decline records kept. The oldest are dropped first. The stored list is bounded the same way (types.ts). */
+const MAX_DECLINE_RECORDS = 500;
+
+/** One routine's declines: when the latest was, and how many came in a row with no accept or completed run between. */
+export interface DeclineRecord {
+  routineId: string;
+  /** When the latest decline or dismissal happened, in ms. */
+  at: number;
+  count: number;
+}
+
+/** How long a routine is left alone after its latest decline. The wait doubles with each decline in a row, up to the cap. */
+function declineCooldownMs(count: number): number {
+  return Math.min(TRIGGER_RULES.declineCooldownMs * 2 ** (count - 1), TRIGGER_RULES.declineCooldownCapMs);
+}
+
 /**
- * Remembers when each routine was offered or declined, and answers whether it may be offered now.
- * It lives in memory on purpose: a restart can cause one extra offer, and it never causes a run.
+ * Remembers when each routine was offered or declined, and answers whether it may be offered now. Declines are kept in
+ * the encrypted config, so a restart does not offer a routine again that the person just declined. That is safe because
+ * a restart can never start a run. Offers and the quiet time after a run stay in memory: a restart can cause one extra
+ * offer, and it never causes a run.
  */
 export class TriggerGate {
   private readonly offered = new Map<string, number>();
-  private readonly declined = new Map<string, number>();
+  /** Insertion order follows the latest decline, so the oldest records come first. */
+  private readonly declines = new Map<string, DeclineRecord>();
   private readonly offersToday = new Map<string, { day: string; count: number }>();
   private quietUntil = 0;
 
-  constructor(private readonly now: () => number = () => Date.now()) {}
+  /** `saved` holds the declines kept from an earlier run. The agent loads them when it starts. */
+  constructor(
+    private readonly now: () => number = () => Date.now(),
+    saved: readonly DeclineRecord[] = [],
+  ) {
+    for (const record of saved) this.declines.set(record.routineId, record);
+  }
 
-  eligible(automationId: string): boolean {
+  eligible(routineId: string): boolean {
     const time = this.now();
     if (time < this.quietUntil) return false;
-    const lastOffer = this.offered.get(automationId);
+    const lastOffer = this.offered.get(routineId);
     if (lastOffer !== undefined && time - lastOffer < TRIGGER_RULES.offerCooldownMs) return false;
-    const lastDecline = this.declined.get(automationId);
-    if (lastDecline !== undefined && time - lastDecline < TRIGGER_RULES.declineCooldownMs) return false;
-    const today = this.offersToday.get(automationId);
+    const decline = this.declines.get(routineId);
+    if (decline && time - decline.at < declineCooldownMs(decline.count)) return false;
+    const today = this.offersToday.get(routineId);
     if (today && today.day === dayKey(time) && today.count >= TRIGGER_RULES.maxOffersPerDay) return false;
     return true;
   }
 
-  recordOffer(automationId: string): void {
+  recordOffer(routineId: string): void {
     const time = this.now();
-    this.offered.set(automationId, time);
-    const today = this.offersToday.get(automationId);
+    this.offered.set(routineId, time);
+    const today = this.offersToday.get(routineId);
     const count = today && today.day === dayKey(time) ? today.count + 1 : 1;
-    this.offersToday.set(automationId, { day: dayKey(time), count });
+    this.offersToday.set(routineId, { day: dayKey(time), count });
   }
 
-  recordDecline(automationId: string): void {
-    this.declined.set(automationId, this.now());
+  /** "Not now", or a dismissal. Each one in a row, with no accept or completed run between, lengthens the wait. */
+  recordDecline(routineId: string): void {
+    const count = Math.min((this.declines.get(routineId)?.count ?? 0) + 1, MAX_DECLINE_STREAK);
+    // Removed first, so the record moves to the end and the oldest are the ones dropped when the list is full.
+    this.declines.delete(routineId);
+    this.declines.set(routineId, { routineId, at: this.now(), count });
+    if (this.declines.size > MAX_DECLINE_RECORDS) {
+      const oldest = this.declines.keys().next();
+      if (!oldest.done) this.declines.delete(oldest.value);
+    }
+  }
+
+  /** An accept or a completed run starts the count again. Returns whether there was a count to clear. */
+  resetDeclines(routineId: string): boolean {
+    return this.declines.delete(routineId);
+  }
+
+  /** Every decline record, oldest first. The agent writes these to the encrypted config. */
+  declineRecords(): DeclineRecord[] {
+    return [...this.declines.values()];
   }
 
   quietAfterRun(): void {
