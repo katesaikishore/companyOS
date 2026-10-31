@@ -37,6 +37,7 @@ import { destroyStoredSecrets, loadOrCreateDataKey } from './keys';
 import { detectHardware } from './hardware';
 import { ModelManager, createRoutineNamer } from './models';
 import { browserCapturePaths, installNativeHost, isBrowserCaptureSupported, removeNativeHost } from './native-host-install';
+import { handsExecutor } from './agent-desktop';
 import { observedAppSequence, runOpenMausBotTask, sendHandoff } from './openmausbot';
 import { choosePlatform, executorFor, type Platform } from './platform';
 
@@ -286,8 +287,23 @@ export class TwinRuntime {
           mode: 'supervised',
           approve: (step, decision) => this.options.approve(automation, step, decision),
         },
-        executorFor(platform),
+        this.runExecutor(platform),
       );
+    });
+  }
+
+  /**
+   * The executor for one run. An empty agent-desktop path keeps the built-in adapters, so focus and key steps work as
+   * before. A path sends those two steps through the program, and an unusable path blocks them with the reason. The
+   * program's exit status and duration are logged, and nothing it was given is.
+   */
+  private runExecutor(platform: Platform): Executor {
+    const native = executorFor(platform);
+    const binary = this.agent.configuration.agentDesktopPath.trim();
+    if (binary === '') return native;
+    return handsExecutor(native, {
+      binary,
+      record: entry => console.info(`[agent-desktop] ${entry.step} exit=${entry.exit} duration=${entry.durationMs}ms`),
     });
   }
 
@@ -368,7 +384,7 @@ export class TwinRuntime {
         this.agent.run(
           automationId,
           { mode: 'unattended' },
-          executorFor(platform),
+          this.runExecutor(platform),
         ),
       );
       this.options.onUnattendedRun?.(result);
