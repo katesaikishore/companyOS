@@ -223,6 +223,59 @@ describe('press_shortcut', () => {
     expect(result.postconditionsPassed).toBe(1);
   });
 
+  it('presses nothing when the person declines', async () => {
+    const { executor, calls } = fakeDesktop();
+    const result = await runAutomation(
+      automation([CHORD]),
+      { mode: 'supervised', policy: ctx(), approve: async () => false, settleMs: 0 },
+      executor,
+    );
+    expect(result.status).toBe('blocked');
+    expect(result.steps[0].reason).toBe('Not approved.');
+    expect(calls).toEqual([]);
+  });
+
+  it('asks again for every key press in one run', async () => {
+    const { executor, calls } = fakeDesktop();
+    const approve = vi.fn(async () => true);
+    const result = await runAutomation(automation([CHORD, CHORD]), { mode: 'supervised', policy: ctx(), approve, settleMs: 0 }, executor);
+    expect(result.status).toBe('completed');
+    expect(approve).toHaveBeenCalledTimes(2);
+    expect(calls).toEqual(['key:microsoft excel:cmd+shift+k', 'key:microsoft excel:cmd+shift+k']);
+  });
+
+  it('a press the adapter reports as failed stops the run with the press reason', async () => {
+    const { executor } = fakeDesktop();
+    const refused: Executor = { ...executor, pressShortcut: async () => false };
+    const result = await runAutomation(automation([CHORD]), { mode: 'supervised', policy: ctx(), approve: async () => true, settleMs: 0 }, refused);
+    expect(result.status).toBe('failed');
+    expect(result.steps[0]).toMatchObject({ outcome: 'failed', reason: 'The shortcut could not be pressed.' });
+  });
+
+  it('a press that throws is an ordinary failure, and the error text is not kept', async () => {
+    const { executor } = fakeDesktop();
+    const throws: Executor = {
+      ...executor,
+      pressShortcut: async () => {
+        throw new Error('osascript: keystroke text');
+      },
+    };
+    const result = await runAutomation(automation([CHORD]), { mode: 'supervised', policy: ctx(), approve: async () => true, settleMs: 0 }, throws);
+    expect(result.status).toBe('failed');
+    expect(result.steps[0].reason).toBe('The shortcut could not be pressed.');
+  });
+
+  it('a stop request before the press sends nothing', async () => {
+    const { executor, calls } = fakeDesktop();
+    const result = await runAutomation(
+      automation([CHORD]),
+      { mode: 'supervised', policy: ctx(), approve: async () => true, shouldStop: () => true, settleMs: 0 },
+      executor,
+    );
+    expect(result.status).toBe('blocked');
+    expect(calls).toEqual([]);
+  });
+
   it('fails when pressing the chord moves focus to another app', async () => {
     const { executor } = fakeDesktop();
     const moved: Executor = { ...executor, frontmostApp: async () => 'slack' };
