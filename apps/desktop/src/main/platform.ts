@@ -151,10 +151,23 @@ $processId = [uint32]0
 (Get-Process -Id $processId -ErrorAction SilentlyContinue).ProcessName
 `;
 
-const WIN_FOCUS = `
+/**
+ * Brings the app forward. AppActivate does not restore a minimized window: on a hosted Windows runner it returned false
+ * every time for a minimized Notepad. So when the first AppActivate fails, a minimized window is restored and AppActivate
+ * is tried once more. A window that is not minimized is never touched. Exit codes: 2 not running, 3 not activated.
+ */
+export const WIN_FOCUS = `
 $process = Get-Process -Name $env:TWIN_APP -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
 if (-not $process) { exit 2 }
 $shell = New-Object -ComObject WScript.Shell
+if ($shell.AppActivate($process.Id)) { 'ok'; exit 0 }
+Add-Type -Namespace Twin -Name Restore -MemberDefinition @'
+[DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
+[DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+'@
+if (-not [Twin.Restore]::IsIconic($process.MainWindowHandle)) { exit 3 }
+[void][Twin.Restore]::ShowWindowAsync($process.MainWindowHandle, 9)
+Start-Sleep -Milliseconds 300
 if ($shell.AppActivate($process.Id)) { 'ok' } else { exit 3 }
 `;
 
@@ -167,20 +180,27 @@ Start-Process -FilePath $env:TWIN_APP -ArgumentList ('"' + $env:TWIN_TARGET + '"
 
 /**
  * Activates the app, waits until its window is the foreground window, and only then sends the keys. The keys come from
- * the environment as a SendKeys string built from the checked chord. Exit codes: 2 not running, 3 not activated,
- * 4 never in front.
+ * the environment as a SendKeys string built from the checked chord. A minimized window is restored when the first
+ * activation fails, as in WIN_FOCUS. Exit codes: 2 not running, 3 not activated, 4 never in front.
  */
-const WIN_PRESS = `
+export const WIN_PRESS = `
 $ErrorActionPreference = 'Stop'
 $process = Get-Process -Name $env:TWIN_APP -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
 if (-not $process) { exit 2 }
 Add-Type -Namespace Twin -Name Keys -MemberDefinition @'
 [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
 [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+[DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
+[DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
 '@
 Add-Type -AssemblyName System.Windows.Forms
 $shell = New-Object -ComObject WScript.Shell
-if (-not $shell.AppActivate($process.Id)) { exit 3 }
+if (-not $shell.AppActivate($process.Id)) {
+  if (-not [Twin.Keys]::IsIconic($process.MainWindowHandle)) { exit 3 }
+  [void][Twin.Keys]::ShowWindowAsync($process.MainWindowHandle, 9)
+  Start-Sleep -Milliseconds 300
+  if (-not $shell.AppActivate($process.Id)) { exit 3 }
+}
 $inFront = $false
 for ($attempt = 0; $attempt -lt 10; $attempt++) {
   $foreground = [uint32]0
@@ -199,9 +219,19 @@ function encode(script: string): string {
 
 const POWERSHELL = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand'];
 
+/**
+ * The program name that Start-Process is given. The shell looks a bare name up on PATH and accepts a file with no
+ * extension. Git for Windows puts a file named "notepad" with no extension in its usr\bin folder, and on a hosted runner
+ * the shell picked it instead of notepad.exe: it showed its "Select an app to open" picker and opened nothing. Adding
+ * ".exe" makes the shell look for the program only. A name that already has an extension, or that has a path, is not changed.
+ */
+export function windowsProgram(app: string): string {
+  return /[\\/:]/.test(app) || /\.[A-Za-z0-9]{1,5}$/.test(app) ? app : `${app}.exe`;
+}
+
 /** The target goes through the environment, never the script text, so a name or path cannot change the command. */
 async function openWindows(app: string, target: string): Promise<boolean> {
-  const env = { ...process.env, TWIN_APP: app, TWIN_TARGET: target };
+  const env = { ...process.env, TWIN_APP: windowsProgram(app), TWIN_TARGET: target };
   try {
     return (await run('powershell.exe', [...POWERSHELL, encode(WIN_OPEN)], env)) === 'ok';
   } catch {

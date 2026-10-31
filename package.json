@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "description": "companyOS Twin: a private, employee-owned work twin for macOS, Windows and Linux",
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "workspaces": [
     "packages/*",
     "apps/*"
