@@ -1,9 +1,13 @@
 name: release
 
-# Builds the installers when a version tag such as v0.2.0 is pushed. Each platform signs only when its certificate
-# secret exists, and otherwise builds unsigned. Nothing here publishes a release: installers and the update files that
-# electron-updater reads (latest*.yml and *.blockmap) are uploaded as workflow artifacts. Secrets are referenced by
-# name only and never stored in the repository (see electron-builder.yml).
+# Runs when a version tag such as v0.2.0 is pushed, in two jobs:
+#   package:       builds the installers on macOS, Windows and Linux with the desktop packaging script
+#                  (apps/desktop/scripts/package.mjs, through npm run dist). Each platform signs only when its
+#                  certificate secret exists, and otherwise builds unsigned.
+#   draft-release: gathers those installers and the update files that electron-updater reads (latest*.yml and
+#                  *.blockmap) into one DRAFT GitHub Release for the tag.
+# Nothing here publishes a release. The draft stays private until a person reviews it on GitHub and publishes it by
+# hand. Secrets are referenced by name only and never stored in the repository (see electron-builder.yml).
 
 on:
   push:
@@ -12,6 +16,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   package:
@@ -119,3 +127,48 @@ jobs:
             apps/desktop/release/*.blockmap
             apps/desktop/release/latest*.yml
           if-no-files-found: error
+
+  draft-release:
+    name: draft GitHub Release
+    needs: package
+    runs-on: ubuntu-latest
+    # Only this job can write to the repository, and it only creates a draft. No step here publishes or un-drafts.
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - name: Download the installers and update files from every platform
+        uses: actions/download-artifact@v4
+        with:
+          pattern: installers-*
+          path: release-files
+          merge-multiple: true
+
+      - name: Check the update files for each platform are present
+        shell: bash
+        run: |
+          for file in latest-mac.yml latest.yml latest-linux.yml; do
+            if [ ! -f "release-files/$file" ]; then
+              echo "Missing $file. The update feed needs it, so no draft is created."
+              exit 1
+            fi
+          done
+          ls -l release-files
+
+      - name: Create the draft release
+        shell: bash
+        run: |
+          # Stop rather than change a release that already exists, whether it is a draft or published.
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "A release for $TAG already exists. Nothing was changed. Delete it on GitHub to run this again."
+            exit 1
+          fi
+          gh release create "$TAG" release-files/* \
+            --draft \
+            --verify-tag \
+            --title "companyOS Twin $TAG" \
+            --generate-notes
+          echo "Draft release $TAG created. Review it on GitHub and publish it by hand."

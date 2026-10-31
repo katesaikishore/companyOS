@@ -51,11 +51,51 @@ describe('resolveUpdateFeed', () => {
     });
   });
 
+  it('treats a missing variable as no feed, whatever else the environment holds', () => {
+    expect(resolveUpdateFeed(true, { COMPANYOS_OTHER: 'https://updates.example.com/companyos' })).toEqual({
+      enabled: false,
+      reason: 'no-feed',
+    });
+    expect(resolveUpdateFeed(true, { [UPDATE_FEED_VARIABLE]: undefined })).toEqual({
+      enabled: false,
+      reason: 'no-feed',
+    });
+  });
+
+  it('reads the variable from the process environment when no environment is passed', () => {
+    const previous = process.env[UPDATE_FEED_VARIABLE];
+    try {
+      delete process.env[UPDATE_FEED_VARIABLE];
+      expect(resolveUpdateFeed(true)).toEqual({ enabled: false, reason: 'no-feed' });
+
+      process.env[UPDATE_FEED_VARIABLE] = 'https://updates.example.com/companyos';
+      expect(resolveUpdateFeed(true)).toEqual({ enabled: true, feedUrl: 'https://updates.example.com/companyos' });
+    } finally {
+      if (previous === undefined) delete process.env[UPDATE_FEED_VARIABLE];
+      else process.env[UPDATE_FEED_VARIABLE] = previous;
+    }
+  });
+
+  it('keeps the feed as the URL parser normalises it', () => {
+    expect(resolveUpdateFeed(true, withFeed('HTTPS://Updates.Example.com:8443/companyos'))).toEqual({
+      enabled: true,
+      feedUrl: 'https://updates.example.com:8443/companyos',
+    });
+    expect(resolveUpdateFeed(true, withFeed('https://updates.example.com'))).toEqual({
+      enabled: true,
+      feedUrl: 'https://updates.example.com/',
+    });
+  });
+
   it.each([
     ['plain HTTP', 'http://updates.example.com/companyos'],
     ['a file path', 'file:///Users/someone/feed'],
+    ['an FTP address', 'ftp://updates.example.com/companyos'],
+    ['a data URL', 'data:text/plain,feed'],
     ['not a URL', 'updates.example.com'],
+    ['only the scheme', 'https://'],
     ['credentials in the URL', 'https://user:pass@updates.example.com/companyos'],
+    ['only a user name in the URL', 'https://user@updates.example.com/companyos'],
     ['a query string', 'https://updates.example.com/companyos?token=abc'],
   ])('rejects a feed with %s', (_label, value) => {
     expect(resolveUpdateFeed(true, withFeed(value))).toEqual({ enabled: false, reason: 'invalid-feed' });
