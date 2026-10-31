@@ -12,7 +12,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 // The stand-in bridge listens on a Unix socket, which Windows does not support here. The browser bridge is off on Windows
-// (native-host-install refuses to install there), so these tests skip on Windows rather than fail for that reason.
+// (the app does not start it there yet), so these tests skip on Windows rather than fail for that reason.
 const WINDOWS_SKIP = process.platform === 'win32' ? 'the browser bridge uses Unix sockets, which Windows does not support here' : false;
 const test = (name, fn) => baseTest(name, { skip: WINDOWS_SKIP }, fn);
 const { spawn } = require('node:child_process');
