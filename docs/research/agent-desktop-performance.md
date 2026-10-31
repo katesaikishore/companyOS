@@ -82,6 +82,18 @@ show: whether the fault is in agent-desktop's press code, in the GTK 3 accessibi
 (at-spi2-core 2.52.0), or in the test app. The agent-desktop Linux guide mentions an at-spi2-core bridge fix and an
 abort on `Action.GetActions` on other distributions, so the bridge is a likely suspect. That is a lead, not a finding.
 
+Follow-up checks:
+
+- The fault is a native SIGSEGV inside libgtk-3 (`gtk_main_do_event`). No AT-SPI, GTK accessibility bridge or X library frame is on
+  the stack.
+- The stress script reproduced the crash on a fresh display: headless press died in 3 of 3 trials.
+- A Python client that replays agent-desktop's AT-SPI calls, then sends the key, did not crash in 3 trials of 60
+  presses. One real press run without the earlier focus calls did not crash either. The reason for the difference from
+  the crashing runs is not known.
+- Killing an earlier test window before the measured one raised the crash rate: 3 of 3 trials died, against 1 of 3 with
+  no earlier window. The sample is small, so this is a lead.
+- Until the cause is known, a press through agent-desktop on Linux should not be relied on.
+
 ## Findings
 
 1. **The executor's command shape was wrong.** It called commands the CLI does not have. This is fixed on this branch.
