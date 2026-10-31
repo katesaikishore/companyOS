@@ -12,6 +12,7 @@ export const IPC = {
   stopAllAutomations: 'twin:stop-all-automations',
   acceptRoutine: 'twin:accept-routine',
   dismissRoutine: 'twin:dismiss-routine',
+  renameAutomation: 'twin:rename-automation',
   setLevel: 'twin:set-level',
   promote: 'twin:promote',
   dryRun: 'twin:dry-run',

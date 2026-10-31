@@ -275,6 +275,8 @@ export interface TwinBridge {
 
   acceptRoutine(routineId: string, name?: string): Promise<AutomationView>;
   dismissRoutine(routineId: string): Promise<void>;
+  /** Changes the name of an automation. Nothing else about it changes. */
+  renameAutomation(automationId: string, name: string): Promise<AutomationView>;
   setLevel(automationId: string, level: AutonomyLevel): Promise<AutomationView>;
   promote(automationId: string): Promise<AutomationView>;
   dryRun(automationId: string): Promise<RunResult>;

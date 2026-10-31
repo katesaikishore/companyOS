@@ -49,6 +49,8 @@ export const state = {
   agentTaskBriefs: new Map<string, string>(),
   /** The handoff the harness page shows in its conversation. Unset means the newest. */
   selectedHandoff: undefined as string | undefined,
+  /** The automation whose name is being edited, and the text typed so far. Unset when no name is being edited. */
+  renaming: undefined as { automationId: string; draft: string } | undefined,
 };
 
 let renderer: (() => void) | undefined;

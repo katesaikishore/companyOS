@@ -91,7 +91,7 @@ function signature(status: TwinStatus | undefined): string {
     pending: [...state.pending].sort(),
     wizard: [state.wizardForced, state.wizardStep, state.altOpen],
     setup: state.setup,
-    selection: [state.selectedSuggestion, state.selectedLedger, state.selectedHandoff, state.automationTab],
+    selection: [state.selectedSuggestion, state.selectedLedger, state.selectedHandoff, state.automationTab, state.renaming?.automationId],
     runs: [...state.runResults.entries()],
   });
 }
@@ -183,6 +183,7 @@ function boot(): void {
   window.addEventListener('hashchange', () => {
     state.route = routeFromHash(location.hash);
     state.dirty.clear();
+    state.renaming = undefined;
     requestRender();
   });
 

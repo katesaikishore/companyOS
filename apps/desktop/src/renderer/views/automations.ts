@@ -143,7 +143,7 @@ function routineDetail(status: TwinStatus, view: AutomationView): HTMLElement {
       h(
         'div',
         { class: 'auto-detail-title' },
-        h('h2', { class: 'auto-detail-name' }, automation.name),
+        nameBlock(view),
         h('span', { class: 'auto-detail-sub mono' }, routineSub(view)),
       ),
       h(
@@ -176,6 +176,97 @@ function routineDetail(status: TwinStatus, view: AutomationView): HTMLElement {
 /** Keeps a run's result with the time it arrived. The strip shows that time, so a repeat run redraws it. */
 function keepResult(automationId: string, result: RunResult): void {
   state.runResults.set(automationId, { ...result, at: Date.now() });
+}
+
+/** The name with its Rename control. While the person edits the name, the form takes its place. */
+function nameBlock(view: AutomationView): HTMLElement {
+  const automation = view.automation;
+  if (state.renaming?.automationId === automation.id) return renameForm(view);
+  return h(
+    'div',
+    { class: 'auto-name-row' },
+    h('h2', { class: 'auto-detail-name' }, automation.name),
+    button('Rename', { testid: 'automation-rename', variant: 'ghost', onClick: () => startRename(view) }, 'btn-small'),
+  );
+}
+
+function renameKey(automationId: string): string {
+  return `rename:${automationId}`;
+}
+
+/**
+ * Opens the name for editing. The form is marked as unsaved straight away, so a refresh does not rebuild it and lose
+ * what the person types. Saving or cancelling clears the mark.
+ */
+function startRename(view: AutomationView): void {
+  state.renaming = { automationId: view.automation.id, draft: view.automation.name };
+  requestRender();
+  state.dirty.add(renameKey(view.automation.id));
+  const input = document.querySelector<HTMLInputElement>('[data-testid="automation-name-input"]');
+  input?.focus();
+  input?.select();
+}
+
+/** The name as an editable field, with Save and Cancel. Enter saves and Escape cancels. */
+function renameForm(view: AutomationView): HTMLElement {
+  const automation = view.automation;
+  const key = renameKey(automation.id);
+  const draft = state.renaming?.draft ?? automation.name;
+  let saveButton: HTMLButtonElement | undefined;
+  const cancel = (): void => {
+    state.renaming = undefined;
+    state.dirty.delete(key);
+    requestRender();
+  };
+  const submit = (): void => {
+    const name = input.value.trim();
+    if (!name) return;
+    void call(key, async twin => {
+      await twin.renameAutomation(automation.id, name);
+      state.renaming = undefined;
+      state.dirty.delete(key);
+    });
+  };
+  const input = h('input', {
+    type: 'text',
+    class: 'input auto-name-input',
+    value: draft,
+    maxlength: 80,
+    autocomplete: 'off',
+    spellcheck: false,
+    'aria-label': 'Automation name',
+    'data-testid': 'automation-name-input',
+    oninput: (event: Event) => {
+      const value = (event.currentTarget as HTMLInputElement).value;
+      if (state.renaming) state.renaming.draft = value;
+      state.dirty.add(key);
+      if (saveButton) saveButton.disabled = !value.trim() || pending(key);
+    },
+    onkeydown: (event: Event) => {
+      if (event instanceof KeyboardEvent && event.key === 'Escape') cancel();
+    },
+  });
+  saveButton = button('Save', {
+    variant: 'primary',
+    testid: 'automation-name-save',
+    disabled: !draft.trim() || pending(key),
+    onClick: submit,
+  });
+  return h(
+    'form',
+    {
+      class: 'auto-name-form',
+      'data-testid': 'automation-name-form',
+      'aria-label': 'Rename automation',
+      onsubmit: (event: Event) => {
+        event.preventDefault();
+        submit();
+      },
+    },
+    input,
+    saveButton,
+    button('Cancel', { testid: 'automation-name-cancel', onClick: cancel }, 'btn-small'),
+  );
 }
 
 function tabStrip(): HTMLElement {

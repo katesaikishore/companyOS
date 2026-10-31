@@ -29,6 +29,7 @@ import {
   type Step,
 } from '@companyos/twin-core';
 import { APP_ORIGIN, IPC } from '../shared/ipc';
+import { renamedAutomationName } from '../shared/rename';
 import { SecureStorageUnavailableError } from './keys';
 import { nativeHostScript } from './native-host-install';
 import {
@@ -119,6 +120,11 @@ function registerIpc(): void {
     requireRuntime().acceptRoutine(routineId(id), typeof name === 'string' ? name.slice(0, 80) : undefined),
   );
   handle(IPC.dismissRoutine, id => requireRuntime().dismissRoutine(routineId(id)));
+  handle(IPC.renameAutomation, (id, name) => {
+    const value = renamedAutomationName(name);
+    if (!value) throw new Error('Give the automation a name.');
+    return requireRuntime().renameAutomation(automationId(id), value);
+  });
   handle(IPC.setLevel, (id, level) => requireRuntime().setLevel(automationId(id), AutonomyLevelSchema.parse(level)));
   handle(IPC.promote, id => requireRuntime().promote(automationId(id)));
   handle(IPC.dryRun, id => requireRuntime().dryRun(automationId(id)));

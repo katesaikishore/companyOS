@@ -256,6 +256,10 @@ export class TwinRuntime {
     this.agent.dismissRoutine(routineId);
   }
 
+  renameAutomation(automationId: string, name: string): AutomationView {
+    return this.agent.renameAutomation(automationId, name);
+  }
+
   setLevel(automationId: string, level: AutonomyLevel): AutomationView {
     return this.agent.setLevel(automationId, level);
   }
