@@ -12,6 +12,8 @@ interface NavItem {
   count?: number;
   /** Shown instead of the count, for a figure such as a percentage. */
   badge?: string;
+  /** A count that needs attention is drawn as an accent pill. */
+  pill?: boolean;
   active: boolean;
 }
 
@@ -23,6 +25,7 @@ export function shell(status: TwinStatus, route: Route, content: Child): HTMLEle
       href: '#/suggestions',
       testid: 'nav-suggestions',
       count: status.suggestions.length,
+      pill: true,
       active: route.name === 'suggestions',
     },
     {
@@ -39,6 +42,7 @@ export function shell(status: TwinStatus, route: Route, content: Child): HTMLEle
       badge: `${status.readiness.automatablePct}%`,
       active: route.name === 'readiness',
     },
+    { label: 'Agent harness', href: '#/harness', testid: 'nav-harness', active: route.name === 'harness' },
     {
       label: 'Network ledger',
       href: '#/ledger',
@@ -76,7 +80,7 @@ export function shell(status: TwinStatus, route: Route, content: Child): HTMLEle
           'aria-keyshortcuts': 'Control+K Meta+K',
           onclick: openCommandPalette,
         },
-        h('span', null, 'Search commands'),
+        h('span', null, 'Search'),
         h('kbd', null, 'Ctrl / ⌘ K'),
       ),
       h(
@@ -111,7 +115,7 @@ function navLink(item: NavItem): HTMLElement {
     item.badge !== undefined
       ? h('span', { class: 'nav-count mono' }, item.badge)
       : item.count !== undefined
-        ? h('span', { class: 'nav-count mono' }, String(item.count))
+        ? h('span', { class: item.pill ? 'nav-count nav-pill mono' : 'nav-count mono' }, String(item.count))
         : undefined,
   );
 }
