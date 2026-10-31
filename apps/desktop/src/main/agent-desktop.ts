@@ -8,11 +8,12 @@ import { parseKeyChord, type Executor } from '@companyos/twin-core';
  * press a key chord. The program is not bundled. Its path is a setting that defaults to empty, and an empty path keeps
  * the built-in adapters, so nothing in this file runs unless a person sets the path.
  *
- * The program is called with a fixed argument array and never through a shell:
- *   <program> focus --app <name>
- *   <program> press --app <name> --shortcut <chord>
- * Exit status 0 is success. Any other status, a signal, a timeout or too much output is a failure. As with the built-in
- * adapters, the program brings the app forward and sends keys only once it is in front, and exits non-zero otherwise.
+ * The program is the agent-desktop CLI (vercel-labs/agent-desktop). It is called with a fixed argument array and never
+ * through a shell:
+ *   <program> focus-window --app <name>          brings the app's window to the front and confirms focus
+ *   <program> press <chord> --app <name>         sends the chord, headless, to a window that is already in front
+ * A press is therefore always preceded by a focus-window call. Exit status 0 is success. Any other status, a signal, a
+ * timeout or too much output is a failure.
  */
 
 /** How long one call may run before the program is stopped. */
@@ -92,7 +93,7 @@ export async function focusWithAgentDesktop(options: HandsOptions, app: string):
   const problem = agentDesktopProblem(options.binary);
   if (problem) return refused('blocked', problem);
   if (!isAllowedAppName(app)) return refused('invalid_input', MESSAGES.app);
-  return runProgram(options, 'focus_app', ['focus', '--app', app]);
+  return runProgram(options, 'focus_app', ['focus-window', '--app', app]);
 }
 
 /** Presses a key chord in an application through the program. Nothing starts unless every input is allowed. */
@@ -101,7 +102,11 @@ export async function pressWithAgentDesktop(options: HandsOptions, app: string, 
   if (problem) return refused('blocked', problem);
   if (!isAllowedAppName(app)) return refused('invalid_input', MESSAGES.app);
   if (!isAllowedChord(shortcut)) return refused('invalid_input', MESSAGES.chord);
-  return runProgram(options, 'press_shortcut', ['press', '--app', app, '--shortcut', shortcut]);
+  // The CLI's headless press refuses to send keys to a window that is not in front. Bring the app forward first, as the
+  // built-in press does, so a press aimed at a background app works the same way on both paths.
+  const focused = await runProgram(options, 'press_shortcut', ['focus-window', '--app', app]);
+  if (!focused.ok) return focused;
+  return runProgram(options, 'press_shortcut', ['press', shortcut, '--app', app]);
 }
 
 /**

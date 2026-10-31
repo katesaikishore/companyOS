@@ -159,11 +159,13 @@ describe('a good call', () => {
     expect(await focusWithAgentDesktop({ binary: program, record }, 'Microsoft Excel')).toEqual({ ok: true });
     expect(await pressWithAgentDesktop({ binary: program, record }, 'Microsoft Excel', 'cmd+shift+k')).toEqual({ ok: true });
     expect(starts(log)).toEqual([
-      ['focus', '--app', 'Microsoft Excel'],
-      ['press', '--app', 'Microsoft Excel', '--shortcut', 'cmd+shift+k'],
+      ['focus-window', '--app', 'Microsoft Excel'],
+      ['focus-window', '--app', 'Microsoft Excel'],
+      ['press', 'cmd+shift+k', '--app', 'Microsoft Excel'],
     ]);
     expect(record.mock.calls.map(([entry]) => [entry.step, entry.exit])).toEqual([
       ['focus_app', 0],
+      ['press_shortcut', 0],
       ['press_shortcut', 0],
     ]);
   });
@@ -239,6 +241,6 @@ describe('an executor with a usable path', () => {
     expect(await executor.focusApp('Microsoft Excel')).toBe(true);
     expect(await executor.pressShortcut?.('Microsoft Excel', 'cmd+shift+k')).toBe(true);
     expect(await executor.frontmostApp()).toBe('microsoft excel');
-    expect(starts(log).map(args => args[0])).toEqual(['focus', 'press']);
+    expect(starts(log).map(args => args[0])).toEqual(['focus-window', 'focus-window', 'press']);
   });
 });
