@@ -3,7 +3,7 @@
 
 .ledger-view {
   container: ledger / inline-size;
-  --ledger-cols: 112px minmax(0, 1fr) 84px 136px;
+  --ledger-cols: 112px minmax(0, 1fr) 84px 196px;
   gap: 16px;
 }
 
@@ -145,6 +145,7 @@
   color: var(--ink-2);
 }
 
+/* One line. The result column holds the longest label, "cancelled · not verified", at 11px with the chip's padding. */
 .ledger-view .ledger-result {
   justify-self: start;
   max-width: 100%;
@@ -155,7 +156,7 @@
   font-family: 'Geist Mono', ui-monospace, monospace;
   font-size: 11px;
   line-height: 1.35;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
 }
 
 .ledger-view .ledger-result.is-teal {

@@ -142,9 +142,10 @@
 
 /* Inbox tiles: suggestions and automations, each a link with a badge when something waits. */
 
+/* One column: the inbox sits in the narrow 3fr column of the page, where two tiles would leave their notes about 68px wide. */
 .ov-inbox {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
 }
 
@@ -209,12 +210,12 @@
   font-weight: 600;
 }
 
+/* A note may wrap to two lines. Two are reserved, so a one-line note leaves its tile the same height as a two-line one. */
 .ov-tile-note {
   font-size: 12px;
+  line-height: 1.35;
+  min-height: 2.7em;
   color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .ov-tile-chevron {

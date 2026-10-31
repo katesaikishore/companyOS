@@ -469,8 +469,10 @@ a {
   background: var(--dot-off);
 }
 
-/* The page column scrolls inside the fixed window. The sidebar never moves. */
+/* The page column scrolls inside the fixed window. The sidebar never moves. It is the containing block of the absolutely
+   positioned visually hidden labels, so they are clipped here and cannot extend the document past the window. */
 .main {
+  position: relative;
   min-width: 0;
   height: 100vh;
   overflow-y: auto;
