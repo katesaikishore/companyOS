@@ -9,11 +9,17 @@ import { parseKeyChord, type Executor } from '@companyos/twin-core';
  * the built-in adapters, so nothing in this file runs unless a person sets the path.
  *
  * The program is the agent-desktop CLI (vercel-labs/agent-desktop). It is called with a fixed argument array and never
- * through a shell:
+ * through a shell. A call names either the app or one of its windows:
  *   <program> focus-window --app <name>          brings the app's window to the front and confirms focus
  *   <program> press <chord> --app <name>         sends the chord, headless, to a window that is already in front
- * A press is therefore always preceded by a focus-window call. Exit status 0 is success. Any other status, a signal, a
- * timeout or too much output is a failure.
+ *   <program> focus-window --window-id <id>      the same, for one window from list-windows
+ *   <program> press <chord> --window-id <id>     the same, for one window from list-windows
+ * A window ID is used when it is given, and the app name is then only for logs. Without one, a press by name fails with
+ * AMBIGUOUS_TARGET when more than one window matches, and a focus by name may bring one of them forward. This module
+ * never picks a window for the caller. The CLI's exit status 1 is shared by every structured error, so AMBIGUOUS_TARGET
+ * is read from the JSON envelope the program prints on stdout, by a match that keeps only its position and never the
+ * output. A press is always preceded by a focus-window call with the same target. Exit status 0 is success. Any other
+ * status, a signal, a timeout or too much output is a failure.
  */
 
 /** How long one call may run before the program is stopped. */
@@ -28,9 +34,21 @@ const APP_NAME = /^[\p{L}\p{N}][\p{L}\p{N} ._()-]{0,99}$/u;
 /** Key chord text. The exact form is then checked by parseKeyChord, the same rule the step schema uses. */
 const CHORD_TEXT = /^[a-z0-9+]{1,40}$/;
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
+/** A window ID from list-windows, such as "w-1.0-org-a11y-atspi-accessible-2". No leading dash, so it cannot read as a flag. */
+const WINDOW_ID = /^(?!-)[A-Za-z0-9._:-]{1,120}$/;
+/** The error code the CLI prints in its JSON envelope when a target matches more than one window. */
+const AMBIGUOUS_CODE = Buffer.from('"AMBIGUOUS_TARGET"');
 
 export type HandsStep = 'focus_app' | 'press_shortcut';
-export type HandsFailure = 'blocked' | 'invalid_input' | 'exit' | 'signal' | 'timeout' | 'output_limit' | 'spawn_error';
+export type HandsFailure =
+  | 'blocked'
+  | 'invalid_input'
+  | 'exit'
+  | 'ambiguous'
+  | 'signal'
+  | 'timeout'
+  | 'output_limit'
+  | 'spawn_error';
 export type HandsResult = { ok: true } | { ok: false; failure: HandsFailure; reason: string };
 
 /**
@@ -58,6 +76,8 @@ const MESSAGES = {
   relative: 'The agent-desktop path must be an absolute path to the program.',
   notFile: 'No program file exists at the agent-desktop path.',
   app: 'The application name is not one the agent-desktop program accepts.',
+  window: 'The window ID is not one the agent-desktop program accepts.',
+  ambiguous: 'More than one window of this app is open. Choose a window, then try again.',
   chord: 'The key chord is not one the agent-desktop program accepts.',
   timeout: 'The agent-desktop program did not finish in time.',
   output: 'The agent-desktop program wrote too much output.',
@@ -83,30 +103,74 @@ export function isAllowedAppName(app: string): boolean {
   return APP_NAME.test(app) && app === app.trim();
 }
 
+/** True for a window ID in the form list-windows prints. Checked before it reaches the argument list. */
+export function isAllowedWindowId(windowId: string): boolean {
+  return WINDOW_ID.test(windowId);
+}
+
+/** The failure table for a streamed match: for each length, the longest proper prefix that is also a suffix of it. */
+function failureTable(pattern: Buffer): number[] {
+  const table = [0];
+  let k = 0;
+  for (let i = 1; i < pattern.length; i++) {
+    while (k > 0 && pattern[i] !== pattern[k]) k = table[k - 1];
+    if (pattern[i] === pattern[k]) k++;
+    table[i] = k;
+  }
+  return table;
+}
+const AMBIGUOUS_FAILURE = failureTable(AMBIGUOUS_CODE);
+
 /** True for a key chord in the canonical form the step schema accepts, such as "cmd+shift+k". */
 export function isAllowedChord(chord: string): boolean {
   return CHORD_TEXT.test(chord) && parseKeyChord(chord) === chord;
 }
 
-/** Focuses an application through the program. Nothing starts unless the path is usable and the name is allowed. */
-export async function focusWithAgentDesktop(options: HandsOptions, app: string): Promise<HandsResult> {
-  const problem = agentDesktopProblem(options.binary);
-  if (problem) return refused('blocked', problem);
-  if (!isAllowedAppName(app)) return refused('invalid_input', MESSAGES.app);
-  return runProgram(options, 'focus_app', ['focus-window', '--app', app]);
+/** Why the target cannot be used, or undefined when it can. The app name is checked even with a window ID: it is for logs. */
+function targetProblem(app: string, windowId: string | undefined): string | undefined {
+  if (!isAllowedAppName(app)) return MESSAGES.app;
+  if (windowId !== undefined && !isAllowedWindowId(windowId)) return MESSAGES.window;
+  return undefined;
 }
 
-/** Presses a key chord in an application through the program. Nothing starts unless every input is allowed. */
-export async function pressWithAgentDesktop(options: HandsOptions, app: string, shortcut: string): Promise<HandsResult> {
+/** The arguments that name the target: the window when one is given, otherwise the app. Call only after targetProblem. */
+function targetArgs(app: string, windowId: string | undefined): string[] {
+  return windowId === undefined ? ['--app', app] : ['--window-id', windowId];
+}
+
+/**
+ * Focuses an application, or one of its windows when windowId is given, through the program. Nothing starts unless the
+ * path is usable and the name, and the window ID when there is one, are allowed.
+ */
+export async function focusWithAgentDesktop(options: HandsOptions, app: string, windowId?: string): Promise<HandsResult> {
   const problem = agentDesktopProblem(options.binary);
   if (problem) return refused('blocked', problem);
-  if (!isAllowedAppName(app)) return refused('invalid_input', MESSAGES.app);
+  const invalid = targetProblem(app, windowId);
+  if (invalid) return refused('invalid_input', invalid);
+  return runProgram(options, 'focus_app', ['focus-window', ...targetArgs(app, windowId)]);
+}
+
+/**
+ * Presses a key chord in an application, or one of its windows when windowId is given, through the program. Nothing
+ * starts unless every input is allowed.
+ */
+export async function pressWithAgentDesktop(
+  options: HandsOptions,
+  app: string,
+  shortcut: string,
+  windowId?: string,
+): Promise<HandsResult> {
+  const problem = agentDesktopProblem(options.binary);
+  if (problem) return refused('blocked', problem);
+  const invalid = targetProblem(app, windowId);
+  if (invalid) return refused('invalid_input', invalid);
   if (!isAllowedChord(shortcut)) return refused('invalid_input', MESSAGES.chord);
+  const aim = targetArgs(app, windowId);
   // The CLI's headless press refuses to send keys to a window that is not in front. Bring the app forward first, as the
   // built-in press does, so a press aimed at a background app works the same way on both paths.
-  const focused = await runProgram(options, 'press_shortcut', ['focus-window', '--app', app]);
+  const focused = await runProgram(options, 'press_shortcut', ['focus-window', ...aim]);
   if (!focused.ok) return focused;
-  return runProgram(options, 'press_shortcut', ['press', shortcut, '--app', app]);
+  return runProgram(options, 'press_shortcut', ['press', shortcut, ...aim]);
 }
 
 /**
@@ -182,12 +246,27 @@ function runProgram(options: HandsOptions, step: HandsStep, args: readonly strin
         failed('output_limit', MESSAGES.output);
       }
     };
-    child.stdout?.on('data', count);
+    // The envelope on stdout is matched as it arrives. Only the match position is kept, so the output is still discarded.
+    let at = 0;
+    let sawAmbiguous = false;
+    const look = (chunk: Buffer): void => {
+      for (let i = 0; i < chunk.length && !sawAmbiguous; i++) {
+        while (at > 0 && chunk[i] !== AMBIGUOUS_CODE[at]) at = AMBIGUOUS_FAILURE[at - 1];
+        if (chunk[i] === AMBIGUOUS_CODE[at]) at++;
+        if (at === AMBIGUOUS_CODE.length) sawAmbiguous = true;
+      }
+    };
+    child.stdout?.on('data', (chunk: Buffer) => {
+      count(chunk);
+      look(chunk);
+    });
     child.stderr?.on('data', count);
     child.once('error', () => failed('spawn_error', MESSAGES.spawn));
     const finish = (code: number | null): void => {
       if (code === 0) settle({ ok: true }, 0);
       else if (code === null) failed('signal', MESSAGES.signal);
+      // The CLI exits 1 for every structured error, so the exit status alone cannot tell this one apart.
+      else if (sawAmbiguous) settle({ ok: false, failure: 'ambiguous', reason: MESSAGES.ambiguous }, 'ambiguous');
       else settle({ ok: false, failure: 'exit', reason: `The agent-desktop program exited with status ${code}.` }, code);
     };
     // Output can still be in the pipes when the program exits, so the result waits briefly for them to close, and the
