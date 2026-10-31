@@ -83,6 +83,10 @@ describe('no canary appears on any output surface', () => {
     expectNoLeaks(run.surfaces, name => name === 'habits');
   });
 
+  it('the usual time shown on each suggestion', () => {
+    expectNoLeaks(run.surfaces, name => name === 'suggestions');
+  });
+
   it('the OpenMausBot prompt preview', () => {
     expectNoLeaks(run.surfaces, name => name === 'prompt:openmausbot');
   });

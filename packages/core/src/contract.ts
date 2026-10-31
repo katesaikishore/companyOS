@@ -46,6 +46,8 @@ export interface SuggestionView {
   minutesPerWeek: number;
   /** When the latest occurrence of this routine began, in ms. */
   lastSeenAt: number;
+  /** When the routine usually happens, in plain words, from the start of each occurrence in local time. See describeWhen. */
+  when: string;
   drafted: DraftStep[];
   effects: EffectClass[];
   parameters: Array<{ name: string; options: string[] }>;
