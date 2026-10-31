@@ -136,7 +136,7 @@ export function exclusionEditor(
     maxlength: 80,
     autocomplete: 'off',
     spellcheck: false,
-    'aria-label': 'App to exclude',
+    'aria-label': 'Add an app to exclude',
     'data-testid': `${testid}-input`,
     oninput: () => {
       state.dirty.add(key);
@@ -189,7 +189,7 @@ export function exclusionEditor(
       'div',
       { class: 'excl-add' },
       input,
-      button('+ Exclude an app', { variant: 'ghost', testid: `${testid}-add`, onClick: submit }, 'btn-small'),
+      button('Exclude', { variant: 'ghost', testid: `${testid}-add`, onClick: submit }, 'btn-small'),
     ),
   );
 }
