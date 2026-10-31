@@ -15,6 +15,12 @@ import {
 } from '../src/main/agent-desktop';
 
 /**
+ * The blocks below start a fake program, which is a script with a shebang line. Windows cannot start such a file
+ * directly, so those blocks run on Linux and macOS only. The blocks above that only check input run everywhere.
+ */
+const STARTS_FAKE_PROGRAM = process.platform !== 'win32';
+
+/**
  * A stand-in for the agent-desktop program. Each start appends its argument list, as one JSON line, to the file named by
  * FAKE_AD_LOG, so a test can tell whether anything started. FAKE_AD_MODE "hang" never exits, and "flood" writes far more
  * than the output cap. "ambiguous" prints the AMBIGUOUS_TARGET envelope and exits 1. "ambiguous-split" sends the same
@@ -173,7 +179,7 @@ describe('input checks', () => {
   });
 });
 
-describe('a good call', () => {
+describe.skipIf(!STARTS_FAKE_PROGRAM)('a good call', () => {
   it('starts the program with the expected argument list and reports success', async () => {
     const log = useFake();
     const record = vi.fn<(entry: HandsRecord) => void>();
@@ -195,7 +201,7 @@ describe('a good call', () => {
   });
 });
 
-describe('a window target', () => {
+describe.skipIf(!STARTS_FAKE_PROGRAM)('a window target', () => {
   const WINDOW = 'w-1.0-org-a11y-atspi-accessible-2';
 
   it('names the window with --window-id in place of --app, for focus and for press', async () => {
@@ -271,7 +277,7 @@ describe('a window target', () => {
   });
 });
 
-describe('a failed call', () => {
+describe.skipIf(!STARTS_FAKE_PROGRAM)('a failed call', () => {
   it('turns a non-zero exit into a failure and records only the step, the status and the duration', async () => {
     const log = useFake({ exit: 3 });
     const record = vi.fn<(entry: HandsRecord) => void>();
@@ -329,7 +335,7 @@ describe('a failed call', () => {
   });
 });
 
-describe('an executor with a usable path', () => {
+describe.skipIf(!STARTS_FAKE_PROGRAM)('an executor with a usable path', () => {
   it('sends focus and key steps through the program and leaves the rest to the built-in executor', async () => {
     const log = useFake();
     // The built-in focus and press throw, so any call that reaches them fails the test.
@@ -375,7 +381,7 @@ describe('an executor with a usable path', () => {
 
 const SEVERAL = 'More than one window of this app is open. Choose a window, then try again.';
 
-describe('a focus by name when the app has several windows', () => {
+describe.skipIf(!STARTS_FAKE_PROGRAM)('a focus by name when the app has several windows', () => {
   it('starts no focus-window call, and records the refused focus as ambiguous', async () => {
     const log = useFake({ mode: 'windows', windows: '2' });
     const record = vi.fn<(entry: HandsRecord) => void>();
@@ -452,7 +458,7 @@ describe('a focus by name when the app has several windows', () => {
   });
 });
 
-describe('the executor carries the refusal to the runner', () => {
+describe.skipIf(!STARTS_FAKE_PROGRAM)('the executor carries the refusal to the runner', () => {
   const base: Executor = {
     focusApp: async () => {
       throw new Error('the built-in focus must not run');
