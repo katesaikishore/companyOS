@@ -7,6 +7,10 @@ Recorded 2026-11-01. Follows `docs/research/agent-desktop-performance.md` on the
 proposed fix. Posting our draft as a new issue would duplicate it. Our evidence is kept below because it matches the
 cause given there.
 
+We opened [vercel-labs/agent-desktop#408](https://github.com/vercel-labs/agent-desktop/pull/408) as an alternative to
+#384. #384 waits 200 ms after every key. #408 waits once at process exit, until the last key is 200 ms old, so a batch
+of presses pays the wait once. It has not been run against a live X11 session.
+
 ## The crash
 
 On Linux/X11, repeated `agent-desktop press <chord> --app <name>` calls make a GTK 3 window die with a segmentation
