@@ -76,7 +76,7 @@ function withoutRetiredKeys(saved: unknown): unknown {
 
 /**
  * The send time of a stored handoff record from an earlier version, or undefined when the row has none readable. Such a
- * row cannot be dated, so pruning keeps it as it is.
+ * row cannot be dated, so pruning removes it: a record that cannot be aged must not be kept past the window.
  */
 function handoffSentAt(row: unknown): number | undefined {
   const sentAt = typeof row === 'object' && row !== null ? (row as { sentAt?: unknown }).sentAt : undefined;
@@ -485,13 +485,13 @@ export class TwinAgent {
 
   /**
    * A handoff record is kept for the same window as an event, counted from the time it was sent. A row with no readable
-   * send time is kept as it is. Returns how many were removed.
+   * send time cannot be aged, so it is removed. Returns how many were removed.
    */
   private pruneHandoffs(cutoff: number): number {
     const rows = this.store.readAll<unknown>('handoffs');
     const kept = rows.filter(row => {
       const sentAt = handoffSentAt(row);
-      return sentAt === undefined || sentAt >= cutoff;
+      return sentAt !== undefined && sentAt >= cutoff;
     });
     if (kept.length !== rows.length) this.store.replaceAll('handoffs', kept);
     return rows.length - kept.length;

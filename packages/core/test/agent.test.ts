@@ -153,7 +153,7 @@ describe('persistence and retention', () => {
     later.close();
   });
 
-  it('keeps a handoff row with no readable send time, since prune cannot date it', () => {
+  it('removes a handoff row with no readable send time, since it cannot be aged past the window', () => {
     const dir = mkdtempSync(join(tmpdir(), 'twin-handoff-undated-'));
     const key = randomBytes(32);
     const now = at(0, 9);
@@ -163,8 +163,8 @@ describe('persistence and retention', () => {
     store.close();
 
     const later = openAgent(dir, key, now + (RETENTION_DAYS + 10) * DAY);
-    expect(later.prune()).toBe(0);
-    expect((later.exportAll() as { handoffs: unknown[] }).handoffs).toEqual([undated]);
+    expect(later.prune()).toBe(1);
+    expect((later.exportAll() as { handoffs: unknown[] }).handoffs).toEqual([]);
     later.close();
   });
 

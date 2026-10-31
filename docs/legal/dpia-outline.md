@@ -54,7 +54,7 @@ The CNIL and German DSK lists also name employee monitoring (privacy-legal §1).
 | Aggregates | Differentially private counts over cohorts of at least [10] people, about workflows and apps only | Secure aggregation, then the employer | [SET] |
 | Network ledger | Record of outbound connections | Device | [SET] |
 
-**Encryption and keys.** The target design is an encrypted SQLCipher store with the key sealed by the OS keychain or secure element (plan §4, privacy-legal §4). The current MVP uses record-level AES-256-GCM over an append-only log, with the key from the OS keychain (plan §16). The assessment must describe whichever build is deployed. Deletion is by destroying the key (crypto-shredding).
+**Encryption and keys.** The target design is an encrypted SQLCipher store with the key sealed by the OS keychain or secure element (plan §4, privacy-legal §4). The current build opens one SQLCipher database, with the key from the OS keychain. Logs written by an earlier MVP build, in record-level AES-256-GCM, are read once and migrated [CONFIRM for the deployed build] (plan §16). The assessment must describe whichever build is deployed. Deletion is by destroying the key (crypto-shredding).
 
 ### 3.3 Aggregates
 
