@@ -90,13 +90,19 @@ async function noHorizontalOverflow(page, label) {
   assert.ok(overflow <= 0, `${label}: horizontal overflow of ${overflow}px`);
 }
 
-/** Resizes the main window's content area, and waits until the page reports the new width. */
-async function setWindowSize(app, page, width, height) {
-  await app.evaluate(({ BrowserWindow }, size) => {
+/** The main window's content size and what the user may change about it. */
+async function windowShape(app) {
+  return app.evaluate(({ BrowserWindow }) => {
     const main = BrowserWindow.getAllWindows().find(win => win.webContents.getURL().includes('/index.html'));
-    main?.setContentSize(size.width, size.height);
-  }, { width, height });
-  await page.waitForFunction(target => window.innerWidth === target, width, { timeout: 10_000 });
+    const [width, height] = main.getContentSize();
+    return {
+      width,
+      height,
+      resizable: main.isResizable(),
+      maximizable: main.isMaximizable(),
+      fullscreenable: main.isFullScreenable(),
+    };
+  });
 }
 
 /**
@@ -114,11 +120,13 @@ async function responsiveProblems(page) {
       const box = link.getBoundingClientRect();
       if (box.left < -1 || box.right > viewport + 1) problems.push(`${link.dataset.testid} is outside the window`);
     }
+    const height = window.innerHeight;
     for (const testid of ['stop-all', 'capture-toggle']) {
       const element = document.querySelector(`[data-testid="${testid}"]`);
       const box = element?.getBoundingClientRect();
       if (!box || box.width === 0) problems.push(`${testid} is missing`);
       else if (box.left < -1 || box.right > viewport + 1) problems.push(`${testid} is outside the window`);
+      else if (box.bottom > height + 1) problems.push(`${testid} is below the fold of the window`);
     }
     const spills = [];
     for (const element of document.querySelectorAll('main *')) {
@@ -144,19 +152,15 @@ async function main() {
   const consoleErrors = [];
   try {
     const page = await mainPage(app);
-    const [defaultWidth, defaultHeight] = await app.evaluate(({ BrowserWindow }) => {
-      const main = BrowserWindow.getAllWindows().find(win => win.webContents.getURL().includes('/index.html'));
-      return main.getContentSize();
-    });
-    assert.ok(defaultWidth <= 1100 && defaultHeight <= 700, `the default window fits a 13-inch screen (${defaultWidth}x${defaultHeight})`);
+    const shape = await windowShape(app);
+    assert.deepEqual([shape.width, shape.height], [900, 600], `the window is a fixed 900x600 (${shape.width}x${shape.height})`);
+    assert.equal(shape.resizable, false, 'the window cannot be resized');
+    assert.equal(shape.maximizable, false, 'the window cannot be maximised');
+    assert.equal(shape.fullscreenable, false, 'the window cannot be made full screen');
     page.on('console', message => {
       if (message.type() === 'error') consoleErrors.push(message.text());
     });
     page.on('pageerror', error => consoleErrors.push(error.message));
-    await app.evaluate(({ BrowserWindow }) => {
-      const main = BrowserWindow.getAllWindows().find(win => win.webContents.getURL().includes('/index.html'));
-      main?.setContentSize(1100, 700);
-    });
 
     // 1. A fresh install opens the setup wizard, not the app.
     await page.waitForSelector('[data-testid="setup-root"]', { timeout: 30_000 });
@@ -314,42 +318,29 @@ async function main() {
     log('no repeat offer during the cooldown');
 
 
-    // 11. Responsive layout. Every main route at each width holds the checks in responsiveProblems, and a live resize
-    // changes the shell layout at the breakpoint without a reload.
-    const WIDTHS = [640, 760, 900, 1024, 1280, 1600, 1920];
+    // 11. The window has one fixed size. Every main route holds the checks in responsiveProblems at 900x600, and the
+    // window still reports that it cannot be resized, maximised or made full screen.
     const ROUTES = ['overview', 'suggestions', 'automations', 'readiness', 'harness', 'ledger', 'settings'];
-    for (const width of WIDTHS) {
-      await setWindowSize(app, page, width, 600);
-      for (const route of ROUTES) {
-        if (route === 'harness') {
-          // The harness has no sidebar link any more; it opens from an automation. Its route still has to lay out.
-          await page.evaluate(() => { location.hash = '#/harness'; });
-        } else {
-          await page.click(`[data-testid="nav-${route}"]`);
-        }
-        await page.waitForTimeout(250);
-        const problems = await responsiveProblems(page);
-        assert.deepEqual(problems, [], `${route} at ${width}px: ${problems.join('; ')}`);
-        if ([640, 1280, 1920].includes(width) && ['overview', 'readiness'].includes(route)) {
-          await page.screenshot({ path: path.join(SHOTS, `responsive-${width}-${route}.png`) });
-        }
+    for (const route of ROUTES) {
+      if (route === 'harness') {
+        // The harness has no sidebar link any more; it opens from an automation. Its route still has to lay out.
+        await page.evaluate(() => { location.hash = '#/harness'; });
+      } else {
+        await page.click(`[data-testid="nav-${route}"]`);
       }
-      log(`responsive: every main route holds at ${width}px`);
+      await page.waitForTimeout(250);
+      const problems = await responsiveProblems(page);
+      assert.deepEqual(problems, [], `${route} at 900x600: ${problems.join('; ')}`);
+      await page.screenshot({ path: path.join(SHOTS, `fixed-900x600-${route}.png`) });
     }
-
-    await page.click('[data-testid="nav-overview"]');
-    await setWindowSize(app, page, 1280, 800);
-    const wideSidebar = await page.evaluate(() => document.querySelector('.sidebar').getBoundingClientRect().width);
-    assert.ok(Math.abs(wideSidebar - 216) <= 1, `the sidebar is a 216px column at 1280px (${wideSidebar}px)`);
-    await setWindowSize(app, page, 640, 600);
-    const narrowSidebar = await page.evaluate(() => document.querySelector('.sidebar').getBoundingClientRect().width);
-    assert.ok(narrowSidebar >= 600, `the sidebar becomes a top header at 640px (${narrowSidebar}px)`);
-    assert.deepEqual(await responsiveProblems(page), [], 'the layout holds after the live resize to 640px');
-    await setWindowSize(app, page, 1920, 900);
-    const againSidebar = await page.evaluate(() => document.querySelector('.sidebar').getBoundingClientRect().width);
-    assert.ok(Math.abs(againSidebar - 216) <= 1, `the sidebar is a 216px column again at 1920px (${againSidebar}px)`);
-    log('live resize: the shell changes layout at the breakpoint, without a reload');
-    await shot(page, '09-settings-min-width');
+    log('fixed 900x600: every main route holds');
+    const after = await windowShape(app);
+    assert.deepEqual(
+      [after.width, after.height, after.resizable, after.maximizable, after.fullscreenable],
+      [900, 600, false, false, false],
+      'the window size stays fixed after navigating',
+    );
+    await shot(page, '09-settings');
 
     assert.deepEqual(
       consoleErrors.filter(text => !/Failed to load resource: net::ERR_FILE_NOT_FOUND/.test(text)),
