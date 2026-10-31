@@ -12,3 +12,4 @@ measure-results/
 *.mobileprovision
 *.cer
 *.b64
+adapter-smoke-out/
