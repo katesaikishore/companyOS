@@ -213,6 +213,7 @@ export class TwinRuntime {
       storageBytes: this.agent.storageBytes(),
       retentionDays: RETENTION_DAYS,
       readiness: this.agent.readiness(),
+      habits: this.agent.habits(),
       handoffs: this.agent.handoffs(),
       stats: {
         routinesLearned: suggestions.length + automations.length,

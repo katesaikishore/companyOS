@@ -195,6 +195,7 @@ export async function runPlantedScenario(): Promise<ScenarioRun> {
       { name: 'ledger', text: JSON.stringify({ network: agent.networkLedger(), downloads: models.states() }, null, 2) },
       { name: 'export', text: JSON.stringify(exported, null, 2) },
       { name: 'export:automations', text: JSON.stringify(exported.automations, null, 2) },
+      { name: 'habits', text: JSON.stringify(agent.habits(), null, 2) },
       { name: 'prompt:openmausbot', text: prompt },
       { name: 'errors', text: thrown.map(errorText).join('\n') },
       { name: 'outbound:fetch', text: outbound.join('\n') },

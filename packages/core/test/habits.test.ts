@@ -1,13 +1,18 @@
+import { randomBytes } from 'node:crypto';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   HABITS_WINDOW_DAYS,
   MIN_OBSERVED_DAYS,
+  TwinAgent,
   habits,
   type HabitsView,
   type TwinEvent,
   type WindowClass,
 } from '../src';
-import { at } from './fixtures';
+import { at, workdays } from './fixtures';
 
 const DAY = 86_400_000;
 /** Midnight at the start of 15 October 2026. The four-week window opens on 17 September. */
@@ -265,5 +270,27 @@ describe('field names', () => {
     const keys = keysOf(habits(usualWeek(), NOW));
 
     expect(keys.filter(key => /focus|score|mood|productiv|engag|stress/i.test(key))).toEqual([]);
+  });
+});
+
+describe('TwinAgent.habits', () => {
+  it('summarises the stored events as the pure function does, and writes nothing', () => {
+    const now = at(6, 0);
+    const dir = mkdtempSync(join(tmpdir(), 'twin-habits-'));
+    const agent = new TwinAgent({ dataDir: dir, dataKey: randomBytes(32), now: () => now });
+    try {
+      agent.updateConfig({ watchBrowsers: true });
+      for (const signal of workdays(6)) agent.ingest(signal);
+      const before = JSON.stringify(agent.exportAll());
+
+      const summary = agent.habits();
+      const stored = (agent.exportAll() as { events: TwinEvent[] }).events;
+      expect(summary.state).toBe('ready');
+      expect(summary).toEqual(habits(stored, now, agent.configuration.idleGapMs));
+      expect(JSON.stringify(agent.exportAll())).toBe(before);
+    } finally {
+      agent.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

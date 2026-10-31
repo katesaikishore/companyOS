@@ -250,6 +250,8 @@ export interface TwinStatus {
   pendingRuns: PendingRunView[];
   /** How much of each app's repeated work could run on its own, over the last seven days. */
   readiness: AppReadinessView;
+  /** How the person usually works, over the last four weeks. Rebuilt from the stored events on each read. */
+  habits: HabitsView;
   /** Handoffs sent to OpenMausBot, newest first. */
   handoffs: HandoffView[];
 }
