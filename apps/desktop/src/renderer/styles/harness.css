@@ -219,6 +219,7 @@
   min-height: 30px;
   padding: 0 12px;
   border-radius: 999px;
+  gap: 6px;
 }
 
 .harness-thread-body {

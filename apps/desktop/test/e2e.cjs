@@ -90,6 +90,24 @@ async function noHorizontalOverflow(page, label) {
   assert.ok(overflow <= 0, `${label}: horizontal overflow of ${overflow}px`);
 }
 
+/** The document is no taller than the window, so only the page column scrolls. */
+async function noDocumentScroll(page, label) {
+  const { scrollHeight, innerHeight } = await page.evaluate(() => ({
+    scrollHeight: document.documentElement.scrollHeight,
+    innerHeight: window.innerHeight,
+  }));
+  assert.ok(scrollHeight <= innerHeight, `${label}: the document is ${scrollHeight}px tall in a ${innerHeight}px window`);
+}
+
+/** Clicks an automation tab and waits until the tab reports that it is selected. */
+async function selectTab(page, name) {
+  await page.getByRole('tab', { name, exact: true }).click();
+  await page.waitForFunction(
+    label => [...document.querySelectorAll('[role="tab"]')].find(tab => tab.textContent.trim() === label)?.getAttribute('aria-selected') === 'true',
+    name,
+  );
+}
+
 /** The main window's content size and what the user may change about it. */
 async function windowShape(app) {
   return app.evaluate(({ BrowserWindow }) => {
@@ -246,14 +264,18 @@ async function main() {
     await page.waitForSelector('[data-testid="run-result"]', { timeout: 15_000 });
     assert.match(await page.textContent('[data-testid="run-result"]'), /dry_run/);
     assert.equal(await page.isDisabled('[data-testid="automation-run"]'), true, 'run is disabled at draft');
+    // The result strip ends above the 558px content box, which stops 20px above the window bottom.
     const windowHeight = await page.evaluate(() => window.innerHeight);
-    for (const selector of ['.auto-ladder-wrap', '.auto-tabs', '[data-testid="run-panel"]']) {
+    const foldLimits = { '.auto-ladder-wrap': windowHeight, '.auto-tabs': windowHeight, '[data-testid="run-panel"]': windowHeight - 20 };
+    for (const [selector, limit] of Object.entries(foldLimits)) {
       const bottom = await page.$eval(selector, element => element.getBoundingClientRect().bottom);
-      assert.ok(bottom <= windowHeight, `${selector} sits above the fold: bottom ${bottom}px of ${windowHeight}px`);
+      assert.ok(bottom <= limit, `${selector} sits below the fold: bottom ${bottom}px of ${limit}px`);
     }
     await shot(page, '07-automation-detail-light');
-    await page.getByRole('tab', { name: 'Autonomy', exact: true }).click();
-    await page.waitForSelector('[data-testid="automation-autonomy"]');
+    for (const name of ['Autonomy', 'Delegate to agents', 'Workflow', 'Autonomy']) {
+      await selectTab(page, name);
+      await noDocumentScroll(page, `automation ${name} tab`);
+    }
     await shot(page, 'automation-autonomy-900');
 
     // 9. The network ledger shows the verified model download, with no personal data in the request.
@@ -339,6 +361,7 @@ async function main() {
         await page.click(`[data-testid="nav-${route}"]`);
       }
       await page.waitForTimeout(250);
+      await noDocumentScroll(page, `${route} route`);
       const problems = await responsiveProblems(page);
       assert.deepEqual(problems, [], `${route} at 900x600: ${problems.join('; ')}`);
       await page.screenshot({ path: path.join(SHOTS, `fixed-900x600-${route}.png`) });

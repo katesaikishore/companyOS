@@ -200,10 +200,17 @@ function threadHead(item: HandoffView): HTMLElement {
   );
 }
 
-/** The header's Task button, with a plus glyph as the design has it. The glyph is hidden from screen readers. */
+/** The header's Task button. The plus is drawn as the design draws it, and is hidden from screen readers. */
 function taskButton(): HTMLButtonElement {
   const control = button('Task', { testid: 'harness-new-task', onClick: () => go('#/automations') }, 'btn-small harness-new-task');
-  control.prepend(h('span', { class: 'harness-plus', 'aria-hidden': 'true' }, '+'));
+  control.prepend(
+    svgElement(
+      'svg',
+      { width: '13', height: '13', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2', 'stroke-linecap': 'round', 'aria-hidden': 'true' },
+      svgElement('path', { d: 'M12 5v14' }),
+      svgElement('path', { d: 'M5 12h14' }),
+    ),
+  );
   return control;
 }
 
@@ -356,7 +363,10 @@ function composer(): HTMLElement {
   );
 }
 
-/** Shown until a routine is sent. It says how to send one, and what to set first when the lead bot or room is missing. */
+/**
+ * Shown until a routine is sent. It says how to send one, and what to set first when the lead bot or room is missing.
+ * Without a lead bot or room the lead column already offers Open Settings, so this state does not repeat it.
+ */
 function emptyConversation(target: string): HTMLElement {
   return h(
     'div',
@@ -366,13 +376,7 @@ function emptyConversation(target: string): HTMLElement {
       target
         ? 'Open an automation, describe the outcome under Delegate a task tree, and confirm the send. The handoff and the reply appear here.'
         : 'Set a lead bot or room in Settings first. Then open an automation, describe the outcome under Delegate a task tree, and confirm the send.',
-      h(
-        'div',
-        { class: 'actions' },
-        target
-          ? button('Open automations', { variant: 'primary', onClick: () => go('#/automations') })
-          : button('Open Settings', { variant: 'primary', onClick: () => go('#/settings') }),
-      ),
+      target ? h('div', { class: 'actions' }, button('Open automations', { variant: 'primary', onClick: () => go('#/automations') })) : undefined,
     ),
   );
 }

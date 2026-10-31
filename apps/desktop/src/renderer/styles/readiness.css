@@ -177,7 +177,7 @@
 .readiness-head,
 .readiness-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(64px, 1fr) 44px 146px 16px;
+  grid-template-columns: minmax(0, 1.6fr) minmax(64px, 1fr) 44px 152px 16px;
   align-items: center;
   gap: 12px;
   padding: 0 16px;
@@ -252,7 +252,7 @@
   min-width: 0;
 }
 
-/* The chip stays on one line. The status column is as wide as the longest label, "Partly automatable", at 12px. */
+/* The chip stays on one line. The status column fits the longest label, "Partly automatable", at 12px, with 6px to spare. */
 .readiness-status .chip {
   white-space: nowrap;
 }
