@@ -8,7 +8,7 @@ import type {
   AppReadinessStatus,
   AppReadinessView,
 } from './contract';
-import type { Routine } from './mine';
+import { stepKey, type Routine } from './mine';
 import { segment, type Segment } from './segment';
 import type { TwinEvent, WindowClass } from './types';
 
@@ -91,9 +91,9 @@ interface Coverage {
   byRoutine: Map<string, Set<string>>;
 }
 
-/** Consecutive switches into one window class, merged the way mining merges them. */
+/** Consecutive switches with one step key, merged the way mining merges them. */
 interface Run {
-  windowClass: WindowClass;
+  key: string;
   events: TwinEvent[];
 }
 
@@ -214,11 +214,11 @@ function coverRoutines(stretches: readonly Segment[], routines: readonly Routine
   const runs = stretches.map(runsOf);
   const coverage: Coverage = { covered: new Set(), asks: new Set(), byRoutine: new Map() };
   for (const routine of routines) {
-    const pattern = routine.steps.map(step => step.windowClass);
+    const pattern = routine.steps.map(step => stepKey(step));
     const ids = new Set<string>();
     for (const stretchRuns of runs) {
       for (let start = 0; start + pattern.length <= stretchRuns.length; start++) {
-        if (!pattern.every((windowClass, offset) => stretchRuns[start + offset].windowClass === windowClass)) continue;
+        if (!pattern.every((key, offset) => stretchRuns[start + offset].key === key)) continue;
         for (let offset = 0; offset < pattern.length; offset++) {
           for (const event of stretchRuns[start + offset].events) ids.add(event.id);
         }
@@ -234,14 +234,18 @@ function coverRoutines(stretches: readonly Segment[], routines: readonly Routine
   return coverage;
 }
 
-/** Collapses a stretch into runs of one window class. Apps that mining does not read are skipped and do not break a run. */
+/**
+ * Collapses a stretch into runs of one step key, as mining does. Apps that mining does not read are skipped and do not
+ * break a run.
+ */
 function runsOf(stretch: Segment): Run[] {
   const runs: Run[] = [];
   for (const event of stretch.events) {
-    if (!event.windowClass || event.windowClass === 'other') continue;
+    if (!event.app || !event.windowClass || event.windowClass === 'other') continue;
+    const key = stepKey({ windowClass: event.windowClass, app: event.app, urlTemplate: event.urlTemplate });
     const last = runs.at(-1);
-    if (last && last.windowClass === event.windowClass) last.events.push(event);
-    else runs.push({ windowClass: event.windowClass, events: [event] });
+    if (last && last.key === key) last.events.push(event);
+    else runs.push({ key, events: [event] });
   }
   return runs;
 }
