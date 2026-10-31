@@ -15,14 +15,12 @@
     "test:e2e": "node test/e2e.cjs"
   },
   "devDependencies": {
-    "@types/cross-spawn": "^6.0.6",
     "electron": "45.1.0",
     "electron-builder": "^26.18.0",
     "typescript": "^5.9.3"
   },
   "dependencies": {
     "@companyos/twin-core": "0.1.0",
-    "cross-spawn": "^7.0.6",
     "electron-updater": "^6.8.10",
     "node-llama-cpp": "3.22.1"
   }
