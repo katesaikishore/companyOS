@@ -144,13 +144,18 @@ async function main() {
   const consoleErrors = [];
   try {
     const page = await mainPage(app);
+    const [defaultWidth, defaultHeight] = await app.evaluate(({ BrowserWindow }) => {
+      const main = BrowserWindow.getAllWindows().find(win => win.webContents.getURL().includes('/index.html'));
+      return main.getContentSize();
+    });
+    assert.ok(defaultWidth <= 1100 && defaultHeight <= 700, `the default window fits a 13-inch screen (${defaultWidth}x${defaultHeight})`);
     page.on('console', message => {
       if (message.type() === 'error') consoleErrors.push(message.text());
     });
     page.on('pageerror', error => consoleErrors.push(error.message));
     await app.evaluate(({ BrowserWindow }) => {
       const main = BrowserWindow.getAllWindows().find(win => win.webContents.getURL().includes('/index.html'));
-      main?.setContentSize(1200, 800);
+      main?.setContentSize(1100, 700);
     });
 
     // 1. A fresh install opens the setup wizard, not the app.
@@ -316,7 +321,12 @@ async function main() {
     for (const width of WIDTHS) {
       await setWindowSize(app, page, width, 600);
       for (const route of ROUTES) {
-        await page.click(`[data-testid="nav-${route}"]`);
+        if (route === 'harness') {
+          // The harness has no sidebar link any more; it opens from an automation. Its route still has to lay out.
+          await page.evaluate(() => { location.hash = '#/harness'; });
+        } else {
+          await page.click(`[data-testid="nav-${route}"]`);
+        }
         await page.waitForTimeout(250);
         const problems = await responsiveProblems(page);
         assert.deepEqual(problems, [], `${route} at ${width}px: ${problems.join('; ')}`);
@@ -330,14 +340,14 @@ async function main() {
     await page.click('[data-testid="nav-overview"]');
     await setWindowSize(app, page, 1280, 800);
     const wideSidebar = await page.evaluate(() => document.querySelector('.sidebar').getBoundingClientRect().width);
-    assert.ok(wideSidebar >= 220 && wideSidebar <= 260, `the sidebar is a column at 1280px (${wideSidebar}px)`);
+    assert.ok(Math.abs(wideSidebar - 216) <= 1, `the sidebar is a 216px column at 1280px (${wideSidebar}px)`);
     await setWindowSize(app, page, 640, 600);
     const narrowSidebar = await page.evaluate(() => document.querySelector('.sidebar').getBoundingClientRect().width);
     assert.ok(narrowSidebar >= 600, `the sidebar becomes a top header at 640px (${narrowSidebar}px)`);
     assert.deepEqual(await responsiveProblems(page), [], 'the layout holds after the live resize to 640px');
     await setWindowSize(app, page, 1920, 900);
     const againSidebar = await page.evaluate(() => document.querySelector('.sidebar').getBoundingClientRect().width);
-    assert.ok(againSidebar >= 220 && againSidebar <= 260, `the sidebar is a column again at 1920px (${againSidebar}px)`);
+    assert.ok(Math.abs(againSidebar - 216) <= 1, `the sidebar is a 216px column again at 1920px (${againSidebar}px)`);
     log('live resize: the shell changes layout at the breakpoint, without a reload');
     await shot(page, '09-settings-min-width');
 

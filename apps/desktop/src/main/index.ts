@@ -248,10 +248,16 @@ const WEB_PREFERENCES = {
   preload: join(__dirname, 'preload.js'),
 };
 
+/** Sized like a chat app's window on a 13-inch laptop. A smaller display gets the room it has. */
+const DEFAULT_WINDOW = { width: 1100, height: 700 };
+/** Space kept around the window when the screen is too small for the default. */
+const SCREEN_MARGIN = 40;
+
 function createMainWindow(): void {
+  const work = screen.getPrimaryDisplay().workArea;
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: Math.min(DEFAULT_WINDOW.width, work.width - SCREEN_MARGIN),
+    height: Math.min(DEFAULT_WINDOW.height, work.height - SCREEN_MARGIN),
     minWidth: 640,
     minHeight: 560,
     title: 'companyOS Twin',

@@ -5,7 +5,7 @@ spreadsheet, then a document, then an editor, and offers to run that sequence fo
 draft. You run it with your approval, and it runs on its own only after it has earned that. Your activity is stored
 encrypted on your device. This is an early preview.
 
-![The companyOS Twin overview on a 1200 by 800 window, with synthetic activity](docs-site/images/overview.png)
+![The companyOS Twin overview on a 1100 by 700 window, with synthetic activity](docs-site/images/overview.png)
 
 Documentation lives in [`docs-site`](docs-site), a Mintlify site that builds and validates locally. Publishing it needs
 the owner's Mintlify account.
@@ -34,8 +34,8 @@ the owner's Mintlify account.
   promotion gate and demotion after a failed or undone run keep that honest.
 - **App readiness.** For each app, the share of its switches in the last seven days that could run on their own,
   worked out by fixed rules.
-- **Agent harness.** OpenMausBot handoffs, after a native confirmation, with their replies and job trees.
-- **Window.** The layout works from 640 by 560 up to full screen. Below 900 pixels the sidebar becomes a header, and
+- **OpenMausBot handoffs.** Sent after a native confirmation. Each one, with its replies and job tree, opens from its automation.
+- **Window.** The main window opens at 1100 by 700, sized for a 13-inch laptop. The layout works from 640 by 560 up to full screen. Below 900 pixels the sidebar becomes a header, and
   every navigation item stays visible.
 
 ## Not done yet

@@ -271,11 +271,6 @@
   white-space: nowrap;
 }
 
-.ov-stat-tag.is-review {
-  background: var(--warn-bg);
-  color: var(--warn-ink);
-}
-
 .ov-stat-value-row {
   display: flex;
   align-items: baseline;
@@ -322,7 +317,7 @@
 
 @container (min-width: 820px) {
   .ov-stats {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .ov-split {
