@@ -1,5 +1,4 @@
-import type { DraftStep } from '@companyos/twin-core';
-import { DAY_MS, formatWhen, plural } from './format.js';
+import { DAY_MS, plural } from './format.js';
 
 /** Counts spelled out in the hero title, up to twelve. Larger counts keep their digits. */
 const COUNT_WORDS = ['Zero', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve'];
@@ -61,33 +60,4 @@ export function rhythmLevels(activity: readonly (readonly number[])[]): { level:
       return { level: 3, count };
     }),
   );
-}
-
-/** The apps a routine opens, in order. Checks are left out, and an app repeated straight after itself is shown once. */
-export function routineApps(steps: readonly DraftStep[]): { app: string; alternatives: number }[] {
-  const apps: { app: string; alternatives: number }[] = [];
-  for (const step of steps) {
-    if (step.kind !== 'act' || apps.at(-1)?.app === step.app) continue;
-    apps.push({ app: step.app, alternatives: step.alternatives });
-  }
-  return apps;
-}
-
-/**
- * How often a suggestion repeated in the 30-day window, across how many days, and the estimate of the hand time it
- * takes. The estimate is labelled as one.
- */
-export function routineEvidence(support: number, days: number, minutesPerWeek: number): string {
-  return `${plural(support, 'time', 'times')} in the last 30 days, across ${plural(days, 'day')} · about ${Math.round(minutesPerWeek)} min / week by hand (estimate)`;
-}
-
-/** When a routine last began, in words such as "Today 09:14" or "Tue 11:40". */
-export function lastSeenLabel(ts: number, now: number = Date.now()): string {
-  const when = formatWhen(ts, now).replace(/^(Today|Yesterday)/, word => word.toLowerCase());
-  return `Last seen ${when}`;
-}
-
-/** Minutes a week shown as hours with one decimal place. The unit is printed beside the figure. */
-export function hoursBack(minutesPerWeek: number): string {
-  return (minutesPerWeek / 60).toFixed(1);
 }

@@ -1,16 +1,11 @@
-import type { DraftStep } from '@companyos/twin-core';
 import { describe, expect, it } from 'vitest';
 import { DAY_MS, handoffStateLabel, noticedPerWeek, summarySourceLabel, titleCase, titleCaseSequence } from '../src/renderer/format';
 import {
   foundTitle,
   heroLede,
-  hoursBack,
   ladderCounts,
-  lastSeenLabel,
   networkCallsThisWeek,
   rhythmLevels,
-  routineApps,
-  routineEvidence,
 } from '../src/renderer/overview-model';
 
 describe('foundTitle', () => {
@@ -76,30 +71,6 @@ describe('networkCallsThisWeek', () => {
 
   it('is zero with an empty ledger', () => {
     expect(networkCallsThisWeek([], now)).toBe(0);
-  });
-});
-
-describe('lastSeenLabel', () => {
-  const now = new Date(2026, 9, 14, 12, 0).getTime();
-
-  it('names today and yesterday in words', () => {
-    expect(lastSeenLabel(new Date(2026, 9, 14, 9, 14).getTime(), now)).toBe('Last seen today 09:14');
-    expect(lastSeenLabel(new Date(2026, 9, 13, 18, 2).getTime(), now)).toBe('Last seen yesterday 18:02');
-  });
-});
-
-describe('routineEvidence and hoursBack', () => {
-  it('states the repeats in the 30-day window, the days, and the labelled hand-time estimate', () => {
-    expect(routineEvidence(6, 4, 3.6)).toBe('6 times in the last 30 days, across 4 days · about 4 min / week by hand (estimate)');
-  });
-
-  it('keeps the singular for one repeat on one day', () => {
-    expect(routineEvidence(1, 1, 0.4)).toBe('1 time in the last 30 days, across 1 day · about 0 min / week by hand (estimate)');
-  });
-
-  it('shows minutes as hours with one decimal place', () => {
-    expect(hoursBack(0)).toBe('0.0');
-    expect(hoursBack(90)).toBe('1.5');
   });
 });
 
@@ -175,27 +146,5 @@ describe('rhythmLevels', () => {
 
   it('leaves every cell empty when there is no activity', () => {
     expect(rhythmLevels(emptyWeek()).flat().every(cell => cell.level === 0)).toBe(true);
-  });
-});
-
-describe('routineApps', () => {
-  const act = (app: string, alternatives = 0): DraftStep => ({ kind: 'act', app, alternatives, effect: 'read_only' });
-  const check = (app: string): DraftStep => ({ kind: 'check', app, alternatives: 0, effect: 'read_only' });
-
-  it('keeps the order of the apps a routine opens', () => {
-    expect(routineApps([act('microsoft excel'), act('microsoft word'), act('microsoft outlook')]).map(step => step.app)).toEqual([
-      'microsoft excel',
-      'microsoft word',
-      'microsoft outlook',
-    ]);
-  });
-
-  it('leaves out checks and an app repeated straight after itself', () => {
-    const steps = [act('microsoft excel'), act('microsoft excel'), check('slack'), act('slack')];
-    expect(routineApps(steps).map(step => step.app)).toEqual(['microsoft excel', 'slack']);
-  });
-
-  it('keeps the count of other apps seen at a step', () => {
-    expect(routineApps([act('microsoft excel', 1)])).toEqual([{ app: 'microsoft excel', alternatives: 1 }]);
   });
 });
