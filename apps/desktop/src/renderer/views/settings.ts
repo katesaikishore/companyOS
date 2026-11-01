@@ -66,7 +66,13 @@ export function settingsView(status: TwinStatus): HTMLElement {
       h(
         'div',
         { class: 'settings-card' },
-        capturePanel(config.watchBrowsers, config.excludedApps, config.idleGapMs, config.screenCaptureEnabled),
+        capturePanel(
+          config.watchBrowsers,
+          config.excludedApps,
+          config.idleGapMs,
+          config.screenCaptureEnabled,
+          config.audioCaptureEnabled && config.installedModels.some(model => model.id === SPEECH_MODEL_ID),
+        ),
         recallPanel(status),
         automationsPanel(config),
         modelsPanel(status),
@@ -203,14 +209,24 @@ function appearancePanel(current: Theme): HTMLElement {
   );
 }
 
-function capturePanel(watchBrowsers: boolean, excluded: readonly string[], idleGapMs: number, screenOn: boolean): HTMLElement {
+function capturePanel(
+  watchBrowsers: boolean,
+  excluded: readonly string[],
+  idleGapMs: number,
+  screenOn: boolean,
+  micOn: boolean,
+): HTMLElement {
   return sectionCard(
     {
       id: 'capture',
       testid: 'settings-capture',
       title: 'Capture',
-      // With screen text on, the note cannot say only app names and timing are kept, so it says what is recorded.
-      note: screenOn ? 'Screen text is being recorded. Set it in Screen and audio below.' : 'App names and timing only. No titles, keystrokes or screenshots.',
+      // With screen or microphone text on, the note cannot say only app names and timing are kept, so it says what is recorded.
+      note: screenOn
+        ? 'Screen text is being recorded. Set it in Screen and audio below.'
+        : micOn
+          ? 'Microphone text is being recorded. Set it in Screen and audio below.'
+          : 'App names and timing only. No titles, keystrokes or screenshots.',
     },
     row(
       toggleRow({
@@ -288,7 +304,7 @@ function recallPanel(status: TwinStatus): HTMLElement {
       toggleRow({
         testid: 'settings-local-api',
         label: 'Local API on this device',
-        note: 'Off by default. Other programs on this device can search the stored text with a token. It listens on 127.0.0.1 only.',
+        note: 'Off by default. Other programs on this device can search the stored text and read the stored screen images, with a token. It listens on 127.0.0.1 only.',
         checked: config.localApiEnabled,
         onChange: checked => void saveConfig('local-api', { localApiEnabled: checked }),
       }),
