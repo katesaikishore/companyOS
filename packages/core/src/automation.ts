@@ -199,7 +199,7 @@ export function compileRoutine(routine: Routine, name: string = defaultName(rout
 }
 
 /** An unknown app is named by its app, since its window class is only 'other'. */
-function defaultName(routine: Routine): string {
+export function defaultName(routine: Routine): string {
   return `Routine: ${routine.steps.map(step => (step.windowClass === 'other' ? step.app : step.windowClass)).join(' → ')}`;
 }
 

@@ -1,5 +1,5 @@
 import { excludesBrowser, isExcludedApp } from './classify';
-import { stepKey, type Routine } from './mine';
+import { routineIdOf, stepKey, type Routine } from './mine';
 import { MAX_SIGNATURE_CHARS, type TwinEvent } from './types';
 
 /** The most dismissed signatures kept. The oldest go first, as the dismissed ids do. */
@@ -44,6 +44,14 @@ export function matchesDismissed(routine: Routine, dismissedIds: readonly string
 export function addSignature(signatures: readonly string[], signature: string): string[] {
   if (signature.length > MAX_SIGNATURE_CHARS || signatures.includes(signature)) return [...signatures];
   return [...signatures, signature].slice(-MAX_SIGNATURES);
+}
+
+/**
+ * The signatures without the one of this routine. A routine's id is the hash of its signature (see routineIdOf), so the
+ * signature is found without the routine being detected. Its near copies were hidden only through it, so they show again.
+ */
+export function withoutRoutine(signatures: readonly string[], routineId: string): string[] {
+  return signatures.filter(signature => routineIdOf(signature) !== routineId);
 }
 
 /**

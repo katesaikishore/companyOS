@@ -1,11 +1,12 @@
 import { AutomationSchema, compileRoutine, effectsOf, fitName, type Automation } from './automation';
 import { isExcludedApp, normalizeAppName } from './classify';
 import { TriggerGate, openingApps } from './triggers';
-import { addSignature, matchesDismissed, signatureOf, signaturesWithNamesIn, withoutExcludedApps } from './dismissed';
+import { addSignature, matchesDismissed, signatureOf, signaturesWithNamesIn, withoutExcludedApps, withoutRoutine } from './dismissed';
 import { DEFAULT_MINING, mineRoutines, type Routine } from './mine';
 import { computeReadiness } from './readiness';
 import { habits as computeHabits, HABITS_WINDOW_DAYS } from './habits';
-import type { AppReadinessView, DayTasksView, HabitsView } from './contract';
+import type { AppReadinessView, DayTasksView, HabitsView, KnownRoutinesView } from './contract';
+import { knownRoutinesView } from './known';
 import { normalizeSignal } from './redact';
 import {
   promotionCheck,
@@ -258,6 +259,22 @@ export class TwinAgent {
     });
   }
 
+  /**
+   * "Reset" on a routine the person said no to. Its decline and wait go, and a dismissal is lifted with its signature, so the
+   * routine can be suggested again as a new one would be. The signature is found by the routine's id, so this works when the
+   * routine is no longer detected. An id with nothing to reset changes nothing.
+   */
+  resetDecline(routineId: string): void {
+    const cleared = this.gate.resetDeclines(routineId);
+    const dismissed = this.config.dismissedRoutineIds.includes(routineId);
+    if (!cleared && !dismissed) return;
+    this.updateConfig({
+      declinedRoutines: this.gate.declineRecords(),
+      dismissedRoutineIds: this.config.dismissedRoutineIds.filter(id => id !== routineId),
+      dismissedRoutineSignatures: withoutRoutine(this.config.dismissedRoutineSignatures, routineId),
+    });
+  }
+
   /** Accepting a routine creates a draft automation at level 2. Nothing runs yet. */
   acceptRoutine(routineId: string, name?: string): AutomationView {
     const existing = this.readAutomations().find(automation => automation.routineId === routineId);
@@ -409,6 +426,21 @@ export class TwinAgent {
    */
   habits(): HabitsView {
     return computeHabits(this.recentEvents(HABITS_WINDOW_DAYS), this.now(), this.config.idleGapMs);
+  }
+
+  /**
+   * What the twin knows about the person's routines, for the What the twin knows page. It is rebuilt from the stored events on
+   * each call. The declines and dismissals it shows are the ones kept in the config, so nothing new is stored.
+   */
+  knownRoutines(): KnownRoutinesView {
+    return knownRoutinesView({
+      routines: this.analyze().routines,
+      accepted: this.automations().map(view => ({ automation: view.automation, level: view.state.level })),
+      isDismissed: routine => this.isDismissed(routine),
+      modelName: routineId => this.routineNames.get(routineId),
+      dismissedIds: this.config.dismissedRoutineIds,
+      declines: this.gate.declineRecords(),
+    });
   }
 
   /** Every network call the twin has made. Stored sealed, shown to the person. */

@@ -230,6 +230,51 @@ export interface DayTasksView {
   tasks: TaskView[];
 }
 
+/** One step of a routine the twin knows. A browser step names its site, as the routine does, and nothing more. */
+export interface RoutineStepView {
+  /** The app the step focuses, as the twin stores it. */
+  app: string;
+  /** The site a browser step visited: its host and first path segment. Absent for any other step. */
+  site?: string;
+  /** Other apps seen at this step. More than zero means the app varies between runs. */
+  alternatives: number;
+}
+
+/**
+ * A routine the twin knows and the person has not dismissed: suggested and waiting for an answer, or accepted as an
+ * automation. Names, apps, sites and timing only.
+ */
+export interface RoutineView {
+  routineId: string;
+  name: string;
+  status: 'suggested' | 'accepted';
+  steps: RoutineStepView[];
+  /** When the routine usually happens, in plain words. Absent when the routine is no longer detected. */
+  when?: string;
+  /** The automation an accepted routine became, and the level it is at. */
+  automationId?: string;
+  level?: AutonomyLevel;
+}
+
+/** A routine the person said no to: "Not now" on an offer, or "Not a routine". Reset clears it. */
+export interface DeclinedRoutineView {
+  routineId: string;
+  /** The name, while the routine is still detected or accepted. */
+  name?: string;
+  /** True when the person said it is not a routine. False for "Not now" on an offer. */
+  dismissed: boolean;
+  /** Declines in a row, with no accept or completed run in between. Zero for a dismissal kept by an earlier version. */
+  declines: number;
+  /** When the latest decline or dismissal happened, in ms. Absent for a dismissal kept by an earlier version. */
+  at?: number;
+}
+
+/** What the twin knows about the person's routines, for the What the twin knows page. */
+export interface KnownRoutinesView {
+  routines: RoutineView[];
+  declined: DeclinedRoutineView[];
+}
+
 export interface TwinStatus {
   capture: { state: 'capturing' | 'paused' | 'idle' | 'locked' | 'unsupported'; detail: string };
   /** Whether browser capture can run on this system. The browser bridge is available on macOS and Linux only. */
@@ -259,6 +304,8 @@ export interface TwinStatus {
   habits: HabitsView;
   /** Today's tasks, grouped from the day's app switches with the person's decisions applied. */
   tasks: DayTasksView;
+  /** What the twin knows about the person's routines. Rebuilt from the stored events on each read. */
+  knownRoutines: KnownRoutinesView;
 }
 
 /** Everything a page may ask of the main process. Each call is validated there. */
@@ -283,6 +330,8 @@ export interface TwinBridge {
 
   acceptRoutine(routineId: string, name?: string): Promise<AutomationView>;
   dismissRoutine(routineId: string): Promise<void>;
+  /** Clears the decline and the wait of a routine, and lifts a dismissal, so the twin may suggest it again. */
+  resetDecline(routineId: string): Promise<void>;
   /** Changes the name of an automation. Nothing else about it changes. */
   renameAutomation(automationId: string, name: string): Promise<AutomationView>;
   setLevel(automationId: string, level: AutonomyLevel): Promise<AutomationView>;

@@ -203,6 +203,14 @@ function mostCommon<T>(items: readonly T[]): T | undefined {
   return best;
 }
 
+/**
+ * The id of a routine: the first 12 hex digits of the SHA-256 of its signature. The signature is the step keys of the
+ * routine joined with '>', so a stored signature names its routine by hash, and the same routine keeps its id.
+ */
+export function routineIdOf(signature: string): string {
+  return createHash('sha256').update(signature).digest('hex').slice(0, 12);
+}
+
 function toRoutine(key: string, group: Group, weeks: number): Routine {
   const length = key.split('>').length;
   const steps: RoutineStep[] = [];
@@ -226,7 +234,7 @@ function toRoutine(key: string, group: Group, weeks: number): Routine {
   const durations = group.occurrences.map(occurrence => occurrence[occurrence.length - 1].endTs - occurrence[0].startTs);
   const durationMs = durations.reduce((sum, value) => sum + value, 0) / Math.max(1, durations.length);
   return {
-    id: createHash('sha256').update(key).digest('hex').slice(0, 12),
+    id: routineIdOf(key),
     steps,
     support,
     days,

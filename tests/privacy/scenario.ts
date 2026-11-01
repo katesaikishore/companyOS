@@ -170,6 +170,8 @@ export async function runPlantedScenario(): Promise<ScenarioRun> {
       { name: 'export:automations', text: JSON.stringify(exported.automations, null, 2) },
       { name: 'export:config', text: JSON.stringify(exported.config, null, 2) },
       { name: 'habits', text: JSON.stringify(agent.habits(), null, 2) },
+      // The What the twin knows page: its routines, sites, timing and declines. It is built from the same planted run.
+      { name: 'knows', text: JSON.stringify(agent.knownRoutines(), null, 2) },
       {
         name: 'suggestions',
         text: JSON.stringify(

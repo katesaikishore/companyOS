@@ -89,6 +89,10 @@ describe('no canary appears on any output surface', () => {
     expectNoLeaks(run.surfaces, name => name === 'habits');
   });
 
+  it('the what the twin knows view, with its routines, sites and declines', () => {
+    expectNoLeaks(run.surfaces, name => name === 'knows');
+  });
+
   it('the usual time shown on each suggestion', () => {
     expectNoLeaks(run.surfaces, name => name === 'suggestions');
   });
@@ -114,6 +118,14 @@ describe('the day tasks keep no raw activity', () => {
 
   it('the task view and the decision store hold no raw canary', () => {
     expectNoLeaks(run.surfaces, name => name === 'tasks' || name === 'store:decrypted:taskDecisions');
+  });
+});
+
+describe('the what the twin knows view holds real data', () => {
+  it('shows the routine with its browser site, and the decline the scenario records', () => {
+    const text = run.surfaces.find(surface => surface.name === 'knows')?.text ?? '';
+    expect(text).toContain('docs.example.com/doc');
+    expect(text).toContain('"dismissed": false');
   });
 });
 

@@ -236,6 +236,7 @@ export class TwinRuntime {
       readiness: this.agent.readiness(),
       habits: this.agent.habits(),
       tasks: this.agent.dayTasks(),
+      knownRoutines: this.agent.knownRoutines(),
       stats: {
         routinesLearned: suggestions.length + automations.length,
         waiting: suggestions.length + drafts,
@@ -278,6 +279,11 @@ export class TwinRuntime {
 
   dismissRoutine(routineId: string): void {
     this.agent.dismissRoutine(routineId);
+  }
+
+  /** Clears the decline and wait of a routine, and lifts a dismissal, so the twin may suggest it again. */
+  resetDecline(routineId: string): void {
+    this.agent.resetDecline(routineId);
   }
 
   renameAutomation(automationId: string, name: string): AutomationView {
