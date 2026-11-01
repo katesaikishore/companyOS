@@ -332,7 +332,8 @@ export class TwinRuntime {
   /**
    * The executor for one run. An empty agent-desktop path keeps the built-in adapters, so focus and key steps work as
    * before. A path sends those two steps through the program, and an unusable path blocks them with the reason. The
-   * program's exit status and duration are logged, and nothing it was given is.
+   * program's exit status, the CLI's error code when it gave one, and the duration are logged. Nothing it was given, and
+   * no error message, is.
    */
   private runExecutor(platform: Platform): Executor {
     const native = executorFor(platform);
@@ -340,7 +341,10 @@ export class TwinRuntime {
     if (binary === '') return native;
     return handsExecutor(native, {
       binary,
-      record: entry => console.info(`[agent-desktop] ${entry.step} exit=${entry.exit} duration=${entry.durationMs}ms`),
+      record: entry => {
+        const code = entry.code === undefined ? '' : ` code=${entry.code}`;
+        console.info(`[agent-desktop] ${entry.step} exit=${entry.exit}${code} duration=${entry.durationMs}ms`);
+      },
     });
   }
 
