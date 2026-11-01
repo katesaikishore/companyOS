@@ -14,7 +14,7 @@ description: "The repository layout, the commands, and the test suites"
 
 ## Commands
 
-You need Node.js 22 or later.
+You need Node.js 22 or later. Set `ONNXRUNTIME_NODE_INSTALL_CUDA=skip` before `npm ci`. The app runs on the CPU, and skipping the CUDA GPU library saves about a gigabyte of download and disk.
 
 ```bash
 npm ci

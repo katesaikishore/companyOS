@@ -27,6 +27,7 @@ jobs:
     timeout-minutes: 25
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      ONNXRUNTIME_NODE_INSTALL_CUDA: 'skip'
       # Only platform.ts and the core package are used here, so the Electron binary is not needed.
       ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
       ADAPTER_SMOKE_OUT: ${{ github.workspace }}/adapter-smoke-out
