@@ -77,7 +77,8 @@ name routines. Typing, clicking and sending are not built, and no release has be
 
 - **Capture.** Reads the app in front on macOS, Windows and Linux X11, with pause, idle detection, an exclusion list,
   and a pause while the screen is locked. Browser capture is off by default. It works on macOS and Linux only, for
-  Chrome and Edge, and it never reports incognito windows.
+  Chrome and Edge. The extension skips incognito windows, so no page address is recorded for them. The browser's name
+  is still recorded as the app in front.
 - **Store.** Encrypted at rest. Raw events and task decisions are kept for 90 days, and handoff records from earlier
   versions too. Export writes a plain file after a warning, with a placeholder for any name you typed for a task or an
   automation. Delete everything removes the database, the data key and the installed models.
@@ -108,7 +109,7 @@ name routines. Typing, clicking and sending are not built, and no release has be
 <details>
 <summary><b>What is not done yet</b></summary>
 
-- **Model use.** A local chat model names routines. The recommended model is now Qwen3 1.7B, which gave a clean name for
+- **Model use.** A local chat model names routines. The recommended model is now Qwen3 1.7B, which gave a usable name for
   88% of test routines, against 52% for Qwen3 0.6B and 93% for Qwen3 4B. The 4B model is not recommended, because most of its
   names were generic (see `docs/research/model-comparison.md`). An optional Laya decision model (about 1.7 GB, checked against
   pinned SHA-256 digests) labels a routine that includes an app the catalogue does not know. It shows the label only at 0.7

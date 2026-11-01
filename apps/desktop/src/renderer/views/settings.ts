@@ -354,7 +354,7 @@ function layaRow(laya: TwinStatus['laya']): HTMLElement {
     h(
       'div',
       { class: 'settings-model-main' },
-      h('span', { class: 'mono settings-model-id' }, 'laya-onnx (decision model, not used yet)'),
+      h('span', { class: 'mono settings-model-id' }, 'laya-onnx (decision model, routine kind labels)'),
       h('span', { class: 'settings-row-note mono', 'data-label-laya': 'true' }, layaStateLabel(laya)),
     ),
     current === 'downloading'
@@ -396,7 +396,7 @@ function dataPanel(): HTMLElement {
       id: 'data',
       testid: 'settings-data',
       title: 'Your data',
-      note: 'Encrypted on this device with AES-256-GCM. The key is held by your OS keychain.',
+      note: 'Encrypted on this device with SQLCipher. The key is held by your OS keychain.',
     },
     row(
       textBlock('Export my data', 'Export writes an unencrypted file. Keep it somewhere private.'),

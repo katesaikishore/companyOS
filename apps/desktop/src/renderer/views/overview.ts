@@ -64,7 +64,7 @@ function overviewHeader(status: TwinStatus): HTMLElement {
   return pageHeader(
     'Overview',
     summaryLine(status.recordedFocusEvents, status.stats.observedDays),
-    h('span', { class: 'ov-pill' }, outlineIcon(12, LOCK), 'AES-256-GCM · OS keychain'),
+    h('span', { class: 'ov-pill' }, outlineIcon(12, LOCK), 'SQLCipher · OS keychain'),
   );
 }
 
