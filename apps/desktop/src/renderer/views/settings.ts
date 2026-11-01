@@ -1,8 +1,9 @@
 import type { CaptureChannelState, CapturePermission, TwinConfig, TwinStatus } from '@companyos/twin-core';
 import { h, type Child } from '../dom.js';
+import { SPEECH_MODEL_ID } from '../speech-model.js';
 import { button, chip, exclusionEditor, toggleRow } from '../components/ui.js';
 import { formatBytes, plural } from '../format.js';
-import { captureChannelNote, layaState, layaStateLabel } from '../labels.js';
+import { captureChannelNote, layaState, layaStateLabel, modelState, modelStateLabel } from '../labels.js';
 import { TEXT_KEPT_DAYS } from '../recall-model.js';
 import { act, bridge, confirmDeleteAll, pending, saveConfig, setNotice, state } from '../store.js';
 import { forgetRecall } from './recall.js';
@@ -243,6 +244,8 @@ function capturePanel(watchBrowsers: boolean, excluded: readonly string[], idleG
 function recallPanel(status: TwinStatus): HTMLElement {
   const config = status.config;
   const capture = status.capture;
+  // Microphone text needs the speech model. The switch can only be on while the model is installed.
+  const speechInstalled = config.installedModels.some(model => model.id === SPEECH_MODEL_ID);
   return sectionCard(
     {
       id: 'recall',
@@ -264,11 +267,15 @@ function recallPanel(status: TwinStatus): HTMLElement {
       toggleRow({
         testid: 'settings-audio',
         label: 'Transcribe the microphone',
-        note: 'Turns speech into text on this device, in 30-second parts. It also hears people nearby and on calls, so check the recording rules where you work first.',
-        checked: config.audioCaptureEnabled,
+        note: speechInstalled
+          ? 'Turns speech into text on this device, in 30-second parts. It also hears people nearby and on calls, so check the recording rules where you work first.'
+          : 'Needs the speech model below. Until it is installed, the microphone is not heard.',
+        checked: config.audioCaptureEnabled && speechInstalled,
+        disabled: !speechInstalled,
         onChange: checked => void saveConfig('audio-capture', { audioCaptureEnabled: checked }),
       }),
     ),
+    speechRow(status),
     permissionRow('microphone', capture.audioState),
     row(
       textBlock(
@@ -481,6 +488,48 @@ function levelButton(level: (typeof LEVELS)[number], current: number): HTMLEleme
     },
     h('span', { class: 'settings-level-label' }, level.label),
     level.note ? h('span', { class: 'settings-level-note' }, level.note) : undefined,
+  );
+}
+
+/**
+ * The speech model that microphone text needs. It is installed and removed like the other models: the download is checked
+ * against its pinned digests, and the record is kept only when every file matches.
+ */
+function speechRow(status: TwinStatus): HTMLElement {
+  const current = modelState(status, SPEECH_MODEL_ID);
+  return h(
+    'div',
+    { class: 'settings-row settings-model', 'data-testid': 'settings-speech', 'data-state': current },
+    h(
+      'div',
+      { class: 'settings-model-main' },
+      h(
+        'span',
+        { class: 'mono settings-model-id' },
+        `${SPEECH_MODEL_ID} (speech model, Whisper tiny, English)`,
+      ),
+      h('span', { class: 'settings-row-note mono', 'data-label-speech': 'true' }, modelStateLabel(status, SPEECH_MODEL_ID)),
+    ),
+    current === 'downloading'
+      ? button('Cancel', {
+          testid: 'settings-speech-cancel',
+          onClick: () => void act('speech-cancel', () => bridge().cancelDownload(SPEECH_MODEL_ID)),
+        })
+      : undefined,
+    current === 'not_installed' || current === 'cancelled' || current === 'failed'
+      ? button(current === 'not_installed' ? 'Install' : 'Retry install', {
+          testid: 'settings-speech-install',
+          disabled: pending('speech-install'),
+          onClick: () => void act('speech-install', () => bridge().installModel(SPEECH_MODEL_ID)),
+        })
+      : undefined,
+    current === 'installed'
+      ? button('Remove', {
+          testid: 'settings-speech-remove',
+          disabled: pending('speech-remove'),
+          onClick: () => void act('speech-remove', () => bridge().removeModel(SPEECH_MODEL_ID)),
+        })
+      : undefined,
   );
 }
 

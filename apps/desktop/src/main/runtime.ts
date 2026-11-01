@@ -41,6 +41,7 @@ import {
   type WindowClass,
   normalizeAppName,
 } from '@companyos/twin-core';
+import { WHISPER_MODEL_ID } from '@companyos/twin-core';
 import { desktopCapturer, systemPreferences } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
@@ -138,6 +139,8 @@ export class TwinRuntime {
   /** Screen and microphone capture. Each starts only while its setting is on. */
   private readonly screen: ScreenCaptureService;
   private readonly audio: AudioCaptureService;
+  /** The speech model state the microphone was last decided on. Undefined until the first decision. */
+  private speechWasInstalled: boolean | undefined;
   private readonly media: MediaStore;
   private readonly grabber = electronFrameSource();
   private captureTimer: ReturnType<typeof setInterval> | undefined;
@@ -196,7 +199,11 @@ export class TwinRuntime {
     this.models = new ModelManager({
       modelsDir: join(options.userData, 'models'),
       agent: this.agent,
-      onChange: options.onChange,
+      onChange: () => {
+        // A speech model that is installed or removed changes whether the microphone may run.
+        this.noteSpeechModel();
+        options.onChange();
+      },
       fetchImpl: options.fetchImpl,
     });
     // Inside the models folder, so wiping that folder removes the bundle with it.
@@ -672,8 +679,21 @@ export class TwinRuntime {
     return this.heldBack() ? 'paused' : 'on';
   }
 
+  /** True when the speech model is installed. Its record is kept only after every file has been checked against its pin. */
+  private speechInstalled(): boolean {
+    return this.agent.configuration.installedModels.some(model => model.id === WHISPER_MODEL_ID);
+  }
+
+  /** Restarts the microphone decision when the speech model is installed or removed, and does nothing otherwise. */
+  private noteSpeechModel(): void {
+    const installed = this.speechInstalled();
+    if (installed === this.speechWasInstalled) return;
+    this.speechWasInstalled = installed;
+    if (this.audio && this.screen) this.refreshCapture();
+  }
+
   private audioState(): CaptureChannelState {
-    if (!this.agent.configuration.audioCaptureEnabled) return 'off';
+    if (!this.agent.configuration.audioCaptureEnabled || !this.speechInstalled()) return 'off';
     if (!microphoneGranted()) return 'needs_permission';
     return this.heldBack() ? 'paused' : 'on';
   }
@@ -732,7 +752,8 @@ export class TwinRuntime {
   /** Gives both channels the current settings and state, and starts or stops the screen channel to match. */
   private refreshCapture(): void {
     const config = this.agent.configuration;
-    this.audio.setContext({ enabled: config.audioCaptureEnabled, ...this.captureFlags() });
+    // Microphone text needs the speech model. Without it, audio is not kept or transcribed.
+    this.audio.setContext({ enabled: config.audioCaptureEnabled && this.speechInstalled(), ...this.captureFlags() });
     if (config.screenCaptureEnabled) {
       this.screen.setContext(this.screenContext());
       this.screen.start();

@@ -1,4 +1,5 @@
 import type { HardwareProfile, LayaBundleView, ModelFit, ModelSpec, SetupPlan, TwinStatus } from '@companyos/twin-core';
+import { SPEECH_MODEL_ID } from '../speech-model.js';
 import { h, type Child } from '../dom.js';
 import { twinCompanion } from '../components/companion.js';
 import { button, chip, exclusionEditor, fact, logo, progressBar, toggleRow } from '../components/ui.js';
@@ -195,6 +196,8 @@ function permissions(status: TwinStatus): Child[] {
  */
 function recallStep(status: TwinStatus): Child[] {
   const config = status.config;
+  // Microphone text needs the speech model, which is installed in Settings. The switch stays off until it is.
+  const speechInstalled = config.installedModels.some(model => model.id === SPEECH_MODEL_ID);
   return [
     h(
       'p',
@@ -218,11 +221,14 @@ function recallStep(status: TwinStatus): Child[] {
       permRow(
         'Microphone text',
         'off by default',
-        'Turns speech into text on this device. It also hears people nearby and on calls, so check the recording rules where you work.',
+        speechInstalled
+          ? 'Turns speech into text on this device. It also hears people nearby and on calls, so check the recording rules where you work.'
+          : 'Needs the speech model, which you install in Settings under Screen and audio.',
         toggleRow({
           testid: 'setup-audio',
           label: 'Transcribe the microphone',
-          checked: config.audioCaptureEnabled,
+          checked: config.audioCaptureEnabled && speechInstalled,
+          disabled: !speechInstalled,
           onChange: checked => void saveConfig('setup-audio', { audioCaptureEnabled: checked }),
         }),
       ),

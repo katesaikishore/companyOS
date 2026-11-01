@@ -391,6 +391,14 @@ async function main(userDataDir, fixtureDir) {
     assert.equal(laya.server.requests.length, requestsBefore, 'skipping requested nothing');
     log('decision model removed from Settings, and Skip keeps the rules path');
 
+    // Recall: the speech model is not installed, so the microphone switch is off and cannot be turned on. Nothing is
+    // downloaded here. The check only reads the state the page shows.
+    await page.click('[data-testid="nav-settings"]');
+    await page.waitForSelector('[data-testid="settings-speech"][data-state="not_installed"]');
+    assert.equal(await page.isDisabled('[data-testid="settings-audio"]'), true, 'the microphone switch needs the speech model');
+    assert.equal(await page.isChecked('[data-testid="settings-audio"]'), false, 'the microphone switch is off without the speech model');
+    log('speech model shows as not installed, and the microphone switch is disabled until it is');
+
     // 7. Suggestions: accept one, then dismiss another.
     await page.click('[data-testid="nav-suggestions"]');
     await page.waitForSelector('[data-testid="suggestion-card"]');
