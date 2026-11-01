@@ -213,10 +213,11 @@ export function createRoutineNamer(options: RoutineNamerOptions): RoutineNamingJ
     preferredModelId: options.preferredModelId,
     modelPath: spec => models.pathFor(spec),
     verify: spec => models.hasVerifiedFile(spec),
-    openModel: modelPath =>
+    openModel: (modelPath, template) =>
       new LocalModelClient({
         modelPath,
         modelsDir: models.directory,
+        template,
         start: () => forkModelWorker(options.workerPath),
         idleStopMs: WORKER_IDLE_STOP_MS,
       }),

@@ -134,3 +134,34 @@ describe.skipIf(!enabled)('real models (COMPANYOS_REAL_MODELS=1)', () => {
     }, 300_000);
   });
 });
+
+/**
+ * Qwen 3.5 turns thinking on in its chat template, so the worker writes the turn out with thinking off. The model is not
+ * in the catalogue yet, so this check takes its file by path. Before the template was written out, every seeded routine
+ * came back as a model error.
+ */
+describe.skipIf(!enabled || !process.env.COMPANYOS_QWEN35_GGUF)(
+  'Qwen 3.5 with thinking off (COMPANYOS_QWEN35_GGUF=path to the .gguf)',
+  () => {
+    it('names the seeded routines through the real worker: no model error or timeout, and at least one name passes the check', async () => {
+      const { dirname } = await import('node:path');
+      const lib = await import(`${SCRIPTS}/lib.mjs`);
+      const file = process.env.COMPANYOS_QWEN35_GGUF as string;
+      const client = new lib.core.LocalModelClient({
+        modelPath: file,
+        modelsDir: dirname(file),
+        template: 'chatml_no_think',
+        start: () => lib.startRealWorker().channel,
+      });
+      try {
+        const { routines } = lib.seededRoutines();
+        const results = [];
+        for (const routine of routines) results.push(await lib.core.nameRoutine(routine, { completer: client, ...PATIENT }));
+        expect(results.some(result => result.reason === 'model_error' || result.reason === 'timeout')).toBe(false);
+        expect(results.filter(result => result.source === 'model').length).toBeGreaterThanOrEqual(1);
+      } finally {
+        client.stop();
+      }
+    }, 600_000);
+  },
+);

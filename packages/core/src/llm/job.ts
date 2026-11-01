@@ -2,6 +2,7 @@ import type { InstalledModel, ModelSpec } from '../models/types';
 import type { Routine } from '../mine';
 import { chooseChatModel } from './select';
 import { nameRoutine } from './namer';
+import type { ModelTemplate } from './template';
 import type { LocalCompleter } from './types';
 
 /** Timing of the background naming job. Design values, not sourced standards. */
@@ -34,7 +35,7 @@ export interface RoutineNamingJobOptions {
   /** True when the file on disk is exactly the catalogue model. Checked once per file, because it reads the whole file. */
   verify: (spec: ModelSpec) => Promise<boolean>;
   /** Makes a model for a verified file. Nothing is started until the job asks for a name. */
-  openModel: (modelPath: string) => NamingModel;
+  openModel: (modelPath: string, template: ModelTemplate) => NamingModel;
   /** False while model work must wait (plan §5.5). */
   allowed: () => boolean;
   /** Called after a pass that changed at least one name. */
@@ -144,7 +145,7 @@ export class RoutineNamingJob {
     }
     this.releaseModel();
     this.modelPath = path;
-    this.model = this.options.openModel(path);
+    this.model = this.options.openModel(path, spec.template ?? 'chat');
     return this.model;
   }
 

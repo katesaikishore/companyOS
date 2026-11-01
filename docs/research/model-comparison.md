@@ -52,9 +52,12 @@ switch does not turn it off. With the grammar, the 2B model returned no name for
 (`model_error`). The app's worker discards the error text on purpose, so the cause was found by hand. Writing the chat
 template out with an empty thinking block (`<think></think>`) and keeping the same JSON grammar fixed it.
 
-So the app cannot use either Qwen 3.5 model yet. Using one needs a worker change: a catalogue flag that tells the worker
-to write the template out with thinking off. That change is not made here, and the untested models are not in the
-catalogue, so no user can download one that the worker cannot run.
+The worker can now run Qwen 3.5 with thinking off. A catalogue model with `template: 'chatml_no_think'` has its prompt
+written out with an empty thinking block, as the check above did. On the 2B file, the real worker gives `model_error` for
+all three seeded routines with the chat session, and a name for each with the no-think template: "work routine", "work
+routine", "zoom and notion" (`llm/template.ts`, and the gated check in `apps/desktop/test/real-models.test.ts`). Qwen 3.5
+is not in the catalogue yet, so no user can download one. Adding it changes the default download, which is a decision for
+the owner.
 
 ### Naming test, thinking off
 
@@ -84,10 +87,9 @@ Reading the table:
 - **Memory** was not measured in the raw harness, so the 2B and 4B memory figures are unknown here. The app's worker
   reported 4.4 GiB for the 2B model while it was failing, which includes its context, so it is not comparable.
 
-**Recommendation.** Once the worker can run Qwen 3.5 with thinking off, the 2B model is the candidate to recommend for
-naming: about the same usable share as the best model here, more app-specific names than the 1.7B model, and a 2 GB file.
-Until then, the recommendation stays on Qwen3 1.7B, because the app cannot run the Qwen 3.5 models. That is a decision for
-the owner, because it changes the worker and the default download.
+**Recommendation.** The 2B model is the candidate to recommend for naming: about the same usable share as the best model here, more
+app-specific names than the 1.7B model, and a 2 GB file. The recommendation stays on Qwen3 1.7B until the 2B model has a
+catalogue entry, because that changes the default download. That is a decision for the owner.
 
 ## What was measured
 
