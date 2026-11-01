@@ -1,6 +1,6 @@
 # agent-desktop `press` crash: upstream status
 
-Recorded 2026-11-01. Follows `docs/research/agent-desktop-performance.md` on the `agent-desktop-executor` branch.
+Recorded 2026-11-01. Follows `docs/research/agent-desktop-performance.md`, which was re-recorded on 2026-11-01 with `scripts/agent-desktop-bench/bench.mjs`.
 
 **Status: tracked upstream. Our draft issue was not posted.** The same crash is reported in
 [vercel-labs/agent-desktop#384](https://github.com/vercel-labs/agent-desktop/pull/384), an open pull request with a
@@ -45,8 +45,10 @@ From #384 and its follow-up comment:
 - **Earlier window killed.** Killing an earlier test window raised the crash rate (3 of 3 against 1 of 3). The cause
   above does not explain this, and the sample was small.
 
-Stress results we recorded, 60 calls per trial, fresh window each trial (Ubuntu 24.04, Xvfb, openbox, at-spi2-core
-2.52.0, GTK 3.24.41, agent-desktop 1.0.2):
+Stress results from the first record (2026-10-31), 60 calls per trial, fresh window each trial (Ubuntu 24.04, Xvfb, openbox,
+at-spi2-core 2.52.0, GTK 3.24.41, agent-desktop 1.0.2). They came from a stress script that has since been replaced by
+`scripts/agent-desktop-bench/bench.mjs`. The re-recorded results, 36 of 40 press trials losing the window, are in the
+performance record:
 
 | Loop | Trial 1 | Trial 2 | Trial 3 |
 |---|---|---|---|
@@ -61,4 +63,4 @@ Stress results we recorded, 60 calls per trial, fresh window each trial (Ubuntu 
 
 Nothing yet. Linux presses still go through `xdotool` after the focus check (`linux-press-xdotool`, merged in PR #4), and
 agent-desktop stays optional and off by default. Revisit when a fix is released upstream and verified against the
-stress script.
+benchmark (`bench.mjs`, the press stages).

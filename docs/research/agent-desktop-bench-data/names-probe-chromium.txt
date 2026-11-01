@@ -1,0 +1,9 @@
+--- X11 windows (instance, class)
+id=2097155 WM_CLASS(STRING) = "chromium-browser (<profile>)", "Chromium-browser"
+--- program: list-apps
+{"version":"2.5","ok":true,"command":"list-apps","data":{"apps":[{"name":"chrome","pid":10648,"presentation":"foreground","process_instance":"9c8d98bb:253615"},{"bundle_id":"gcr-prompter","name":"gcr-prompter","pid":10770,"presentation":"fo
+focus-window --app chromium -> APP_NOT_FOUND
+focus-window --app Chromium -> APP_NOT_FOUND
+focus-window --app chrome -> ok
+focus-window --app Chrome -> ok
+focus-window --app Chromium-browser -> APP_NOT_FOUND

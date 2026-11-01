@@ -1,20 +1,18 @@
 #!/bin/bash
-# Starts AT-SPI, a window manager and a GTK test window, then runs the executor benchmark.
-# Run as: AGENT_DESKTOP_BIN=... xvfb-run -a dbus-run-session -- scripts/agent-desktop-bench/run.sh
+# Starts an AT-SPI bus and a window manager, then runs the benchmark driver, which starts a fresh GTK test window for each
+# trial. Run it on a machine with nothing else busy, as:
+#   AGENT_DESKTOP_BIN=/path/to/agent-desktop xvfb-run -a dbus-run-session -- scripts/agent-desktop-bench/run.sh
+# Settings for the driver (all optional): OUT, TRIALS, CALLS, CLI_CALLS, STAGES, PYTHON, APP_NAME. See bench.mjs.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
+: "${AGENT_DESKTOP_BIN:?Set AGENT_DESKTOP_BIN to the path of the agent-desktop binary}"
 export GTK_A11Y=atspi GNOME_ACCESSIBILITY=1 NO_AT_BRIDGE=0
-export KEY_LOG="${KEY_LOG:-$(mktemp)}"
 /usr/libexec/at-spi-bus-launcher --launch-immediately >/dev/null 2>&1 &
+BUS=$!
 openbox >/dev/null 2>&1 &
+WM=$!
 sleep 3
-touch "$KEY_LOG"
-PY="${PYTHON:-/usr/bin/python3.12}"
-"$PY" "$HERE/testapp.py" >/dev/null 2>&1 &
-APP=$!
-sleep 4
-node "$HERE/executor-real.mjs"
+node "$HERE/bench.mjs" "$@"
 RESULT=$?
-if kill -0 "$APP" 2>/dev/null; then echo "test app still running"; else echo "WARNING: the test app died during the run; discard these results"; RESULT=2; fi
-kill "$APP" 2>/dev/null
+kill "$BUS" "$WM" 2>/dev/null
 exit "$RESULT"
