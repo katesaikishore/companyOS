@@ -1,7 +1,7 @@
 import type { KindLabel } from './labels';
 import type { AutomationView } from './agent';
 import type { GateRequirement } from './autonomy';
-import type { EffectClass, TwinConfig, AutonomyLevel, WindowClass } from './types';
+import type { EffectClass, TwinConfig, AutonomyLevel, CaptureKind, WindowClass } from './types';
 import type { DownloadState, HardwareProfile, InstalledModel, LayaBundleView, NetworkEntry, SetupPlan } from './models/types';
 import type { RunResult } from './runner';
 import type { TaskDecision } from './tasks';
@@ -278,8 +278,50 @@ export interface KnownRoutinesView {
   declined: DeclinedRoutineView[];
 }
 
+/** Where the screen or microphone channel stands. 'needs_permission' means the operating system has not granted access yet. */
+export type CaptureChannelState = 'off' | 'on' | 'paused' | 'needs_permission' | 'unsupported';
+
+/** Where the local API stands. 'failed' means it is switched on but could not bind to its port. */
+export type LocalApiState = 'off' | 'listening' | 'failed';
+
+/** The two permissions capture can ask the operating system for. */
+export type CapturePermission = 'screen' | 'microphone';
+
+/** A search from the Recall page. Words are split and matched by the engine. A kind, app or range left out is not filtered. */
+export interface CaptureSearchRequest {
+  text: string;
+  kind?: CaptureKind;
+  app?: string;
+  /** Inclusive bounds, in ms. */
+  from: number;
+  to: number;
+}
+
+/** One captured item that matched. For a screen item, `id` names its image, which frameImage reads. The snippet is a short piece of the stored text. */
+export interface CaptureHitView {
+  kind: CaptureKind;
+  id: string;
+  ts: number;
+  app: string | null;
+  snippet: string;
+}
+
 export interface TwinStatus {
-  capture: { state: 'capturing' | 'paused' | 'idle' | 'locked' | 'unsupported'; detail: string };
+  /**
+   * Activity capture (state and detail), then screen text, microphone text and the local API. Counts and sizes cover
+   * what is stored. The detail line says, in plain words, why a channel is off, paused or waiting for permission.
+   */
+  capture: {
+    state: 'capturing' | 'paused' | 'idle' | 'locked' | 'unsupported';
+    detail: string;
+    screenState: CaptureChannelState;
+    audioState: CaptureChannelState;
+    apiState: LocalApiState;
+    /** Bytes on disk for the sealed screen images. */
+    mediaBytes: number;
+    screenCount: number;
+    audioCount: number;
+  };
   /** Whether browser capture can run on this system. The browser bridge is available on macOS and Linux only. */
   browserCaptureSupported: boolean;
   config: TwinConfig;
@@ -347,6 +389,21 @@ export interface TwinBridge {
 
   /** Confirms, renames, merges or splits one of a day's tasks. The engine checks it before it is stored. */
   decideTask(decision: TaskDecision): Promise<void>;
+
+  /** Searches the stored screen and microphone text. Words are matched as phrases; search syntax is never parsed. */
+  searchCapture(request: CaptureSearchRequest): Promise<CaptureHitView[]>;
+  /** A stored screen image as a JPEG data URL, or null when it was deleted or cannot be read. */
+  frameImage(id: string): Promise<string | null>;
+  /** Deletes every stored screen image and all captured text. The main process asks the person first. */
+  deleteCapture(): Promise<void>;
+  /** Copies the local API token to the clipboard. The token itself never reaches the page. */
+  copyApiToken(): Promise<void>;
+  /** Replaces the local API token after the person confirms. The old token stops working at once. */
+  rotateApiToken(): Promise<void>;
+  /** Asks the operating system for screen or microphone access. The result shows in the status. */
+  requestPermission(permission: CapturePermission): Promise<void>;
+  /** Opens the operating system's privacy settings for screen or microphone access. */
+  openPrivacySettings(permission: CapturePermission): Promise<void>;
 
   exportData(): Promise<string>;
   deleteAll(): Promise<void>;

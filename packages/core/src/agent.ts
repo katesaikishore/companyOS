@@ -1,12 +1,21 @@
+import { z } from 'zod';
 import { AutomationSchema, compileRoutine, effectsOf, fitName, type Automation } from './automation';
-import { isExcludedApp, normalizeAppName } from './classify';
+import { isBrowserApp, isExcludedApp, normalizeAppName } from './classify';
+import { newId, normaliseOcr, normaliseTranscript, searchTerms } from './capture-text';
 import { TriggerGate, openingApps } from './triggers';
 import { addSignature, matchesDismissed, signatureOf, signaturesWithNamesIn, withoutExcludedApps, withoutRoutine } from './dismissed';
 import { DEFAULT_MINING, legacyRelinks, mineRoutines, type Routine } from './mine';
 import { hasUnknownStep, ruleKindOfSteps, type KindLabeling } from './labels';
 import { computeReadiness } from './readiness';
 import { habits as computeHabits, HABITS_WINDOW_DAYS } from './habits';
-import type { AppReadinessView, DayTasksView, HabitsView, KnownRoutinesView } from './contract';
+import type {
+  AppReadinessView,
+  CaptureHitView,
+  CaptureSearchRequest,
+  DayTasksView,
+  HabitsView,
+  KnownRoutinesView,
+} from './contract';
 import { knownRoutinesView } from './known';
 import { normalizeSignal } from './redact';
 import {
@@ -25,8 +34,11 @@ import { EncryptedStore } from './store';
 import { dayKeyOf, decisionFits, parseTaskDecision, TaskDecisionSchema, tasksForDay, type TaskDecision } from './tasks';
 import type { InstalledModel, NetworkEntry } from './models/types';
 import {
+  CAPTURE_KINDS,
   DEFAULT_CONFIG,
   TwinConfigSchema,
+  WINDOW_CLASSES,
+  mergeConfigPatch,
   type AutonomyLevel,
   type TwinConfig,
   type TwinEvent,
@@ -35,18 +47,88 @@ import {
 
 const DAY_MS = 86_400_000;
 const ANALYSIS_DAYS = 30;
+/** How many screen rows one pass of image expiry reads. */
+const IMAGE_EXPIRY_BATCH = 200;
 /** Raw events and handoff records older than this are pruned. The desktop status reports the same figure to the Overview. */
 export const RETENTION_DAYS = 90;
 /** Names kept in memory for detected routines. The oldest are dropped first. */
 const MAX_ROUTINE_NAMES = 200;
 /** What the data export shows in place of a name the person typed. The encrypted store and the pages keep the name itself. */
 const TYPED_NAME_NOT_EXPORTED = '[typed name not exported]';
+/** Longest raw text one screen read or one segment may carry. A longer one is refused before it is cleaned. */
+const MAX_RAW_TEXT_CHARS = 100_000;
+/** Longest audio segment accepted. Capture cuts segments at 30 seconds, so this leaves a wide margin. */
+const MAX_SEGMENT_MS = 600_000;
+/** Longest search the Recall page may send. */
+const MAX_SEARCH_CHARS = 200;
+/** Most hits one search returns. The Recall page groups them by hour, so a shorter list is enough. */
+const CAPTURE_SEARCH_LIMIT = 200;
+/** The latest time a Date can hold. The export turns captured times into dates, so a later one is refused. */
+const MAX_TIME_MS = 8_640_000_000_000_000;
+/** An image id is the 32 hex characters of newId(). It names a file, so anything else is refused. */
+const MEDIA_ID = /^[0-9a-f]{32}$/;
+const INVALID_CAPTURE = 'Invalid capture: it has a field or value the twin does not accept.';
+const INVALID_SEARCH = 'Invalid search: it has a field or value the twin does not accept.';
+
+const TimeSchema = z.number().int().nonnegative().max(MAX_TIME_MS);
+/** Strict, so a window title or any other extra field is refused rather than stored. */
+const ScreenReadSchema = z
+  .object({
+    ts: TimeSchema,
+    app: z.string().max(200).nullable(),
+    windowClass: z.enum(WINDOW_CLASSES),
+    text: z.string().max(MAX_RAW_TEXT_CHARS),
+    mediaId: z.string().regex(MEDIA_ID).nullable(),
+  })
+  .strict();
+const AudioReadSchema = z
+  .object({
+    ts: TimeSchema,
+    durationMs: z.number().int().nonnegative().max(MAX_SEGMENT_MS),
+    text: z.string().max(MAX_RAW_TEXT_CHARS),
+  })
+  .strict();
+const CaptureSearchSchema = z
+  .object({
+    text: z.string().max(MAX_SEARCH_CHARS),
+    kind: z.enum(CAPTURE_KINDS).optional(),
+    app: z.string().max(200).optional(),
+    from: TimeSchema,
+    to: TimeSchema,
+  })
+  .strict();
+
+/**
+ * One screen read from the capture service. The window title is not a field, so a read that carries one is refused.
+ * mediaId names the image the read was sealed into, or is null when no image was kept.
+ */
+export interface ScreenRead {
+  ts: number;
+  app: string | null;
+  windowClass: WindowClass;
+  text: string;
+  mediaId: string | null;
+}
+
+/** One microphone segment after transcription. A segment that carries any other field is refused. */
+export interface AudioRead {
+  ts: number;
+  durationMs: number;
+  text: string;
+}
 
 export interface AgentOptions {
   dataDir: string;
   /** 32-byte data key. The desktop app obtains it from the OS keychain. Losing it loses the twin. */
   dataKey: Buffer;
   now?: () => number;
+  /**
+   * Deletes image files by id. The store cannot reach the image folder, so the agent calls this for the images of expired
+   * frames and of an app once it is excluded. An expired frame keeps its reference until this call returns, so a call
+   * that throws is tried again on the next prune. Without this callback no frame image expires, and an excluded app's
+   * images are left for the media store's startup sweep, which removes any image no stored item names.
+   */
+  deleteMedia?: (mediaIds: string[]) => void;
 }
 
 export interface AutomationView {
@@ -97,6 +179,7 @@ function handoffSentAt(row: unknown): number | undefined {
 export class TwinAgent {
   private readonly store: EncryptedStore;
   private readonly now: () => number;
+  private readonly deleteMedia: ((mediaIds: string[]) => void) | undefined;
   private config: TwinConfig;
   /** Advances whenever the global stop switch is turned off, so a quick off/on still cancels active runs. */
   private stopGeneration = 0;
@@ -113,6 +196,7 @@ export class TwinAgent {
   constructor(options: AgentOptions) {
     this.store = new EncryptedStore(options.dataDir, options.dataKey);
     this.now = options.now ?? (() => Date.now());
+    this.deleteMedia = options.deleteMedia;
     const saved = this.store.readAll<unknown>('settings').at(-1);
     this.config = saved ? TwinConfigSchema.parse(withoutRetiredKeys(saved)) : { ...DEFAULT_CONFIG };
     this.gate = new TriggerGate(this.now, this.config.declinedRoutines);
@@ -127,8 +211,9 @@ export class TwinAgent {
     return { ...this.config, excludedApps: [...this.config.excludedApps], installedModels: [...this.config.installedModels] };
   }
 
+  /** Merges a settings patch into the saved config and checks the result as a whole, so a patch resets nothing it leaves out. */
   updateConfig(patch: Partial<TwinConfig>): TwinConfig {
-    const parsed = TwinConfigSchema.parse({ ...this.config, ...patch });
+    const parsed = mergeConfigPatch(this.config, patch);
     const excludedChanged = JSON.stringify(parsed.excludedApps) !== JSON.stringify(this.config.excludedApps);
     // The dismissed signatures that name an excluded app go with its events, from the saved config as well.
     const next = excludedChanged
@@ -147,6 +232,40 @@ export class TwinAgent {
     const all = this.store.readAll<TwinEvent>('events');
     const kept = all.filter(event => !event.app || !isExcludedApp(event.app, this.config.excludedApps));
     if (kept.length !== all.length) this.store.replaceAll('events', kept);
+    this.purgeExcludedCapture();
+  }
+
+  /**
+   * Captured text of an excluded app goes with its images, as its events do. Matching uses the same rule as the exclusion
+   * check, so an alias or a longer name of an excluded app is covered too. Runs once per change to the list, and is a no-op
+   * for an app with nothing stored.
+   */
+  private purgeExcludedCapture(): void {
+    for (const app of this.store.captureApps()) {
+      if (!isExcludedApp(app, this.config.excludedApps)) continue;
+      const { mediaIds } = this.store.deleteCaptureForApp(app);
+      if (mediaIds.length > 0) this.deleteMedia?.(mediaIds);
+    }
+  }
+
+  /**
+   * Deletes the images of screen items older than the frame retention, and clears their references. Their text stays until
+   * the 90-day prune. Oldest first, in batches. Does nothing without a deleteMedia callback, so no reference is cleared
+   * before its file is gone.
+   */
+  private expireScreenImages(): void {
+    const deleteMedia = this.deleteMedia;
+    if (!deleteMedia) return;
+    const cutoff = this.now() - this.config.frameRetentionDays * DAY_MS;
+    for (;;) {
+      const oldest = this.store.oldestScreenMedia(IMAGE_EXPIRY_BATCH);
+      const expired = oldest.filter(item => item.ts < cutoff).map(item => item.mediaId);
+      if (expired.length === 0) return;
+      deleteMedia(expired);
+      this.store.clearCaptureMedia(expired);
+      // Rows are oldest first, so a batch with a newer row left in it has no older image after it.
+      if (expired.length < oldest.length) return;
+    }
   }
 
   /** Feeds one raw capture signal. Returns false when redaction dropped it. */
@@ -158,6 +277,131 @@ export class TwinAgent {
     if (!event) return false;
     this.store.append('events', event);
     return true;
+  }
+
+  /**
+   * Stores the text of one screen read, indexed for search, with the id of its image. Nothing is stored when screen capture
+   * is off, when the app is excluded or when the window is a browser. The lock, pause, idle, permission and secure-input
+   * checks are made by screenDecision before a read, since the twin does not know those states. A read with no text and
+   * no image is not stored. Returns whether the read was stored.
+   */
+  ingestScreen(read: ScreenRead): boolean {
+    const parsed = ScreenReadSchema.safeParse(read);
+    if (!parsed.success) throw new Error(INVALID_CAPTURE);
+    const { ts, windowClass, mediaId } = parsed.data;
+    const app = parsed.data.app === null ? null : normalizeAppName(parsed.data.app) || null;
+    if (!this.config.screenCaptureEnabled) return false;
+    if (windowClass === 'browser' || (app !== null && isBrowserApp(app))) return false;
+    if (app !== null && isExcludedApp(app, this.config.excludedApps)) return false;
+    const text = normaliseOcr(parsed.data.text);
+    if (text === '' && mediaId === null) return false;
+    this.store.appendCapture({
+      collection: 'screenText',
+      kind: 'screen',
+      // The image's id, so a search hit can name its image. A read with no image gets an id of its own.
+      id: mediaId ?? newId(),
+      ts,
+      app,
+      text,
+      body: { ts, mediaId, windowClass },
+    });
+    return true;
+  }
+
+  /**
+   * Stores the text of one microphone segment. Nothing is stored when microphone capture is off, or when the text is empty
+   * once cleaned. The lock, pause, idle and permission checks are made by audioDecision before a segment. Returns whether
+   * the segment was stored.
+   */
+  ingestAudio(segment: AudioRead): boolean {
+    const parsed = AudioReadSchema.safeParse(segment);
+    if (!parsed.success) throw new Error(INVALID_CAPTURE);
+    if (!this.config.audioCaptureEnabled) return false;
+    const text = normaliseTranscript(parsed.data.text);
+    if (text === '') return false;
+    const { ts, durationMs } = parsed.data;
+    this.store.appendCapture({
+      collection: 'audioText',
+      kind: 'audio',
+      id: newId(),
+      ts,
+      app: null,
+      text,
+      body: { ts, durationMs },
+    });
+    return true;
+  }
+
+  /**
+   * Finds stored screen and microphone text, newest first. The words are matched as phrases, so search syntax is never
+   * parsed. A hit for an app that is excluded now is left out, even before its text has been removed.
+   */
+  searchCapture(request: CaptureSearchRequest): CaptureHitView[] {
+    const parsed = CaptureSearchSchema.safeParse(request);
+    if (!parsed.success) throw new Error(INVALID_SEARCH);
+    const app = parsed.data.app === undefined ? undefined : normalizeAppName(parsed.data.app) || undefined;
+    return this.store
+      .searchCapture({
+        terms: searchTerms(parsed.data.text),
+        kind: parsed.data.kind,
+        app,
+        from: parsed.data.from,
+        to: parsed.data.to,
+        limit: CAPTURE_SEARCH_LIMIT,
+      })
+      .filter(hit => hit.app === null || !isExcludedApp(hit.app, this.config.excludedApps));
+  }
+
+  /**
+   * Deletes every stored screen and microphone item, with its text. Returns the image ids, so the caller deletes those
+   * files too.
+   */
+  deleteAllCapture(): string[] {
+    return this.store.deleteAllCapture().mediaIds;
+  }
+
+  /**
+   * The image ids that stored screen items still name, each once. The startup check deletes any image file that is not in this
+   * list, since no item shows it. Reads the item bodies only, which hold no text.
+   */
+  liveMediaIds(): string[] {
+    const ids = new Set<string>();
+    for (const row of this.store.readAll<{ mediaId?: unknown }>('screenText')) {
+      if (typeof row.mediaId === 'string') ids.add(row.mediaId);
+    }
+    return [...ids];
+  }
+
+  /**
+   * The size cap path. Clears the image references of the oldest screen items that have an image, up to the given count, and
+   * returns their image ids, so the caller deletes those files. The text stays. The references are cleared first, so a crash
+   * before the files are deleted leaves orphan files, which the startup check removes with liveMediaIds.
+   */
+  evictScreenMedia(limit: number): string[] {
+    const mediaIds = [...new Set(this.store.oldestScreenMedia(limit).map(item => item.mediaId))];
+    this.store.clearCaptureMedia(mediaIds);
+    return mediaIds;
+  }
+
+  /**
+   * How many screen and microphone items are stored, and the first and the last time one was captured. Holds no text, so the
+   * export can show it.
+   */
+  captureSummary(): { screenCount: number; audioCount: number; oldest: string | null; newest: string | null } {
+    const counts = this.store.captureCounts();
+    const times = [
+      ...this.store.readAll<{ ts?: unknown }>('screenText'),
+      ...this.store.readAll<{ ts?: unknown }>('audioText'),
+    ].flatMap(body => (typeof body.ts === 'number' ? [body.ts] : []));
+    if (times.length === 0) return { screenCount: counts.screen, audioCount: counts.audio, oldest: null, newest: null };
+    const first = times.reduce((min, ts) => Math.min(min, ts), Infinity);
+    const last = times.reduce((max, ts) => Math.max(max, ts), -Infinity);
+    return {
+      screenCount: counts.screen,
+      audioCount: counts.audio,
+      oldest: new Date(first).toISOString(),
+      newest: new Date(last).toISOString(),
+    };
   }
 
   analyze(): { segments: Segment[]; routines: Routine[] } {
@@ -607,23 +851,41 @@ export class TwinAgent {
   }
 
   /**
-   * Drops events, handoff records, task decisions and dismissed signatures past the retention window. A signature goes
-   * once the events no longer hold the sites or unknown apps it names. Returns how many records were removed.
+   * Drops events, handoff records, task decisions, dismissed signatures and captured text past the retention window. A
+   * signature goes once the events no longer hold the sites or unknown apps it names. Returns how many records were removed.
    */
   prune(): number {
+    return this.pruneWithMedia().removed;
+  }
+
+  /**
+   * prune, and also the image ids of the screen reads whose text was removed. The caller deletes those image files, which
+   * the store cannot reach. Images past the frame retention are expired first, through deleteMedia, and are not returned.
+   */
+  pruneWithMedia(): { removed: number; mediaIds: string[] } {
+    this.expireScreenImages();
     const cutoff = this.now() - RETENTION_DAYS * DAY_MS;
     const all = this.store.readAll<TwinEvent>('events');
     const kept = all.filter(event => event.ts >= cutoff);
     if (kept.length !== all.length) this.store.replaceAll('events', kept);
-    return (
-      all.length - kept.length + this.pruneHandoffs(cutoff) + this.pruneTaskDecisions(cutoff) + this.pruneSignatures(kept)
-    );
+    const capture = this.store.pruneCapture(cutoff);
+    return {
+      removed:
+        all.length -
+        kept.length +
+        this.pruneHandoffs(cutoff) +
+        this.pruneTaskDecisions(cutoff) +
+        this.pruneSignatures(kept) +
+        capture.removed,
+      mediaIds: capture.mediaIds,
+    };
   }
 
   /**
    * Everything the twin holds about the person, for the person. Handoff rows from earlier versions are included as they
    * were stored, so the export does not lose them. Nothing else reads them. The export is plain text, so a name the
    * person typed, for a task or an automation, is replaced by a placeholder. A cleared task name holds no typed text.
+   * Captured screen and microphone text is not exported, only its counts and the first and last capture times.
    */
   exportAll(): object {
     const renamed = this.renamedAutomationIds();
@@ -640,6 +902,7 @@ export class TwinAgent {
       taskDecisions: this.readTaskDecisions().map(decision =>
         decision.kind === 'rename' && decision.name !== '' ? { ...decision, name: TYPED_NAME_NOT_EXPORTED } : decision,
       ),
+      screenCapture: this.captureSummary(),
     };
   }
 

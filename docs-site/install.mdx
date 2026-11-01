@@ -26,7 +26,7 @@ Installers come from the GitHub Releases page once a release is published. No re
 
 ## Build from source
 
-You need Node.js 22 or later.
+You need Node.js 22 or later. Set `ONNXRUNTIME_NODE_INSTALL_CUDA=skip` before `npm ci`. The decision model runs on the CPU, and skipping the CUDA GPU library saves about a gigabyte of download and disk.
 
 ```bash
 npm ci

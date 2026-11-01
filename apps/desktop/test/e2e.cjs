@@ -78,6 +78,14 @@ async function seedActivity(app) {
       agent.ingest({ kind: 'focus', ts: at(ago, 13, 45), app: 'Visual Studio Code' });
       agent.ingest({ kind: 'idle_start', ts: at(ago, 14) });
     }
+    // Screen and microphone text for the Recall page. Both channels are off by default, so they are switched on only for
+    // these writes, then switched off again. The text is seeded without an image, so no media file is made.
+    agent.updateConfig({ screenCaptureEnabled: true, audioCaptureEnabled: true });
+    for (let ago = 10; ago >= 1; ago -= 3) {
+      agent.ingestScreen({ ts: at(ago, 10, 30), app: 'Microsoft Excel', windowClass: 'spreadsheet', text: `Quarterly invoice summary ${ago}`, mediaId: null });
+      agent.ingestAudio({ ts: at(ago, 11, 15), durationMs: 30_000, text: 'Follow up on the invoice with the client' });
+    }
+    agent.updateConfig({ screenCaptureEnabled: false, audioCaptureEnabled: false });
     // One task with two stretches, so the review offers a split, then a second task after a longer break.
     agent.ingest({ kind: 'focus', ts: at(0, 9), app: 'Microsoft Excel' });
     agent.ingest({ kind: 'idle_start', ts: at(0, 9, 10) });
@@ -251,8 +259,11 @@ async function main(userDataDir, fixtureDir) {
     await page.waitForSelector('[data-testid="setup-step"][data-step="2"]');
     await shot(page, '02-setup-permissions');
     await page.click('[data-testid="setup-next"]');
+    await page.waitForSelector('[data-testid="setup-step"][data-step="3"]');
+    // Recall is off by default, so this step is passed without turning anything on.
+    await page.click('[data-testid="setup-next"]');
 
-    // 2. Step three detects the device and recommends models from the open catalogue.
+    // 2. Step four detects the device and recommends models from the open catalogue.
     await page.waitForSelector('[data-testid="setup-plan-chat"]', { timeout: 30_000 });
     const chatModel = await page.getAttribute('[data-testid="setup-plan-chat"]', 'data-model-id');
     assert.ok(['qwen3-0.6b', 'qwen3-1.7b', 'qwen3-4b', 'qwen3-8b', 'qwen3-14b'].includes(chatModel), `chat model ${chatModel}`);
@@ -291,7 +302,7 @@ async function main(userDataDir, fixtureDir) {
 
     // 3b. The optional decision-model step. Nothing is requested until the person chooses to download.
     await page.click('[data-testid="setup-next"]');
-    await page.waitForSelector('[data-testid="setup-step"][data-step="4"]');
+    await page.waitForSelector('[data-testid="setup-step"][data-step="5"]');
     await page.waitForSelector('[data-testid="setup-laya"][data-state="not_installed"]');
     assert.match(await page.textContent('[data-testid="setup-laya-note"]'), /keeps the rule-based labels/);
     // The page states the size of the bundle it will fetch. Here that is the 3 MB test bundle. The real one reads "about 1.7 GB" (laya-labels.test.ts).
@@ -335,7 +346,7 @@ async function main(userDataDir, fixtureDir) {
     log('decision-model download resumed, verified and installed');
 
     await page.click('[data-testid="setup-next"]');
-    await page.waitForSelector('[data-testid="setup-step"][data-step="5"]');
+    await page.waitForSelector('[data-testid="setup-step"][data-step="6"]');
     assert.match(await page.textContent('[data-testid="setup-step"]'), /Decision modelInstalled\. It labels routines with unknown apps\./);
     await page.click('[data-testid="setup-start-observing"]');
     await page.waitForSelector('[data-testid="app-shell"]', { timeout: 15_000 });
@@ -370,15 +381,23 @@ async function main(userDataDir, fixtureDir) {
     assert.equal(existsSync(path.join(userDataDir, 'models', 'laya')), false, 'Remove deletes the whole decision-model folder');
     const requestsBefore = laya.server.requests.length;
     await page.click('[data-testid="settings-laya-setup"]');
-    await page.waitForSelector('[data-testid="setup-step"][data-step="4"]');
+    await page.waitForSelector('[data-testid="setup-step"][data-step="5"]');
     await page.waitForSelector('[data-testid="setup-laya"][data-state="not_installed"]');
     await page.click('[data-testid="setup-laya-skip"]');
-    await page.waitForSelector('[data-testid="setup-step"][data-step="5"]');
+    await page.waitForSelector('[data-testid="setup-step"][data-step="6"]');
     assert.match(await page.textContent('[data-testid="setup-step"]'), /Decision modelNot installed, rules are used/);
     await page.click('[data-testid="setup-close"]');
     await page.waitForSelector('[data-testid="settings-laya"]');
     assert.equal(laya.server.requests.length, requestsBefore, 'skipping requested nothing');
     log('decision model removed from Settings, and Skip keeps the rules path');
+
+    // Recall: the speech model is not installed, so the microphone switch is off and cannot be turned on. Nothing is
+    // downloaded here. The check only reads the state the page shows.
+    await page.click('[data-testid="nav-settings"]');
+    await page.waitForSelector('[data-testid="settings-speech"][data-state="not_installed"]');
+    assert.equal(await page.isDisabled('[data-testid="settings-audio"]'), true, 'the microphone switch needs the speech model');
+    assert.equal(await page.isChecked('[data-testid="settings-audio"]'), false, 'the microphone switch is off without the speech model');
+    log('speech model shows as not installed, and the microphone switch is disabled until it is');
 
     // 7. Suggestions: accept one, then dismiss another.
     await page.click('[data-testid="nav-suggestions"]');
@@ -496,7 +515,7 @@ async function main(userDataDir, fixtureDir) {
 
     // 11. The window has one fixed size. Every main route holds the checks in responsiveProblems at 900x600, and the
     // window still reports that it cannot be resized, maximised or made full screen.
-    const ROUTES = ['overview', 'suggestions', 'automations', 'readiness', 'knows', 'review', 'ledger', 'settings'];
+    const ROUTES = ['overview', 'recall', 'suggestions', 'automations', 'readiness', 'knows', 'review', 'ledger', 'settings'];
     for (const route of ROUTES) {
       if (route === 'review') {
         // The review has no sidebar link. It opens from the Overview, and its route still has to lay out.
@@ -505,6 +524,8 @@ async function main(userDataDir, fixtureDir) {
         await page.click(`[data-testid="nav-${route}"]`);
       }
       await page.waitForTimeout(250);
+      // The Recall page is reached from its sidebar link, and its view must render at this size.
+      if (route === 'recall') await page.waitForSelector('[data-testid="view-recall"]', { timeout: 15_000 });
       await noDocumentScroll(page, `${route} route`);
       const problems = await responsiveProblems(page);
       assert.deepEqual(problems, [], `${route} at 900x600: ${problems.join('; ')}`);

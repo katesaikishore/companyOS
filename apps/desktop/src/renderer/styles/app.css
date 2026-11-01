@@ -509,6 +509,25 @@ a {
   font-size: 13px;
 }
 
+/*
+ * The window is 900x600. With eight navigation rows, the sidebar is taller than that, and Stop all would fall below the
+ * fold. At this height the rows and the gaps are tightened so the stop switch stays in view.
+ */
+@media (max-height: 640px) {
+  .sidebar {
+    gap: 10px;
+    padding: 14px 12px 12px;
+  }
+
+  .nav {
+    gap: 1px;
+  }
+
+  .nav-item {
+    min-height: 30px;
+  }
+}
+
 .observing {
   display: flex;
   flex-direction: column;

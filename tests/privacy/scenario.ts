@@ -1,11 +1,29 @@
-import { TwinAgent, dayKeyOf, describeWhen, type Automation, type Executor, type TwinEvent } from '@companyos/twin-core';
-import { randomBytes } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import {
+  FrameDeduper,
+  TwinAgent,
+  audioDecision,
+  dayKeyOf,
+  deriveMediaKey,
+  describeWhen,
+  fingerprintBitmap,
+  newId,
+  normaliseOcr,
+  screenDecision,
+  type Automation,
+  type AudioState,
+  type Executor,
+  type ScreenState,
+  type TwinEvent,
+  type WindowClass,
+} from '@companyos/twin-core';
+import { createHash, randomBytes } from 'node:crypto';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { MediaStore } from '../../apps/desktop/src/main/media-store';
 import { ModelManager } from '../../apps/desktop/src/main/models';
 import { CANARIES, type Surface } from './canaries';
-import { ConsoleCapture, diskSurfaces, errorText, recordingFetch, refuseOutbound } from './surfaces';
+import { ConsoleCapture, diskSurfaces, errorText, listFiles, recordingFetch, refuseOutbound } from './surfaces';
 
 export type Outcome = 'stored' | 'dropped' | 'rejected';
 
@@ -64,6 +82,114 @@ export const PLANTED: readonly Planted[] = [
   { label: 'percent-encoded URL query in a browser', outcome: 'stored', signal: ts => ({ kind: 'focus', ts, app: 'Google Chrome', url: `https://docs.example.com/doc/5f0e7c21/view?t=${encodeURIComponent(CANARIES.encodedForms)}` }) },
 ];
 
+/** Size of the stand-in frames. fingerprintBitmap samples frames down to 64 by 36, so no resizing is needed. */
+const FRAME_WIDTH = 64;
+const FRAME_HEIGHT = 36;
+
+/** A stand-in screen frame: the app in front, the window class and the policy inputs that differ from a clear screen. */
+export interface PlantedFrame {
+  label: string;
+  outcome: Outcome;
+  app: string;
+  windowClass: WindowClass;
+  state: Partial<Pick<ScreenState, 'locked' | 'paused' | 'idle' | 'appExcluded' | 'secureInput' | 'permissionGranted'>>;
+  /** The text the stand-in OCR returns for the frame. */
+  text: string;
+}
+
+/**
+ * Screen frames planted through the steps the screen service takes: the policy, the dedupe, the cleaned text, a sealed
+ * image and the agent's ingest. The grab and the OCR are stand-ins that return the planted text. The Electron modules are
+ * not imported, so the suite runs without Electron. The frame in the first row is the only one that may be kept, so its
+ * canary is the only screen canary the store may hold. Every dropped row carries a canary of its own.
+ */
+export const PLANTED_FRAMES: readonly PlantedFrame[] = [
+  { label: 'screen text in an allowed app', outcome: 'stored', app: 'Microsoft Excel', windowClass: 'spreadsheet', state: {}, text: `Invoice total ${CANARIES.screenOcr}` },
+  { label: 'screen text from an excluded app', outcome: 'dropped', app: '1Password 8', windowClass: 'other', state: { appExcluded: true }, text: `Vault ${CANARIES.screenOcrExcluded}` },
+  { label: 'screen text with a password field focused', outcome: 'dropped', app: 'Microsoft Word', windowClass: 'document', state: { secureInput: true }, text: `Password ${CANARIES.screenOcrSecure}` },
+  { label: 'screen text when secure input cannot be checked', outcome: 'dropped', app: 'Microsoft Word', windowClass: 'document', state: { secureInput: 'unknown' }, text: `Unchecked ${CANARIES.screenOcrUnknown}` },
+  { label: 'screen text while the screen is locked', outcome: 'dropped', app: 'Slack', windowClass: 'chat', state: { locked: true }, text: `Locked ${CANARIES.screenOcrLocked}` },
+  { label: 'screen text in a browser window', outcome: 'dropped', app: 'Google Chrome', windowClass: 'browser', state: {}, text: `Browser ${CANARIES.screenOcrBrowser}` },
+];
+
+/** A stand-in microphone segment, with the policy inputs that differ from a clear microphone. */
+export interface PlantedSegment {
+  label: string;
+  outcome: Outcome;
+  state: Partial<Pick<AudioState, 'locked' | 'paused' | 'idle' | 'permissionGranted'>>;
+  /** The transcript the stand-in speech model returns for the segment. */
+  text: string;
+}
+
+export const PLANTED_SEGMENTS: readonly PlantedSegment[] = [
+  { label: 'microphone text while paused', outcome: 'dropped', state: { paused: true }, text: `Meeting notes ${CANARIES.audioTranscript}` },
+];
+
+function frameState(planted: PlantedFrame): ScreenState {
+  return {
+    enabled: true,
+    locked: false,
+    paused: false,
+    idle: false,
+    appExcluded: false,
+    windowClass: planted.windowClass,
+    secureInput: false,
+    permissionGranted: true,
+    ...planted.state,
+  };
+}
+
+/** A stand-in for the JPEG the Electron encoder makes: the JPEG header, then fixed bytes that hold no planted text. */
+function standInJpeg(mediaId: string): Buffer {
+  return Buffer.concat([
+    Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
+    createHash('sha256').update(mediaId).digest(),
+    Buffer.alloc(2048, 0x42),
+  ]);
+}
+
+/** The steps the screen service takes for one frame, with the stand-ins. Returns what became of it. */
+async function plantFrame(
+  agent: TwinAgent,
+  media: MediaStore,
+  deduper: FrameDeduper,
+  planted: PlantedFrame,
+  index: number,
+  ts: number,
+  thrown: unknown[],
+): Promise<Outcome> {
+  if (!screenDecision(frameState(planted)).capture) return 'dropped';
+  // Each frame is a flat colour with its own level, so two planted frames never look alike to the dedupe.
+  const bgra = Buffer.alloc(FRAME_WIDTH * FRAME_HEIGHT * 4, 40 + index * 20);
+  if (!deduper.shouldKeep(fingerprintBitmap(bgra, FRAME_WIDTH, FRAME_HEIGHT))) return 'dropped';
+  const text = normaliseOcr(planted.text);
+  if (text === '') return 'dropped';
+  const mediaId = newId();
+  try {
+    await media.write(mediaId, standInJpeg(mediaId));
+    const stored = agent.ingestScreen({ ts, app: planted.app, windowClass: planted.windowClass, text, mediaId });
+    // An image whose text was not stored is removed, as the service does.
+    if (!stored) await media.remove([mediaId]);
+    return stored ? 'stored' : 'dropped';
+  } catch (error) {
+    thrown.push(error);
+    await media.remove([mediaId]).catch(() => undefined);
+    return 'rejected';
+  }
+}
+
+/** The steps the audio service takes for one segment, with the stand-in transcript. */
+function plantSegment(agent: TwinAgent, planted: PlantedSegment, ts: number, thrown: unknown[]): Outcome {
+  const state: AudioState = { enabled: true, locked: false, paused: false, idle: false, permissionGranted: true, ...planted.state };
+  if (!audioDecision(state).capture) return 'dropped';
+  try {
+    return agent.ingestAudio({ ts, durationMs: 30_000, text: planted.text }) ? 'stored' : 'dropped';
+  } catch (error) {
+    thrown.push(error);
+    return 'rejected';
+  }
+}
+
 export interface ScenarioRun {
   /** Every output the suite inspects, taken after the whole scenario ran. */
   surfaces: Surface[];
@@ -75,6 +201,17 @@ export interface ScenarioRun {
     unexpectedOutboundCalls: number;
     chromeTemplate?: string;
     downloadStatus: string[];
+    captures: {
+      /** Stored screen items and microphone items after the run. */
+      screenCount: number;
+      audioCount: number;
+      /** Sealed image files left in the media folder. */
+      mediaFiles: number;
+      /** Stored screen items that the search for a word in the stored frame returned. */
+      screenHits: number;
+      /** Items that the search for the query canary returned. It must be zero. */
+      queryHits: number;
+    };
   };
 }
 
@@ -114,6 +251,7 @@ async function settle(done: () => boolean, timeoutMs = 10_000): Promise<void> {
 export async function runPlantedScenario(): Promise<ScenarioRun> {
   const root = mkdtempSync(join(tmpdir(), 'twin-privacy-'));
   const storeDir = join(root, 'twin');
+  const mediaDir = join(root, 'media');
   const key = randomBytes(32);
   const outbound: string[] = [];
   const thrown: unknown[] = [];
@@ -123,11 +261,31 @@ export async function runPlantedScenario(): Promise<ScenarioRun> {
 
   const agent = new TwinAgent({ dataDir: storeDir, dataKey: key, now: () => at(10, 0) });
   try {
-    agent.updateConfig({ watchBrowsers: true });
+    // Screen and microphone text are off by default. This run turns both on, so the planted text can reach the store
+    // where the policy allows it. The default-off check is a separate test.
+    agent.updateConfig({ watchBrowsers: true, screenCaptureEnabled: true, audioCaptureEnabled: true });
     for (let day = 0; day < 10; day++) for (const signal of workday(day)) agent.ingest(signal);
     PLANTED.forEach((planted, index) => {
       outcomes[planted.label] = ingestOutcome(agent, planted.signal(at(0, 11, index)), thrown);
     });
+
+    const media = new MediaStore(mediaDir, deriveMediaKey(key));
+    const deduper = new FrameDeduper();
+    for (const [index, planted] of PLANTED_FRAMES.entries()) {
+      outcomes[planted.label] = await plantFrame(agent, media, deduper, planted, index, at(0, 12, index), thrown);
+    }
+    for (const [index, planted] of PLANTED_SEGMENTS.entries()) {
+      outcomes[planted.label] = plantSegment(agent, planted, at(0, 13, index), thrown);
+    }
+    // A search for words the store holds finds the stored frame. A search for the query canary finds nothing, and the
+    // query itself is not kept, which the store check below reads. A malformed search is refused with a fixed sentence.
+    const screenHits = agent.searchCapture({ text: 'Invoice', from: at(-1, 0), to: at(1, 0) }).length;
+    const queryHits = agent.searchCapture({ text: CANARIES.searchQuery, from: at(-1, 0), to: at(1, 0) }).length;
+    try {
+      agent.searchCapture({ text: CANARIES.searchQuery, from: 'soon' as unknown as number, to: at(1, 0) });
+    } catch (error) {
+      thrown.push(error);
+    }
 
     const detected = agent.suggestions();
     const suggestion = detected.find(candidate => candidate.routine.steps.length === 4);
@@ -163,7 +321,7 @@ export async function runPlantedScenario(): Promise<ScenarioRun> {
 
     const exported = agent.exportAll() as { events: TwinEvent[]; automations: Automation[]; config: unknown };
     const surfaces: Surface[] = [
-      ...diskSurfaces(root, storeDir, key),
+      ...diskSurfaces(root, storeDir, key, mediaDir),
       { name: 'console', text: capture.text() },
       { name: 'ledger', text: JSON.stringify({ network: agent.networkLedger(), downloads: models.states() }, null, 2) },
       { name: 'export', text: JSON.stringify(exported, null, 2) },
@@ -194,6 +352,13 @@ export async function runPlantedScenario(): Promise<ScenarioRun> {
         unexpectedOutboundCalls: outbound.filter(line => line.startsWith('UNEXPECTED')).length,
         chromeTemplate: exported.events.find(event => event.urlTemplate)?.urlTemplate,
         downloadStatus: models.states().map(state => state.status),
+        captures: {
+          screenCount: agent.captureSummary().screenCount,
+          audioCount: agent.captureSummary().audioCount,
+          mediaFiles: existsSync(mediaDir) ? listFiles(mediaDir).filter(path => path.endsWith('.bin')).length : 0,
+          screenHits,
+          queryHits,
+        },
       },
     };
   } finally {

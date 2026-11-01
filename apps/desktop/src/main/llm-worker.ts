@@ -87,8 +87,11 @@ async function load(request: LoadRequest): Promise<void> {
   loadedTemplate = undefined;
   grammars.clear();
   const lib = await moduleOnce();
+  // The Linux package holds only the CPU build (electron-builder.yml leaves out the GPU builds), so Linux asks for that
+  // one. macOS and Windows keep the default, which picks Metal or CUDA when the machine has one.
   llama ??= await lib.getLlama({
     build: 'never',
+    gpu: process.platform === 'linux' ? false : 'auto',
     skipDownload: true,
     progressLogs: false,
     logLevel: lib.LlamaLogLevel.disabled,

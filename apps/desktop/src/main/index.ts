@@ -1,6 +1,7 @@
 import {
   app,
   BrowserWindow,
+  clipboard,
   dialog,
   globalShortcut,
   ipcMain,
@@ -10,6 +11,8 @@ import {
   powerMonitor,
   protocol,
   screen,
+  session,
+  shell,
   Notification,
   Tray,
   type MenuItemConstructorOptions,
@@ -21,9 +24,10 @@ import { join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   AutonomyLevelSchema,
-  TwinConfigSchema,
   describeStep,
   type Automation,
+  type CapturePermission,
+  type CaptureSearchRequest,
   type Decision,
   type PendingRunView,
   type Step,
@@ -47,8 +51,18 @@ let runtime: TwinRuntime | undefined;
 let mainWindow: BrowserWindow | undefined;
 let trayWindow: BrowserWindow | undefined;
 let tray: Tray | undefined;
-let paused = false;
 let quitting = false;
+
+/** How long the operating system is asked to be idle before it reports a locked screen. Only used while the lock state is unknown. */
+const LOCK_QUERY_IDLE_SECONDS = 60;
+
+/** The screen's lock state from the operating system. Undefined when the system cannot say, so the check is asked again later. */
+function screenLockedNow(): boolean | undefined {
+  if (!app.isPackaged && process.env.COMPANYOS_TEST_FAKE_PLATFORM) return false;
+  const state = powerMonitor.getSystemIdleState(LOCK_QUERY_IDLE_SECONDS);
+  if (state === 'unknown') return undefined;
+  return state === 'locked';
+}
 
 // COMPANYOS_USER_DATA moves the twin's data folder. The performance harness uses it, so a measured run never touches a real install.
 if (process.env.COMPANYOS_USER_DATA) app.setPath('userData', resolve(process.env.COMPANYOS_USER_DATA));
@@ -68,6 +82,7 @@ function text(value: unknown, pattern: RegExp, message: string): string {
 const automationId = (value: unknown) => text(value, /^auto_[a-f0-9]{12}$/, 'Invalid automation id.');
 const routineId = (value: unknown) => text(value, /^[a-f0-9]{12}$/, 'Invalid routine id.');
 const modelId = (value: unknown) => text(value, /^[a-z0-9.-]{1,80}$/, 'Invalid model id.');
+const mediaId = (value: unknown) => text(value, /^[0-9a-f]{32}$/, 'Invalid image id.');
 
 function handle(channel: string, fn: (...args: unknown[]) => unknown): void {
   ipcMain.handle(channel, (_event, ...args) => fn(...args));
@@ -88,6 +103,63 @@ function stopAllAutomations(): void {
   requireRuntime().stopAllAutomations();
 }
 
+/** A native question. Only the first button answers yes. */
+async function confirmed(options: MessageBoxOptions): Promise<boolean> {
+  const parent = parentWindow();
+  const result = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
+  return result.response === 0;
+}
+
+function capturePermission(value: unknown): CapturePermission {
+  if (value === 'screen' || value === 'microphone') return value;
+  throw new Error('Invalid permission.');
+}
+
+/** Fixed addresses only, so nothing the page sends reaches shell.openExternal. */
+const MAC_PRIVACY_LINKS: Record<CapturePermission, string> = {
+  screen: 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture',
+  microphone: 'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone',
+};
+
+/** The operating system's privacy page for one permission. Undefined where there is none. */
+function privacySettingsLink(permission: CapturePermission): string | undefined {
+  if (process.platform === 'darwin') return MAC_PRIVACY_LINKS[permission];
+  if (process.platform === 'win32' && permission === 'microphone') return 'ms-settings:privacy-microphone';
+  return undefined;
+}
+
+/** The only page allowed the microphone: the hidden window that listens while capture is on. */
+const CAPTURE_PAGE_URL = `${APP_ORIGIN}/capture.html`;
+
+/** True for the capture window's microphone request, and for no other. Any video request is refused. */
+function isCaptureMicrophone(
+  webContentsId: number | undefined,
+  mediaTypes: readonly string[] | undefined,
+  requestingUrl: string | undefined,
+): boolean {
+  const captureId = runtime?.captureWebContentsId();
+  if (captureId === undefined || webContentsId !== captureId) return false;
+  if (requestingUrl !== undefined && requestingUrl !== CAPTURE_PAGE_URL) return false;
+  return mediaTypes !== undefined && mediaTypes.length > 0 && mediaTypes.every(type => type === 'audio');
+}
+
+/**
+ * Refuses every browser permission the app does not need. The one grant is the microphone for the hidden capture window.
+ * The pages cannot use the camera, location, notifications or the screen through the browser's permission system.
+ */
+function installPermissionPolicy(): void {
+  const ses = session.defaultSession;
+  ses.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    const mediaTypes = 'mediaTypes' in details ? details.mediaTypes : undefined;
+    const requestingUrl = 'requestingUrl' in details ? details.requestingUrl : undefined;
+    callback(permission === 'media' && isCaptureMicrophone(webContents.id, mediaTypes, requestingUrl));
+  });
+  ses.setPermissionCheckHandler((webContents, permission, _origin, details) => {
+    const mediaTypes = details.mediaType === 'audio' ? ['audio'] : undefined;
+    return permission === 'media' && isCaptureMicrophone(webContents?.id, mediaTypes, details.requestingUrl);
+  });
+}
+
 function registerIpc(): void {
   handle(IPC.status, () => requireRuntime().status());
   handle(IPC.hardware, () => requireRuntime().hardware());
@@ -102,12 +174,12 @@ function registerIpc(): void {
 
   handle(IPC.setPaused, value => {
     if (typeof value !== 'boolean') throw new Error('Invalid value.');
-    paused = value;
     requireRuntime().setPaused(value);
     rebuildTrayMenu();
   });
 
-  handle(IPC.updateConfig, patch => requireRuntime().updateConfig(TwinConfigSchema.partial().parse(patch)));
+  // The runtime checks the patch against the saved config, so a patch cannot reset the settings it does not name.
+  handle(IPC.updateConfig, patch => requireRuntime().updateConfig(patch));
   handle(IPC.stopAllAutomations, () => stopAllAutomations());
 
   handle(IPC.acceptRoutine, (id, name) =>
@@ -133,6 +205,42 @@ function registerIpc(): void {
   });
   // The engine checks the decision's shape and that it still fits the day's tasks, so the page cannot store anything else.
   handle(IPC.decideTask, decision => requireRuntime().decideTask(decision));
+
+  // The engine checks the search's shape, and refuses anything it does not accept, so only the object's form is checked here.
+  handle(IPC.searchCapture, request => {
+    if (typeof request !== 'object' || request === null) throw new Error('Invalid search.');
+    return requireRuntime().searchCapture(request as CaptureSearchRequest);
+  });
+  handle(IPC.frameImage, id => requireRuntime().frameImage(mediaId(id)));
+  handle(IPC.deleteCapture, async () => {
+    const approved = await confirmed({
+      type: 'warning',
+      buttons: ['Delete', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      message: 'Delete all screen images and microphone text?',
+      detail: 'Every stored screen image, and every line of screen and microphone text, is removed. The local API stops returning them. Your activity history, automations and settings are kept. It cannot be undone.',
+    });
+    if (approved) await requireRuntime().deleteCapture();
+  });
+  handle(IPC.copyApiToken, () => requireRuntime().copyApiToken(value => clipboard.writeText(value)));
+  handle(IPC.rotateApiToken, async () => {
+    const approved = await confirmed({
+      type: 'warning',
+      buttons: ['Replace token', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      message: 'Replace the local API token?',
+      detail: 'Any tool that uses the current token stops working at once. The new token is copied only when you choose Copy token.',
+    });
+    if (approved) await requireRuntime().rotateApiToken();
+  });
+  handle(IPC.requestPermission, permission => requireRuntime().requestPermission(capturePermission(permission)));
+  handle(IPC.openPrivacySettings, permission => {
+    const link = privacySettingsLink(capturePermission(permission));
+    if (!link) throw new Error('Privacy settings are not available on this system.');
+    void shell.openExternal(link);
+  });
 
   handle(IPC.openMainWindow, route => {
     if (route !== undefined && (typeof route !== 'string' || !/^#\/[a-z0-9/-]{0,80}$/.test(route))) {
@@ -174,7 +282,7 @@ function registerIpc(): void {
       defaultId: 1,
       cancelId: 1,
       message: 'Delete everything the twin knows about you?',
-      detail: 'This removes all events, automations, the network ledger, any handoff records saved by an earlier version, task decisions, and the installed models on this device, including the optional decision model and any partial download of it. It cannot be undone.',
+      detail: 'This removes all events, automations, the network ledger, any handoff records saved by an earlier version, task decisions, captured screen images and microphone text, and the installed models on this device, including the optional decision model and any partial download of it. It cannot be undone.',
     };
     const parent = parentWindow();
     const choice = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
@@ -289,6 +397,9 @@ function createTrayWindow(): void {
     // An open offer stays on screen until it is answered or expires.
     if (!runtime?.hasPendingOffers()) hideTray();
   });
+  // The tray page holds the same bridge as the main window, so it gets the same guards: no new windows, no navigation.
+  trayWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  trayWindow.webContents.on('will-navigate', event => event.preventDefault());
   void trayWindow.loadURL(`${APP_ORIGIN}/tray.html`);
 }
 
@@ -354,10 +465,9 @@ function rebuildTrayMenu(): void {
     Menu.buildFromTemplate([
       { label: 'Open companyOS Twin', click: () => showMainWindow() },
       {
-        label: paused ? 'Resume capture' : 'Pause capture',
+        label: runtime?.capturePaused() ? 'Resume capture' : 'Pause capture',
         click: () => {
-          paused = !paused;
-          requireRuntime().setPaused(paused);
+          requireRuntime().setPaused(!requireRuntime().capturePaused());
           rebuildTrayMenu();
         },
       },
@@ -387,6 +497,8 @@ function createTray(): void {
 
 async function boot(): Promise<void> {
   if (process.platform === 'darwin') app.dock?.setIcon(join(BRAND_DIR, 'app-icon.png'));
+  // Set before any window exists, so no page can be granted a permission it did not ask for.
+  installPermissionPolicy();
   try {
     runtime = await TwinRuntime.create({
       userData,
@@ -395,8 +507,9 @@ async function boot(): Promise<void> {
       laya: !app.isPackaged && process.env.COMPANYOS_TEST_LAYA_FIXTURE ? readLayaFixture(process.env.COMPANYOS_TEST_LAYA_FIXTURE) : undefined,
       approve: approveStep,
       // The test platform has no real input device, so idle time is pinned to zero for it.
-      idleSeconds: () => (process.env.COMPANYOS_TEST_FAKE_PLATFORM ? 0 : powerMonitor.getSystemIdleTime()),
+      idleSeconds: () => (!app.isPackaged && process.env.COMPANYOS_TEST_FAKE_PLATFORM ? 0 : powerMonitor.getSystemIdleTime()),
       onBattery: () => powerMonitor.onBatteryPower,
+      screenLocked: screenLockedNow,
       onChange: () => undefined,
       onOffer: showOffer,
       onUnattendedRun: result => {
@@ -424,15 +537,15 @@ async function boot(): Promise<void> {
     return;
   }
 
+  // Registered before start, which reads the saved pause and the lock state first, so a lock during start is not missed.
+  powerMonitor.on('lock-screen', () => runtime?.setLocked(true));
+  powerMonitor.on('unlock-screen', () => runtime?.setLocked(false));
   await runtime.start();
   // Test-only, for the performance harness. It needs an unpackaged run in its own data folder, so a real install never seeds.
   const seedDays = Number(process.env.COMPANYOS_MEASURE_SEED_DAYS);
   if (!app.isPackaged && process.env.COMPANYOS_USER_DATA && Number.isInteger(seedDays) && seedDays > 0) {
     runtime.seedMeasurementActivity(Math.min(seedDays, 30));
   }
-  powerMonitor.on('lock-screen', () => runtime?.setLocked(true));
-  powerMonitor.on('unlock-screen', () => runtime?.setLocked(false));
-
   protocol.handle('app', serveRenderer);
   registerIpc();
   createMainWindow();
