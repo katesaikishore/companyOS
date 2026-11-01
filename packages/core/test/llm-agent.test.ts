@@ -86,7 +86,7 @@ describe('routine names from the local model', () => {
 
 /**
  * Five working days with two routines. One six-step routine alternates two long window classes, so its rule-based
- * name ("Routine: spreadsheet → terminal → ...") is 81 characters, over the 80-character limit of an automation.
+ * name ("Routine: spreadsheet → document → ...") is 81 characters, over the 80-character limit of an automation.
  * The other is a normal three-step routine.
  */
 function longAndNormal(): TwinAgent {
@@ -94,7 +94,7 @@ function longAndNormal(): TwinAgent {
   const now = at(5, 0);
   const agent = new TwinAgent({ dataDir: dir, dataKey: randomBytes(32), now: () => now });
   for (let day = 0; day < 5; day++) {
-    const long = ['Microsoft Excel', 'Terminal', 'Microsoft Excel', 'Terminal', 'Microsoft Excel', 'Terminal'];
+    const long = ['Microsoft Excel', 'Microsoft Word', 'Microsoft Excel', 'Microsoft Word', 'Microsoft Excel', 'Microsoft Word'];
     long.forEach((app, index) => agent.ingest({ kind: 'focus', ts: at(day, 9, index * 5), app }));
     agent.ingest({ kind: 'idle_start', ts: at(day, 9, 40) });
     const normal = ['Microsoft Excel', 'Microsoft Outlook', 'Slack'];

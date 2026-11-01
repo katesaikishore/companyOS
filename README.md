@@ -30,12 +30,25 @@ the owner's Mintlify account.
 - **Capture.** Reads the app in front on macOS, Windows and Linux X11, with pause, idle detection, an exclusion list,
   and a pause while the screen is locked. Browser capture is off by default. It works on macOS and Linux only, for
   Chrome and Edge, and it never reports incognito windows.
-- **Store.** Encrypted at rest. Raw events and handoff records from earlier versions are kept for 90 days. Export
-  writes a plain file after a warning. Delete everything removes the database, the data key and the installed models.
-- **Routines and automations.** Repeated sequences on at least three different days are suggested. An accepted routine
-  becomes a draft that can be dry-run. At level 3 you start each run, from the tray offer or with Run now. At level 4,
-  with the unattended switch on, a routine of local, reversible steps can run when its app comes to the front. A
-  promotion gate and demotion after a failed or undone run keep that honest.
+- **Store.** Encrypted at rest. Raw events and task decisions are kept for 90 days, and handoff records from earlier
+  versions too. Export writes a plain file after a warning, with a placeholder for any name you typed for a task or an
+  automation. Delete everything removes the database, the data key and the installed models.
+- **Today's tasks.** Each day's work is grouped into tasks by fixed rules: app names and the breaks between them. You
+  confirm, rename, merge or split each task in the review. Only ids and your action are kept, plus any name you typed.
+- **Routines.** Repeated sequences on at least three different days are suggested. With browser capture on, a web site
+  is its own step. An unknown app is mined once it recurs on three days, unless its name looks like a web address.
+  Shells, script hosts, terminals and system processes, such as Finder or Explorer, are never mined. Each suggestion
+  says when the routine usually happens, such as "Usually weekday mornings, around 9 to 11 am".
+- **Automations.** An accepted routine becomes a draft that can be dry-run. At level 3 you start each run, from the tray
+  offer or with Run now. At level 4, with the unattended switch on, a routine of local, reversible steps can run when its
+  app comes to the front. A promotion gate and demotion after a failed or undone run keep that honest. You can rename an
+  automation on its page.
+- **Declines.** "Not a routine" hides a suggestion, and near copies of it that differ by one step, for routines of three or
+  more steps. A "Not now" on an offer holds that routine back for four hours. Each one in a row doubles the wait, up to
+  seven days. Accepting the routine or completing a run starts the count again.
+- **What the twin knows.** A page that lists the routines the twin has noticed, what you said no to, and your habits over
+  the last 28 days: usual hours, typical session, the usual app for each kind of work, and how long you stay in one app.
+  Habits need five days of activity. From the page you can forget a suggestion, reset a decline or open an automation.
 - **App readiness.** For each app, the share of its switches in the last seven days that could run on their own,
   worked out by fixed rules.
 - **Window.** The main window is a fixed 900 by 600. It cannot be resized, maximised or made full screen, and zoom is off, so the layout is designed for that one size. The sidebar stays in place, and the page column scrolls inside the window.
@@ -58,7 +71,14 @@ the owner's Mintlify account.
   executor can run focus steps everywhere and key steps on macOS and Windows. It is off by default, it needs a program
   path set in Settings, and the program is not bundled.
   Typing, clicking and sending are not built. A design is in
-  [`docs/research/input-steps-proposal.md`](docs/research/input-steps-proposal.md). Level 5 is not built.
+  [`docs/research/input-steps-proposal.md`](docs/research/input-steps-proposal.md). Level 5 is not built. A web site
+  step focuses its browser and checks it. It does not open the site.
+- **Routine changes.** Routines with a web site step have new ids. An automation accepted from one before this version is
+  no longer linked to it, and the routine shows as a suggestion again. A dismissal from before this version no longer
+  hides it. Default names use window classes, so routines that differ only by site can share one. No migration is
+  written yet.
+- **Web addresses.** A site keeps its first path segment when it is lower case and up to 12 letters, so a user name can
+  show on What the twin knows. Changing that rule needs a decision.
 - **Platforms.** Wayland has no app capture. Windows has no browser capture.
   Intel Macs are not supported by the current builds, which are for Apple silicon.
 - **Signing.** Release builds are checked for a Developer ID signature and notarisation, but no certificate has been

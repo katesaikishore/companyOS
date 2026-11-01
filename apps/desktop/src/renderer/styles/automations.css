@@ -156,6 +156,37 @@
   overflow-wrap: anywhere;
 }
 
+/* The name and its Rename control. The rename form takes the same place while the person edits the name. */
+.auto-name-row,
+.auto-name-form {
+  display: flex;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+}
+
+/* The Rename button stays beside the name. A name that fills the column wraps inside its own space rather than pushing
+   the button onto a row of its own, which on Linux fonts took 38px from a page that has to fit a 600px window. */
+.auto-name-row .auto-detail-name {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.auto-name-row .btn {
+  flex: none;
+}
+
+.auto-name-form {
+  flex-wrap: wrap;
+}
+
+.auto-name-form .input {
+  flex: 1 1 180px;
+  max-width: 320px;
+  min-height: 36px;
+  font-size: 14px;
+}
+
 .auto-detail-sub {
   font-size: 12px;
   color: var(--muted);

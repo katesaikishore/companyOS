@@ -50,7 +50,10 @@ async function waitForStatus(page, check, { timeout = 15_000, label = 'status' }
   }
 }
 
-/** Writes ten working days of synthetic activity through a second engine instance on the same data folder. */
+/**
+ * Writes ten working days and today's synthetic activity through a second engine instance on the same data folder. Today
+ * has tasks at fixed hours, so the review has cards to lay out whatever time the run starts.
+ */
 async function seedActivity(app) {
   return app.evaluate(async (electronModule, args) => {
     const req = globalThis.require || process.mainModule.require;
@@ -75,6 +78,15 @@ async function seedActivity(app) {
       agent.ingest({ kind: 'focus', ts: at(ago, 13, 45), app: 'Visual Studio Code' });
       agent.ingest({ kind: 'idle_start', ts: at(ago, 14) });
     }
+    // One task with two stretches, so the review offers a split, then a second task after a longer break.
+    agent.ingest({ kind: 'focus', ts: at(0, 9), app: 'Microsoft Excel' });
+    agent.ingest({ kind: 'idle_start', ts: at(0, 9, 10) });
+    agent.ingest({ kind: 'focus', ts: at(0, 9, 20), app: 'Microsoft Excel' });
+    agent.ingest({ kind: 'focus', ts: at(0, 9, 30), app: 'Microsoft Outlook' });
+    agent.ingest({ kind: 'idle_start', ts: at(0, 9, 50) });
+    agent.ingest({ kind: 'focus', ts: at(0, 11), app: 'Microsoft Word' });
+    agent.ingest({ kind: 'focus', ts: at(0, 11, 10), app: 'Google Chrome', url: 'https://docs.example.com/doc/1ab2cd3ef4567890/edit?token=SECRET123456' });
+    agent.ingest({ kind: 'idle_start', ts: at(0, 11, 30) });
     return agent.suggestions().length;
   }, { core: CORE, keys: KEYS });
 }
@@ -155,12 +167,20 @@ async function responsiveProblems(page) {
       else if (box.left < -1 || box.right > viewport + 1) problems.push(`${testid} is outside the window`);
       else if (box.bottom > height + 1) problems.push(`${testid} is below the fold of the window`);
     }
+    // The page column is the scroll container. It is also overflow-x auto itself, so it must not count as the thing that
+    // contains what is inside it: a child past its inner edge would scroll the column sideways, and that is the problem.
+    const column = document.querySelector('main.main');
+    if (column) {
+      const sideways = column.scrollWidth - column.clientWidth;
+      if (sideways > 1) problems.push(`the page column scrolls sideways by ${sideways}px`);
+    }
+    const edge = column ? column.getBoundingClientRect().left + column.clientLeft + column.clientWidth : viewport;
     const spills = [];
     for (const element of document.querySelectorAll('main *')) {
       const box = element.getBoundingClientRect();
-      if (box.width === 0 || box.right <= viewport + 1) continue;
+      if (box.width === 0 || box.right <= edge + 1) continue;
       let contained = false;
-      for (let node = element.parentElement; node && node !== document.body; node = node.parentElement) {
+      for (let node = element.parentElement; node && node !== column && node !== document.body; node = node.parentElement) {
         if (['auto', 'hidden', 'scroll'].includes(getComputedStyle(node).overflowX)) {
           contained = true;
           break;
@@ -168,7 +188,7 @@ async function responsiveProblems(page) {
       }
       if (!contained) spills.push(element.getAttribute('class') || element.tagName);
     }
-    if (spills.length > 0) problems.push(`${spills.length} element(s) run past the window edge, for example ${spills.slice(0, 3).join(', ')}`);
+    if (spills.length > 0) problems.push(`${spills.length} element(s) run past the page column, for example ${spills.slice(0, 3).join(', ')}`);
     return problems;
   });
 }
@@ -469,13 +489,29 @@ async function main() {
 
     // 11. The window has one fixed size. Every main route holds the checks in responsiveProblems at 900x600, and the
     // window still reports that it cannot be resized, maximised or made full screen.
-    const ROUTES = ['overview', 'suggestions', 'automations', 'readiness', 'ledger', 'settings'];
+    const ROUTES = ['overview', 'suggestions', 'automations', 'readiness', 'knows', 'review', 'ledger', 'settings'];
     for (const route of ROUTES) {
-      await page.click(`[data-testid="nav-${route}"]`);
+      if (route === 'review') {
+        // The review has no sidebar link. It opens from the Overview, and its route still has to lay out.
+        await page.evaluate(name => { location.hash = `#/${name}`; }, route);
+      } else {
+        await page.click(`[data-testid="nav-${route}"]`);
+      }
       await page.waitForTimeout(250);
       await noDocumentScroll(page, `${route} route`);
       const problems = await responsiveProblems(page);
       assert.deepEqual(problems, [], `${route} at 900x600: ${problems.join('; ')}`);
+      if (route === 'review') {
+        // Today has tasks, so the review is populated and its cards are laid out. With a rename open, its field and
+        // buttons must fit the page column too.
+        await page.waitForSelector('[data-testid="review-task"]', { timeout: 15_000 });
+        assert.ok((await page.locator('[data-testid="review-task"]').count()) >= 2, 'the review shows today\'s two tasks');
+        await page.click('[data-testid="review-rename"]');
+        await page.waitForSelector('[data-testid="review-name-input"]');
+        const renaming = await responsiveProblems(page);
+        assert.deepEqual(renaming, [], `review with a rename open at 900x600: ${renaming.join('; ')}`);
+        await page.click('[data-testid="review-name-cancel"]');
+      }
       await page.screenshot({ path: path.join(SHOTS, `fixed-900x600-${route}.png`) });
     }
     log('fixed 900x600: every main route holds');

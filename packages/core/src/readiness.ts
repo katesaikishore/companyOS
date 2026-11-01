@@ -8,7 +8,7 @@ import type {
   AppReadinessStatus,
   AppReadinessView,
 } from './contract';
-import type { Routine } from './mine';
+import { DEFAULT_MINING, joinedKey, minedKeyOf, recurringUnknownApps, stepKey, type Routine } from './mine';
 import { segment, type Segment } from './segment';
 import type { TwinEvent, WindowClass } from './types';
 
@@ -45,7 +45,7 @@ export interface ReadinessInput {
   routines: readonly Routine[];
   /** Automations accepted from routines, with their autonomy state and promotion result. */
   automations: readonly AutomationView[];
-  /** Routines the person dismissed. They still count in the figures, and the routine list marks them. */
+  /** Routines the person dismissed, or that are near a dismissed one. They still count in the figures, and the list marks them. */
   dismissedRoutineIds: readonly string[];
 }
 
@@ -91,9 +91,9 @@ interface Coverage {
   byRoutine: Map<string, Set<string>>;
 }
 
-/** Consecutive switches into one window class, merged the way mining merges them. */
+/** Consecutive switches under one mining key, merged the way mining merges them. */
 interface Run {
-  windowClass: WindowClass;
+  key: string;
   events: TwinEvent[];
 }
 
@@ -110,7 +110,7 @@ interface Learned {
 export function computeReadiness(input: ReadinessInput): AppReadinessView {
   const since = input.now - READINESS_DAYS * DAY_MS;
   const stretches = segment(input.events, input.idleGapMs);
-  const coverage = coverRoutines(stretches, input.routines);
+  const coverage = coverRoutines(stretches, input.routines, recurringUnknownApps(stretches, DEFAULT_MINING));
 
   const total = emptyCounts();
   const tallies = new Map<string, Tally>();
@@ -210,15 +210,19 @@ function gateOf(item: Learned | undefined): AppReadinessGate | undefined {
  * Matches every routine against the stretches the way mining does, and records which switches each routine covers.
  * A routine covers a switch only inside one of its occurrences, so a switch outside any repeated sequence is not covered.
  */
-function coverRoutines(stretches: readonly Segment[], routines: readonly Routine[]): Coverage {
-  const runs = stretches.map(runsOf);
+function coverRoutines(
+  stretches: readonly Segment[],
+  routines: readonly Routine[],
+  recurring: ReadonlySet<string>,
+): Coverage {
+  const runs = stretches.map(stretch => runsOf(stretch, recurring));
   const coverage: Coverage = { covered: new Set(), asks: new Set(), byRoutine: new Map() };
   for (const routine of routines) {
-    const pattern = routine.steps.map(step => step.windowClass);
+    const pattern = routine.steps.map(step => stepKey(step));
     const ids = new Set<string>();
     for (const stretchRuns of runs) {
       for (let start = 0; start + pattern.length <= stretchRuns.length; start++) {
-        if (!pattern.every((windowClass, offset) => stretchRuns[start + offset].windowClass === windowClass)) continue;
+        if (!pattern.every((key, offset) => stretchRuns[start + offset].key === key)) continue;
         for (let offset = 0; offset < pattern.length; offset++) {
           for (const event of stretchRuns[start + offset].events) ids.add(event.id);
         }
@@ -234,14 +238,27 @@ function coverRoutines(stretches: readonly Segment[], routines: readonly Routine
   return coverage;
 }
 
-/** Collapses a stretch into runs of one window class. Apps that mining does not read are skipped and do not break a run. */
-function runsOf(stretch: Segment): Run[] {
+/**
+ * Collapses a stretch into runs of one mining key, as mining does (see joinedKey). Apps that mining does not read are
+ * skipped and do not break a run.
+ */
+function runsOf(stretch: Segment, recurring: ReadonlySet<string>): Run[] {
   const runs: Run[] = [];
   for (const event of stretch.events) {
-    if (!event.windowClass || event.windowClass === 'other') continue;
+    if (!event.app || !event.windowClass) continue;
+    const key = minedKeyOf(
+      { windowClass: event.windowClass, app: event.app, urlTemplate: event.urlTemplate },
+      recurring,
+    );
+    if (key === undefined) continue;
     const last = runs.at(-1);
-    if (last && last.windowClass === event.windowClass) last.events.push(event);
-    else runs.push({ windowClass: event.windowClass, events: [event] });
+    const joined = last ? joinedKey(last.key, key) : undefined;
+    if (last && joined !== undefined) {
+      last.key = joined;
+      last.events.push(event);
+    } else {
+      runs.push({ key, events: [event] });
+    }
   }
   return runs;
 }

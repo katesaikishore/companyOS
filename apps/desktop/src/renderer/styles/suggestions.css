@@ -142,6 +142,11 @@
   overflow-wrap: anywhere;
 }
 
+/* The usual time spans both columns, since it is the longest value on the card. */
+.sg-figure-wide {
+  grid-column: 1 / -1;
+}
+
 .sg-body {
   flex: 1;
   display: flex;

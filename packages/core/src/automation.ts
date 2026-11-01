@@ -198,12 +198,16 @@ export function compileRoutine(routine: Routine, name: string = defaultName(rout
   });
 }
 
-function defaultName(routine: Routine): string {
-  return `Routine: ${routine.steps.map(step => step.windowClass).join(' → ')}`;
+/** An unknown app is named by its app, since its window class is only 'other'. */
+export function defaultName(routine: Routine): string {
+  return `Routine: ${routine.steps.map(step => (step.windowClass === 'other' ? step.app : step.windowClass)).join(' → ')}`;
 }
 
-/** A name the schema accepts. A longer one is cut and ends with an ellipsis, so a long routine still compiles. */
-function fitName(name: string): string {
+/**
+ * A name the schema accepts. A longer one is cut and ends with an ellipsis, so a long routine still compiles. Accepting
+ * a routine and renaming an automation both use it, so the two follow the same rule.
+ */
+export function fitName(name: string): string {
   return name.length <= NAME_MAX ? name : `${name.slice(0, NAME_MAX - 1)}…`;
 }
 

@@ -68,6 +68,53 @@ const CATALOG: Readonly<Record<string, WindowClass>> = {
   sketch: 'design',
 };
 
+/**
+ * Processes of the desktop itself: the shell, the launcher and search, the lock and login screens, the window manager
+ * and the authentication prompts. They take focus all the time, so a routine built from them is noise. Matched by
+ * normalised name, as the catalogue is. Shells and terminals are not listed here: isShellApp covers them.
+ */
+const SYSTEM_PROCESSES: ReadonlySet<string> = new Set([
+  // macOS
+  'finder',
+  'dock',
+  'loginwindow',
+  'securityagent',
+  'systemuiserver',
+  'spotlight',
+  'control center',
+  'controlcenter',
+  'notification center',
+  'notificationcenter',
+  'window server',
+  'windowserver',
+  // Windows
+  'explorer',
+  'shellexperiencehost',
+  'startmenuexperiencehost',
+  'searchhost',
+  'searchapp',
+  'lockapp',
+  'textinputhost',
+  'credentialuibroker',
+  // Linux desktops, and the file managers that play the same part as Finder and Explorer
+  'gnome-shell',
+  'plasmashell',
+  'kwin',
+  'kwin_x11',
+  'kwin_wayland',
+  'mutter',
+  'xfwm4',
+  'xfce4-panel',
+  'gnome-screensaver',
+  'xscreensaver',
+  'polkit-gnome-authentication-agent-1',
+  'polkit-kde-authentication-agent-1',
+  'nautilus',
+  'dolphin',
+  'nemo',
+  'thunar',
+]);
+
 export function normalizeAppName(name: string): string {
   return name.trim().toLowerCase().replace(/\.(app|exe)$/, '').replace(/\s+/g, ' ');
 }
@@ -77,38 +124,113 @@ export function classifyApp(name: string): WindowClass {
 }
 
 /**
+ * Web browsers the catalogue does not list, by normalised name. They keep the class 'other', so they are mined like any
+ * unknown app, but browser capture is off by default and must cover them too (see isBrowserApp).
+ */
+const UNCATALOGUED_BROWSERS: ReadonlySet<string> = new Set([
+  'arc',
+  'brave-browser',
+  'chromium-browser',
+  'duckduckgo',
+  'epiphany',
+  'firefox developer edition',
+  'firefox nightly',
+  'firefox-esr',
+  'gnome-web',
+  'google-chrome-stable',
+  'librewolf',
+  'microsoft-edge',
+  'opera',
+  'opera gx',
+  'opera-stable',
+  'orion',
+  'tor browser',
+  'vivaldi',
+  'vivaldi-stable',
+  'waterfox',
+]);
+
+/** True for a web browser, whether the catalogue lists it or not. Its focus is dropped unless browser capture is on. */
+export function isBrowserApp(name: string): boolean {
+  return classifyApp(name) === 'browser' || UNCATALOGUED_BROWSERS.has(normalizeAppName(name));
+}
+
+/**
+ * True when the exclusion list covers any web browser, by a name or an alias it is known by. A browser site does not
+ * say which browser visited it, so this decides for every browser's sites at once.
+ */
+export function excludesBrowser(excluded: readonly string[]): boolean {
+  const browsers = [...Object.keys(CATALOG).filter(name => CATALOG[name] === 'browser'), ...UNCATALOGUED_BROWSERS];
+  return browsers.some(name => isExcludedApp(name, excluded));
+}
+
+/**
  * Shells, script hosts and interpreters by name, including the Windows tools that run a script, a library or an
- * installer. Terminal apps are matched by their window class, which covers the rest.
+ * installer. Terminal apps the catalogue lists are matched by their window class. The terminal emulators and remote
+ * shells it does not list are named here, so they are never mined either.
  */
 const SHELL_APPS = [
   'bash',
   'bun',
   'cmd',
+  'cmder',
   'command prompt',
+  'conemu',
+  'conemu64',
+  'conhost',
   'cscript',
   'csh',
   'dash',
   'deno',
+  'elvish',
   'fish',
+  'foot',
+  'ghostty',
+  'guake',
+  'hyper',
   'ksh',
+  'lxterminal',
+  'mintty',
+  'mobaxterm',
   'mshta',
   'msiexec',
   'node',
+  'nu',
+  'openconsole',
   'osascript',
   'perl',
   'php',
   'powershell',
+  'powershell_ise',
   'pwsh',
+  'putty',
   'py',
   'pythonw',
+  'qterminal',
   'regsvr32',
+  'rxvt',
   'ruby',
   'rundll32',
+  'sakura',
+  'screen',
   'sh',
+  'ssh',
+  'tabby',
   'tcsh',
+  'telnet',
+  'terminator',
+  'tilix',
+  'tmux',
+  'urxvt',
+  'warp',
+  'wezterm',
   'windows powershell',
   'wscript',
   'wsl',
+  'xfce4-terminal',
+  'xonsh',
+  'xterm',
+  'yakuake',
   'zsh',
 ];
 
@@ -125,6 +247,23 @@ export function isShellApp(name: string): boolean {
   // A second cut catches a space left in front of the extension, as in "wscript .exe.".
   const normalized = normalizeAppName(windowsName).replace(TRAILING_DOTS_AND_SPACES, '');
   return classifyApp(windowsName) === 'terminal' || SHELL_APPS.includes(normalized) || /^python[\d.]*$/.test(normalized);
+}
+
+/**
+ * True for a process of the desktop itself, by name. The name is cut the way Windows cuts it, as isShellApp does, so
+ * "explorer.exe." counts as explorer.
+ */
+export function isSystemProcess(name: string): boolean {
+  const windowsName = name.replace(TRAILING_DOTS_AND_SPACES, '');
+  return SYSTEM_PROCESSES.has(normalizeAppName(windowsName).replace(TRAILING_DOTS_AND_SPACES, ''));
+}
+
+/**
+ * True for a name with a dot followed by a letter, which is how a host or a reverse-domain id reads. A Chromium web app's
+ * window class carries the site's host, as in "Chrome-web.whatsapp.com__-Default", so such a name can carry a site.
+ */
+export function isSiteLikeName(name: string): boolean {
+  return /\.[a-z]/.test(normalizeAppName(name));
 }
 
 /**

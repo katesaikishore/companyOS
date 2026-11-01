@@ -33,6 +33,11 @@ const READINESS: Shape[] = [
   ['path', { d: 'M12 3a9 9 0 1 0 9 9h-9z' }],
   ['path', { d: 'M15 3.5A9 9 0 0 1 20.5 9H15z' }],
 ];
+/** An open book: what the twin has learned is kept in the pages. */
+const KNOWS: Shape[] = [
+  ['path', { d: 'M3 6.5c2.5-1.2 5.5-1.2 9 .9v12.1c-3.5-2.1-6.5-2.1-9-.9z' }],
+  ['path', { d: 'M21 6.5c-2.5-1.2-5.5-1.2-9 .9v12.1c3.5-2.1 6.5-2.1 9-.9z' }],
+];
 const LEDGER: Shape[] = [
   ['circle', { cx: '12', cy: '12', r: '9' }],
   ['path', { d: 'M3 12h18' }],
@@ -77,7 +82,15 @@ interface NavItem {
 
 export function shell(status: TwinStatus, route: Route, content: Child): HTMLElement {
   const items: NavItem[] = [
-    { label: 'Overview', href: '#/overview', testid: 'nav-overview', icon: OVERVIEW, tone: 'blue', active: route.name === 'overview' },
+    // The review has no link of its own. It is opened from the Overview, so the Overview stays marked while it is shown.
+    {
+      label: 'Overview',
+      href: '#/overview',
+      testid: 'nav-overview',
+      icon: OVERVIEW,
+      tone: 'blue',
+      active: route.name === 'overview' || route.name === 'review',
+    },
     {
       label: 'Suggestions',
       href: '#/suggestions',
@@ -105,6 +118,14 @@ export function shell(status: TwinStatus, route: Route, content: Child): HTMLEle
       tone: 'purple',
       badge: `${status.readiness.automatablePct}%`,
       active: route.name === 'readiness',
+    },
+    {
+      label: 'What the twin knows',
+      href: '#/knows',
+      testid: 'nav-knows',
+      icon: KNOWS,
+      tone: 'blue',
+      active: route.name === 'knows',
     },
     {
       label: 'Network ledger',

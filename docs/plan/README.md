@@ -551,3 +551,17 @@ What the tests cover:
 - Desktop (`apps/desktop/test/e2e.cjs`, Linux in CI): launches the built app and covers setup, the model recommendation, a real verified download, cancelling an install, routine detection, suggestions, a dry run, the ledger, the tray stop switch, and the routine offer when an app opens.
 
 Not yet done: running the installed model (labels and names still use rules), automation steps beyond app focus, the browser extension, native capture, SQLCipher, signing and notarisation, real icons, a manual pass on each OS against real apps, a measurement against the CPU and memory budgets in §5.5, and company mode.
+
+**Personalisation.** Where the seven gaps in the personalisation brief stand on branch `twin/personalisation`:
+
+| Gap | Status | Not done, or changed from the brief |
+|---|---|---|
+| 1. Web sites as their own routine steps | Built | A site step focuses and checks its browser, and does not open the site. Routines with a site step have new ids, so an accepted automation or an earlier dismissal no longer matches, and no migration is written. Default names use window classes. The first path segment is kept when it is lower case and up to 12 letters, a known gap in `tests/privacy`. |
+| 2. Unknown apps and system processes in routines | Partial | The optional per-app window class override in Settings. A recurring unknown app now breaks a known sequence it sits inside. |
+| 3. When a routine usually happens | Built | The usual time is not shown on an automation, which does not keep its routine's summary. |
+| 4. The twin remembers what the person tells it | Built | A dismissed routine that is no longer detected keeps its id only, so its near copies are not hidden. |
+| 5. Habits: how the person usually works | Built | None. Shown on What the twin knows. |
+| 6. Tasks and an end-of-day review | Built | Not yet checked in the Electron window. The end-to-end run in CI covers the review route. |
+| 7. What the twin knows | Partial | Forget is offered only on suggested routines. An accepted routine shows Open automation instead. Reset also lifts a dismissal. Not yet checked in the Electron window. |
+
+Shells, script hosts, terminal apps and system processes are never mined. Before this branch, catalogued terminals were mined by window class, so this changes behaviour.

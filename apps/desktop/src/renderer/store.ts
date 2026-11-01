@@ -8,6 +8,10 @@ export type Route =
   | { name: 'ledger' }
   /** The app readiness list, or one app's detail when the route names an app. */
   | { name: 'readiness'; app?: string }
+  /** Today's tasks, for the end-of-day review. It is opened from the Overview. */
+  | { name: 'review' }
+  /** What the twin knows: its routines, its habits, what the person said no to, and today's tasks. */
+  | { name: 'knows' }
   | { name: 'settings' };
 
 export interface Notice {
@@ -44,6 +48,8 @@ export const state = {
   /** The tab the automation detail shows. It is here, with the other selections, so a tab click redraws the page. */
   automationTab: 'workflow' as 'workflow' | 'autonomy',
   runResults: new Map<string, StoredRun>(),
+  /** The automation whose name is being edited, and the text typed so far. Unset when no name is being edited. */
+  renaming: undefined as { automationId: string; draft: string } | undefined,
 };
 
 let renderer: (() => void) | undefined;
@@ -116,7 +122,7 @@ export function saveConfig(key: string, patch: Partial<TwinConfig>): Promise<voi
 }
 
 export function confirmDeleteAll(): void {
-  if (!window.confirm('Delete everything the twin knows about you? This removes all events, automations, any handoff records saved by an earlier version, and installed models on this device, including the optional decision model. It cannot be undone.')) {
+  if (!window.confirm('Delete everything the twin knows about you? This removes all events, automations, any handoff records saved by an earlier version, task decisions, and installed models on this device, including the optional decision model. It cannot be undone.')) {
     return;
   }
   void call('delete', twin => twin.deleteAll());
@@ -146,6 +152,10 @@ export function routeFromHash(hash: string): Route {
       return { name: 'ledger' };
     case 'readiness':
       return parts[1] ? { name: 'readiness', app: safeDecode(parts[1]) } : { name: 'readiness' };
+    case 'review':
+      return { name: 'review' };
+    case 'knows':
+      return { name: 'knows' };
     case 'settings':
       return { name: 'settings' };
     default:

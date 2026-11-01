@@ -4,9 +4,11 @@ import { shell } from './components/shell.js';
 import { openCommandPalette } from './commands.js';
 import { layaFraction, layaStateLabel, modelFraction, modelStateLabel } from './labels.js';
 import { automationDetailView, automationsView } from './views/automations.js';
+import { knowsView } from './views/knows.js';
 import { ledgerView } from './views/ledger.js';
 import { readinessView } from './views/readiness.js';
 import { overviewView } from './views/overview.js';
+import { reviewView } from './views/review.js';
 import { settingsView } from './views/settings.js';
 import { setupView } from './views/setup.js';
 import { suggestionsView } from './views/suggestions.js';
@@ -92,7 +94,7 @@ function signature(status: TwinStatus | undefined): string {
     pending: [...state.pending].sort(),
     wizard: [state.wizardForced, state.wizardStep, state.altOpen],
     setup: state.setup,
-    selection: [state.selectedSuggestion, state.selectedLedger, state.automationTab],
+    selection: [state.selectedSuggestion, state.selectedLedger, state.automationTab, state.renaming?.automationId],
     runs: [...state.runResults.entries()],
   });
 }
@@ -129,10 +131,14 @@ function viewFor(status: TwinStatus, route: Route): HTMLElement {
       return automationsView(status);
     case 'automation':
       return automationDetailView(status, route.id);
+    case 'knows':
+      return knowsView(status);
     case 'ledger':
       return ledgerView(status);
     case 'readiness':
       return readinessView(status, route.app);
+    case 'review':
+      return reviewView(status);
     case 'settings':
       return settingsView(status);
     default:
@@ -191,6 +197,7 @@ function boot(): void {
   window.addEventListener('hashchange', () => {
     state.route = routeFromHash(location.hash);
     state.dirty.clear();
+    state.renaming = undefined;
     requestRender();
   });
 

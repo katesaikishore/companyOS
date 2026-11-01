@@ -372,7 +372,7 @@ describe('shell targets', () => {
     expect(StepSchema.safeParse({ op: 'press_shortcut', app, shortcut: 'cmd+shift+k' }).success).toBe(false);
   });
 
-  it.each(['cmd.exe', 'Terminal.app', 'Windows Terminal', 'Command Prompt', 'python3.12', 'iTerm2'])('refuses %s too', app => {
+  it.each(['cmd.exe', 'Terminal.app', 'Windows Terminal', 'Command Prompt', 'python3.12', 'iTerm2', 'Warp', 'WezTerm'])('refuses %s too', app => {
     expect(StepSchema.safeParse({ op: 'press_shortcut', app, shortcut: 'cmd+k' }).success).toBe(false);
     expect(StepSchema.safeParse({ op: 'open_file', app, path: '/Users/me/a.xlsx' }).success).toBe(false);
   });

@@ -1,4 +1,4 @@
-import { TwinAgent, type Automation, type Executor, type TwinEvent } from '@companyos/twin-core';
+import { TwinAgent, dayKeyOf, describeWhen, type Automation, type Executor, type TwinEvent } from '@companyos/twin-core';
 import { randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -129,12 +129,15 @@ export async function runPlantedScenario(): Promise<ScenarioRun> {
       outcomes[planted.label] = ingestOutcome(agent, planted.signal(at(0, 11, index)), thrown);
     });
 
-    const suggestion = agent.suggestions().find(candidate => candidate.routine.steps.length === 4);
+    const detected = agent.suggestions();
+    const suggestion = detected.find(candidate => candidate.routine.steps.length === 4);
     if (!suggestion) throw new Error('The scenario should detect a four-step routine.');
     const view = agent.acceptRoutine(suggestion.routine.id, 'Invoice follow-up');
     agent.setLevel(view.automation.id, 3);
     await agent.run(view.automation.id, { mode: 'dry_run' }, focusingExecutor());
     await agent.run(view.automation.id, { mode: 'supervised', approve: async () => true }, focusingExecutor());
+    // A decline is kept in the encrypted config, so the store and the export carry it. The canary checks read it there.
+    agent.recordDecline(view.automation.id);
 
     for (const attempt of [() => agent.setLevel('auto_unknown', 3), () => agent.acceptRoutine('routine_unknown')]) {
       try {
@@ -154,13 +157,30 @@ export async function runPlantedScenario(): Promise<ScenarioRun> {
     models.install('qwen3-0.6b');
     await settle(() => models.states().every(state => state.status !== 'running'));
 
-    const exported = agent.exportAll() as { events: TwinEvent[]; automations: Automation[] };
+    // Tasks for a working day, with the first one confirmed, so the task view and the decision store hold real data.
+    const taskDay = dayKeyOf(at(9, 12));
+    agent.decideTask({ day: taskDay, kind: 'confirm', taskId: agent.dayTasks(taskDay).tasks[0].id });
+
+    const exported = agent.exportAll() as { events: TwinEvent[]; automations: Automation[]; config: unknown };
     const surfaces: Surface[] = [
       ...diskSurfaces(root, storeDir, key),
       { name: 'console', text: capture.text() },
       { name: 'ledger', text: JSON.stringify({ network: agent.networkLedger(), downloads: models.states() }, null, 2) },
       { name: 'export', text: JSON.stringify(exported, null, 2) },
       { name: 'export:automations', text: JSON.stringify(exported.automations, null, 2) },
+      { name: 'export:config', text: JSON.stringify(exported.config, null, 2) },
+      { name: 'habits', text: JSON.stringify(agent.habits(), null, 2) },
+      // The What the twin knows page: its routines, sites, timing and declines. It is built from the same planted run.
+      { name: 'knows', text: JSON.stringify(agent.knownRoutines(), null, 2) },
+      {
+        name: 'suggestions',
+        text: JSON.stringify(
+          detected.map(item => ({ when: describeWhen(item.routine.when) })),
+          null,
+          2,
+        ),
+      },
+      { name: 'tasks', text: JSON.stringify(agent.dayTasks(taskDay), null, 2) },
       { name: 'errors', text: thrown.map(errorText).join('\n') },
       { name: 'outbound:fetch', text: outbound.join('\n') },
     ];

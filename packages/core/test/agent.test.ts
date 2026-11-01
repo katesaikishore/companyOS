@@ -3,7 +3,20 @@ import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { DEFAULT_CONFIG, EncryptedStore, RETENTION_DAYS, TwinAgent, mineRoutines, normalizeSignal, segment, type Executor, type TwinEvent } from '../src';
+import {
+  DEFAULT_CONFIG,
+  EncryptedStore,
+  RETENTION_DAYS,
+  TwinAgent,
+  mineRoutines,
+  normalizeSignal,
+  segment,
+  signatureOf,
+  type Executor,
+  type Routine,
+  type TwinConfig,
+  type TwinEvent,
+} from '../src';
 import { SECRET_QUERY, at, workdays } from './fixtures';
 
 const DAY = 86_400_000;
@@ -325,5 +338,276 @@ describe('dismissals, the automations switch, the ledger and the overview', () =
     const view = agent.acceptRoutine(agent.suggestions()[0].routine.id);
     expect(view.automation.estimate?.occurrencesPerWeek).toBeGreaterThan(0);
     expect(view.automation.estimate?.minutesPerWeek).toBeGreaterThan(0);
+  });
+});
+
+describe('near copies of a dismissed routine', () => {
+  const SHEET = ['Microsoft Excel', 'Microsoft Word', 'Slack', 'Figma'];
+  const NEAR = ['Microsoft Excel', 'Microsoft Word', 'Microsoft Outlook', 'Figma'];
+  const OTHER = ['Figma', 'Slack', 'Microsoft Excel', 'Microsoft Outlook'];
+  const SHEET_FLOW = 'microsoft excel > microsoft word > slack > figma';
+  const NEAR_FLOW = 'microsoft excel > microsoft word > microsoft outlook > figma';
+  const OTHER_FLOW = 'figma > slack > microsoft excel > microsoft outlook';
+
+  /** One stretch of work at a regular pace, then an idle break that ends it. */
+  function sitting(day: number, hour: number, apps: string[]): Array<Record<string, unknown>> {
+    const focus = apps.map((app, index) => ({ kind: 'focus', ts: at(day, hour, index * 10), app }));
+    return [...focus, { kind: 'idle_start', ts: at(day, hour, 40) }];
+  }
+
+  /** Six days of one routine, four days of its near copy (one app changed), and an unrelated routine on every day. */
+  function nearCopies() {
+    const dir = mkdtempSync(join(tmpdir(), 'twin-near-'));
+    const key = randomBytes(32);
+    const now = at(10, 0);
+    const agent = openAgent(dir, key, now);
+    for (let day = 0; day < 10; day++) {
+      for (const signal of sitting(day, 9, day < 6 ? SHEET : NEAR)) agent.ingest(signal);
+      for (const signal of sitting(day, 14, OTHER)) agent.ingest(signal);
+    }
+    return { agent, dir, key, now };
+  }
+
+  /** The apps of a routine in order, so a test can name the routine it means. */
+  function flowOf(routine: Routine): string {
+    return routine.steps.map(step => step.app).join(' > ');
+  }
+
+  it('hides a near copy of a dismissed routine, and keeps an unrelated routine', () => {
+    const { agent, dir, key, now } = nearCopies();
+    const flows = () => agent.suggestions().map(suggestion => flowOf(suggestion.routine));
+    expect(flows()).toEqual(expect.arrayContaining([SHEET_FLOW, NEAR_FLOW, OTHER_FLOW]));
+
+    const sheet = agent.suggestions().find(suggestion => flowOf(suggestion.routine) === SHEET_FLOW)!.routine.id;
+    agent.dismissRoutine(sheet);
+    expect(flows()).toEqual([OTHER_FLOW]);
+    expect(agent.routinesToName().map(routine => flowOf(routine))).toEqual([OTHER_FLOW]);
+    agent.close();
+
+    const reopened = openAgent(dir, key, now);
+    expect(reopened.suggestions().map(suggestion => flowOf(suggestion.routine))).toEqual([OTHER_FLOW]);
+    reopened.close();
+  });
+
+  it('exports the dismissal and its decline, and a wipe removes both', () => {
+    const { agent, dir, key, now } = nearCopies();
+    const sheet = agent.suggestions().find(suggestion => flowOf(suggestion.routine) === SHEET_FLOW)!.routine.id;
+    agent.dismissRoutine(sheet);
+    const config = (agent.exportAll() as { config: TwinConfig }).config;
+    // Names only as the twin already keeps them: window classes here, and the same keys the routine is mined under.
+    expect(config.dismissedRoutineSignatures).toEqual(['spreadsheet>document>chat>design']);
+    expect(config.declinedRoutines).toEqual([{ routineId: sheet, at: now, count: 1 }]);
+    agent.wipe();
+
+    const after = openAgent(dir, key, now);
+    expect(after.configuration.dismissedRoutineSignatures).toEqual([]);
+    expect(after.configuration.declinedRoutines).toEqual([]);
+    after.close();
+  });
+
+  it('still counts a near copy in readiness, where it is shown as dismissed', () => {
+    const { agent } = nearCopies();
+    const near = agent.suggestions().find(suggestion => flowOf(suggestion.routine) === NEAR_FLOW)!.routine.id;
+    const sheet = agent.suggestions().find(suggestion => flowOf(suggestion.routine) === SHEET_FLOW)!.routine.id;
+    agent.dismissRoutine(sheet);
+    const learned = agent.readiness().rows.flatMap(row => row.learned);
+    expect(learned.find(item => item.routineId === near)?.status).toBe('dismissed');
+    agent.close();
+  });
+
+  it('hides a near copy of a routine that an earlier version dismissed by id alone, and stores its signature', () => {
+    const { agent } = nearCopies();
+    const sheet = agent.suggestions().find(suggestion => flowOf(suggestion.routine) === SHEET_FLOW)!.routine.id;
+    // An earlier version kept the id and no signature. The routine is still detected, so its near copy must stay hidden.
+    agent.updateConfig({ dismissedRoutineIds: [sheet] });
+
+    expect(agent.suggestions().map(suggestion => flowOf(suggestion.routine))).toEqual([OTHER_FLOW]);
+    // Dismissing it again changes nothing, and a dismissal that was already kept counts no decline.
+    agent.dismissRoutine(sheet);
+    const config = (agent.exportAll() as { config: TwinConfig }).config;
+    expect(config.dismissedRoutineSignatures).toEqual(['spreadsheet>document>chat>design']);
+    expect(config.declinedRoutines).toEqual([]);
+    agent.close();
+  });
+
+  it('keeps the order of the automations when one is renamed', () => {
+    const { agent } = nearCopies();
+    const views = [SHEET_FLOW, NEAR_FLOW, OTHER_FLOW].map(flow => {
+      const routine = agent.suggestions().find(suggestion => flowOf(suggestion.routine) === flow)!.routine.id;
+      return agent.acceptRoutine(routine);
+    });
+    const order = views.map(view => view.automation.id);
+
+    agent.renameAutomation(order[0], 'Month-end sheet');
+    expect(agent.automations().map(view => view.automation.id)).toEqual(order);
+    expect(agent.automations()[0].automation.name).toBe('Month-end sheet');
+    agent.renameAutomation(order[1], 'Near copy');
+    expect(agent.automations().map(view => view.automation.id)).toEqual(order);
+    agent.close();
+  });
+});
+
+describe('dismissed signatures and the apps they name', () => {
+  const SITE_FLOW = 'browser@docs.example.com/doc>spreadsheet>chat';
+  const CLASSES_FLOW = 'document>chat>design';
+
+  /** Ten mornings in a browser site, a spreadsheet and chat, and ten afternoons of document, chat and design. */
+  function siteAndClasses(agent: TwinAgent, site: string): void {
+    agent.updateConfig({ watchBrowsers: true });
+    for (let day = 0; day < 10; day++) {
+      agent.ingest({ kind: 'focus', ts: at(day, 9), app: 'Google Chrome', url: `https://${site}/1ab2cd3ef4567890/edit?token=SECRET123456` });
+      agent.ingest({ kind: 'focus', ts: at(day, 9, 10), app: 'Microsoft Excel' });
+      agent.ingest({ kind: 'focus', ts: at(day, 9, 20), app: 'Slack' });
+      agent.ingest({ kind: 'idle_start', ts: at(day, 9, 30) });
+      agent.ingest({ kind: 'focus', ts: at(day, 13), app: 'Microsoft Word' });
+      agent.ingest({ kind: 'focus', ts: at(day, 13, 10), app: 'Slack' });
+      agent.ingest({ kind: 'focus', ts: at(day, 13, 20), app: 'Figma' });
+      agent.ingest({ kind: 'idle_start', ts: at(day, 13, 30) });
+    }
+  }
+
+  /** Dismisses the suggested routine whose signature is the given one. */
+  function dismiss(agent: TwinAgent, signature: string): void {
+    const suggestion = agent.suggestions().find(candidate => signatureOf(candidate.routine) === signature);
+    if (!suggestion) throw new Error(`no routine with signature ${signature}`);
+    agent.dismissRoutine(suggestion.routine.id);
+  }
+
+  it('forgets a browser site once a browser is excluded, and keeps the other dismissals', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'twin-exclude-site-'));
+    const agent = openAgent(dir, randomBytes(32), at(10, 0));
+    siteAndClasses(agent, 'docs.example.com/doc');
+    dismiss(agent, SITE_FLOW);
+    dismiss(agent, CLASSES_FLOW);
+    expect((agent.exportAll() as { config: TwinConfig }).config.dismissedRoutineSignatures).toEqual(expect.arrayContaining([SITE_FLOW, CLASSES_FLOW]));
+
+    agent.updateConfig({ excludedApps: [...agent.configuration.excludedApps, 'Google Chrome'] });
+
+    const config = (agent.exportAll() as { config: TwinConfig }).config;
+    expect(config.dismissedRoutineSignatures).toEqual([CLASSES_FLOW]);
+    expect(JSON.stringify(config)).not.toContain('docs.example.com');
+    agent.close();
+  });
+
+  it('forgets a dismissed routine that names an unknown app once that app is excluded', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'twin-exclude-other-'));
+    const agent = openAgent(dir, randomBytes(32), at(10, 0));
+    for (let day = 0; day < 10; day++) {
+      agent.ingest({ kind: 'focus', ts: at(day, 9), app: 'Acme Planner' });
+      agent.ingest({ kind: 'focus', ts: at(day, 9, 10), app: 'Microsoft Word' });
+      agent.ingest({ kind: 'focus', ts: at(day, 9, 20), app: 'Slack' });
+      agent.ingest({ kind: 'idle_start', ts: at(day, 9, 30) });
+    }
+    dismiss(agent, 'other:acme planner>document>chat');
+    expect((agent.exportAll() as { config: TwinConfig }).config.dismissedRoutineSignatures).toEqual(['other:acme planner>document>chat']);
+
+    agent.updateConfig({ excludedApps: [...agent.configuration.excludedApps, 'Acme Planner'] });
+
+    const exported = agent.exportAll() as { config: TwinConfig; events: TwinEvent[] };
+    expect(exported.config.dismissedRoutineSignatures).toEqual([]);
+    expect(exported.events.some(event => event.app?.includes('acme'))).toBe(false);
+    agent.close();
+  });
+
+  it('drops a dismissed site once no stored event holds it, and keeps the signatures whose sites are still there', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'twin-prune-site-'));
+    const key = randomBytes(32);
+    const first = openAgent(dir, key, at(9, 12));
+    first.updateConfig({
+      watchBrowsers: true,
+      dismissedRoutineSignatures: ['browser@docs.example.com/doc>spreadsheet>chat', 'browser@wiki.example.com/page>spreadsheet>chat', CLASSES_FLOW],
+    });
+    // The docs site was last visited on day 0, the wiki on day 9. Only the wiki site is still in the store, after pruning.
+    first.ingest({ kind: 'focus', ts: at(0, 9), app: 'Google Chrome', url: 'https://docs.example.com/doc/1ab2/edit' });
+    first.ingest({ kind: 'focus', ts: at(9, 9), app: 'Google Chrome', url: 'https://wiki.example.com/page/x' });
+    first.close();
+
+    const later = openAgent(dir, key, at(0, 9) + (RETENTION_DAYS + 1) * DAY);
+    expect(later.prune()).toBeGreaterThan(0);
+    const config = (later.exportAll() as { config: TwinConfig }).config;
+    expect(config.dismissedRoutineSignatures).toEqual(['browser@wiki.example.com/page>spreadsheet>chat', CLASSES_FLOW]);
+    expect(JSON.stringify(later.exportAll())).not.toContain('docs.example.com');
+    later.close();
+  });
+
+  it('drops a signature that names an app excluded before the exclusion was forgotten, at the next prune', () => {
+    // A config saved by an earlier version: Chrome is excluded, and its site is still among the dismissed signatures.
+    const dir = mkdtempSync(join(tmpdir(), 'twin-legacy-exclusion-'));
+    const key = randomBytes(32);
+    const store = new EncryptedStore(dir, key);
+    store.replaceAll('settings', [
+      { ...DEFAULT_CONFIG, excludedApps: [...DEFAULT_CONFIG.excludedApps, 'Google Chrome'], dismissedRoutineSignatures: [SITE_FLOW, CLASSES_FLOW] },
+    ]);
+    store.close();
+
+    const agent = openAgent(dir, key, at(0, 9));
+    expect(agent.prune()).toBe(1);
+    expect((agent.exportAll() as { config: TwinConfig }).config.dismissedRoutineSignatures).toEqual([CLASSES_FLOW]);
+    agent.close();
+  });
+});
+
+describe('renaming an automation', () => {
+  it('changes only the name, and keeps the name across a restart', async () => {
+    const { agent, dir, key, now } = seeded(10);
+    const id = agent.acceptRoutine(agent.suggestions()[0].routine.id).automation.id;
+    agent.setLevel(id, 3);
+    await agent.run(id, { mode: 'supervised', approve: async () => true }, focusingExecutor());
+    const before = agent.automations()[0];
+    const renamed = agent.renameAutomation(id, 'Month-end sheet');
+    expect(renamed.automation).toEqual({ ...before.automation, name: 'Month-end sheet' });
+    expect(renamed.state).toEqual(before.state);
+    agent.close();
+    expect(openAgent(dir, key, now).automations()[0].automation.name).toBe('Month-end sheet');
+  });
+
+  it('refuses a blank name and an unknown automation, and cuts a long name to fit as an accepted routine is', () => {
+    const { agent } = seeded(10);
+    const id = agent.acceptRoutine(agent.suggestions()[0].routine.id).automation.id;
+    expect(() => agent.renameAutomation(id, '   ')).toThrow('Give the automation a name.');
+    expect(() => agent.renameAutomation('auto_000000000000', 'Name')).toThrow('Unknown automation.');
+    const cut = agent.renameAutomation(id, 'x'.repeat(120)).automation.name;
+    expect(cut).toHaveLength(80);
+    expect(cut.endsWith('…')).toBe(true);
+    agent.close();
+  });
+
+  it('exports a renamed automation without the typed name, and keeps the name across a restart', () => {
+    const { agent, dir, key, now } = seeded(10);
+    const id = agent.acceptRoutine(agent.suggestions()[0].routine.id).automation.id;
+    agent.renameAutomation(id, 'Salary review with HR, Q3');
+    agent.renameAutomation(id, 'Payroll check');
+    expect(JSON.stringify(agent.exportAll())).not.toContain('Salary review with HR');
+    expect(JSON.stringify(agent.exportAll())).not.toContain('Payroll check');
+    agent.close();
+
+    const reopened = openAgent(dir, key, now);
+    expect(reopened.automations()[0].automation.name).toBe('Payroll check');
+    expect(JSON.stringify(reopened.exportAll())).not.toContain('Payroll check');
+    reopened.close();
+  });
+
+  it('still exports the name of an automation that was not renamed', () => {
+    const { agent } = seeded(10);
+    const view = agent.acceptRoutine(agent.suggestions()[0].routine.id);
+    expect((agent.exportAll() as { automations: Array<{ name: string }> }).automations[0].name).toBe(view.automation.name);
+    agent.close();
+  });
+});
+
+describe('settings saved by an earlier version', () => {
+  it('opens with no declines and no dismissed signatures', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'twin-old-settings-'));
+    const key = randomBytes(32);
+    const earlier: Record<string, unknown> = { ...DEFAULT_CONFIG };
+    delete earlier.dismissedRoutineSignatures;
+    delete earlier.declinedRoutines;
+    const store = new EncryptedStore(dir, key);
+    store.replaceAll('settings', [earlier]);
+    store.close();
+    const agent = openAgent(dir, key, at(0, 9));
+    expect(agent.configuration.dismissedRoutineSignatures).toEqual([]);
+    expect(agent.configuration.declinedRoutines).toEqual([]);
+    agent.close();
   });
 });

@@ -1,8 +1,9 @@
 import type { AutomationView } from './agent';
 import type { GateRequirement } from './autonomy';
-import type { EffectClass, TwinConfig, AutonomyLevel } from './types';
+import type { EffectClass, TwinConfig, AutonomyLevel, WindowClass } from './types';
 import type { DownloadState, HardwareProfile, InstalledModel, LayaBundleView, NetworkEntry, SetupPlan } from './models/types';
 import type { RunResult } from './runner';
+import type { TaskDecision } from './tasks';
 
 /**
  * The contract between the desktop main process and its pages (the app and the tray).
@@ -46,6 +47,8 @@ export interface SuggestionView {
   minutesPerWeek: number;
   /** When the latest occurrence of this routine began, in ms. */
   lastSeenAt: number;
+  /** When the routine usually happens, in plain words, from the start of each occurrence in local time. See describeWhen. */
+  when: string;
   drafted: DraftStep[];
   effects: EffectClass[];
   parameters: Array<{ name: string; options: string[] }>;
@@ -89,7 +92,7 @@ export interface AppReadinessRoutineView {
   switches: number;
   /** Automatable when every step is local and reversible. Approval when a step is not. */
   kind: 'automatable' | 'approval';
-  /** Suggested, accepted as an automation, or dismissed by the person. */
+  /** Suggested, accepted as an automation, or dismissed by the person. A near copy of a dismissed routine is dismissed too. */
   status: 'suggested' | 'accepted' | 'dismissed';
   automationId?: string;
   automationName?: string;
@@ -132,6 +135,146 @@ export interface AppReadinessView {
   rows: AppReadinessRow[];
 }
 
+/** The usual hours of one weekday. Weekdays run Monday first, as in the activity grid. */
+export interface UsualHoursView {
+  /** 0 is Monday. */
+  weekday: number;
+  /**
+   * Whole local days in the window with an app switch on this weekday. A day the window cuts, or today before it
+   * ends, is left out.
+   */
+  days: number;
+  /** False when too few days were seen to name an hour. The hours are then null, so the twin does not guess. */
+  enoughData: boolean;
+  /** Median hour of the first app switch of each observed day, to two decimals. 9.5 is 09:30. */
+  startHour: number | null;
+  /** Median hour of the last app switch of each observed day. */
+  endHour: number | null;
+}
+
+/** How long a work segment usually lasts. A segment runs from its first app switch to its last. */
+export interface SessionMinutesView {
+  /** Work segments in the window. */
+  segments: number;
+  /** Null below the minimum number of segments. */
+  medianMinutes: number | null;
+}
+
+/** The app a window class uses most in the window. Only classes with enough switches appear. */
+export interface UsualAppView {
+  windowClass: WindowClass;
+  /** App switches into this class in the window. */
+  switches: number;
+  /** The normalised app name. */
+  app: string;
+  /** Whole percentage of the class's switches that went to this app. */
+  sharePct: number;
+}
+
+/** How long the person stayed in one app of a window class before switching to another. */
+export interface StretchMinutesView {
+  windowClass: WindowClass;
+  /** Stretches in this class that ended with a switch to another app. */
+  stretches: number;
+  /** Null below the minimum number of stretches. */
+  medianMinutes: number | null;
+}
+
+/**
+ * How the person usually works, over the last four weeks. It describes what was recorded and never judges it. Until
+ * enough days are observed, it says so and gives no habit.
+ */
+export type HabitsView =
+  | { state: 'not_enough_data'; windowDays: number; observedDays: number; requiredDays: number }
+  | {
+      state: 'ready';
+      windowDays: number;
+      observedDays: number;
+      usualHours: UsualHoursView[];
+      sessionMinutes: SessionMinutesView;
+      usualAppPerKind: UsualAppView[];
+      stretchMinutes: StretchMinutesView[];
+    };
+
+/** A stretch of work inside a task, from its first focus event to its last. A split refers to one by its id. */
+export interface TaskSegmentView {
+  id: string;
+  startTs: number;
+}
+
+/**
+ * One task of a day: consecutive stretches of work grouped from app names and timing, named from the two most used apps
+ * unless the person named it. Nothing in it is window text or page content.
+ */
+export interface TaskView {
+  /** The id of the task's first stretch. Decisions refer to a task by it. */
+  id: string;
+  /** The name the person gave, or the two most used apps, such as "Microsoft Excel and Slack". */
+  name: string;
+  /** True when the person named the task. */
+  renamed: boolean;
+  /** The app names in the task, most used first. Stored names are lower case. */
+  apps: string[];
+  startTs: number;
+  endTs: number;
+  /** The task's stretches in time order. A split can happen at any of them but the first. */
+  segments: TaskSegmentView[];
+  /** True once the person has confirmed the task, or has merged, split or renamed it. */
+  confirmed: boolean;
+}
+
+/** The tasks of one local day, in time order. */
+export interface DayTasksView {
+  /** The local calendar day, as YYYY-MM-DD. */
+  day: string;
+  tasks: TaskView[];
+}
+
+/** One step of a routine the twin knows. A browser step names its site, as the routine does, and nothing more. */
+export interface RoutineStepView {
+  /** The app the step focuses, as the twin stores it. */
+  app: string;
+  /** The site a browser step visited: its host and first path segment. Absent for any other step. */
+  site?: string;
+  /** Other apps seen at this step. More than zero means the app varies between runs. */
+  alternatives: number;
+}
+
+/**
+ * A routine the twin knows and the person has not dismissed: suggested and waiting for an answer, or accepted as an
+ * automation. Names, apps, sites and timing only.
+ */
+export interface RoutineView {
+  routineId: string;
+  name: string;
+  status: 'suggested' | 'accepted';
+  steps: RoutineStepView[];
+  /** When the routine usually happens, in plain words. Absent when the routine is no longer detected. */
+  when?: string;
+  /** The automation an accepted routine became, and the level it is at. */
+  automationId?: string;
+  level?: AutonomyLevel;
+}
+
+/** A routine the person said no to: "Not now" on an offer, or "Not a routine". Reset clears it. */
+export interface DeclinedRoutineView {
+  routineId: string;
+  /** The name, while the routine is still detected or accepted. */
+  name?: string;
+  /** True when the person said it is not a routine. False for "Not now" on an offer. */
+  dismissed: boolean;
+  /** Declines in a row, with no accept or completed run in between. Zero for a dismissal kept by an earlier version. */
+  declines: number;
+  /** When the latest decline or dismissal happened, in ms. Absent for a dismissal kept by an earlier version. */
+  at?: number;
+}
+
+/** What the twin knows about the person's routines, for the What the twin knows page. */
+export interface KnownRoutinesView {
+  routines: RoutineView[];
+  declined: DeclinedRoutineView[];
+}
+
 export interface TwinStatus {
   capture: { state: 'capturing' | 'paused' | 'idle' | 'locked' | 'unsupported'; detail: string };
   /** Whether browser capture can run on this system. The browser bridge is available on macOS and Linux only. */
@@ -157,6 +300,12 @@ export interface TwinStatus {
   pendingRuns: PendingRunView[];
   /** How much of each app's repeated work could run on its own, over the last seven days. */
   readiness: AppReadinessView;
+  /** How the person usually works, over the last four weeks. Rebuilt from the stored events on each read. */
+  habits: HabitsView;
+  /** Today's tasks, grouped from the day's app switches with the person's decisions applied. */
+  tasks: DayTasksView;
+  /** What the twin knows about the person's routines. Rebuilt from the stored events on each read. */
+  knownRoutines: KnownRoutinesView;
 }
 
 /** Everything a page may ask of the main process. Each call is validated there. */
@@ -181,6 +330,10 @@ export interface TwinBridge {
 
   acceptRoutine(routineId: string, name?: string): Promise<AutomationView>;
   dismissRoutine(routineId: string): Promise<void>;
+  /** Clears the decline and the wait of a routine, and lifts a dismissal, so the twin may suggest it again. */
+  resetDecline(routineId: string): Promise<void>;
+  /** Changes the name of an automation. Nothing else about it changes. */
+  renameAutomation(automationId: string, name: string): Promise<AutomationView>;
   setLevel(automationId: string, level: AutonomyLevel): Promise<AutomationView>;
   promote(automationId: string): Promise<AutomationView>;
   dryRun(automationId: string): Promise<RunResult>;
@@ -188,6 +341,9 @@ export interface TwinBridge {
   revertLast(automationId: string): Promise<AutomationView>;
   /** Answers an offer. `run: true` starts a supervised run, where each external step still asks. */
   answerPendingRun(id: string, run: boolean): Promise<void>;
+
+  /** Confirms, renames, merges or splits one of a day's tasks. The engine checks it before it is stored. */
+  decideTask(decision: TaskDecision): Promise<void>;
 
   exportData(): Promise<string>;
   deleteAll(): Promise<void>;
