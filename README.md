@@ -115,7 +115,7 @@ name routines. Typing, clicking and sending are not built, and no release has be
   pinned SHA-256 digests) labels a routine that includes an app the catalogue does not know. It shows the label only at 0.7
   confidence or more. On 57 catalogue names, those labels matched the catalogue 95% of the time, for 35% of the names. The
   rules label everything else, and no policy or approval reads a label. Routine detection, policy and safety checks are
-  rule-based. The embedding model is downloaded and never loaded.
+  rule-based. The embedding model is in the catalogue, but setup does not offer it, because nothing uses it yet.
 - **Steps** are limited. Focusing an app and checking focus work wherever app capture works. Opening a link or a file
   works on macOS, Windows and Linux X11 (where `gio` is installed), and a file asks each time. The Linux adapter has run
   only with stand-in apps. Pressing a shortcut works on macOS and Windows and, on X11, through xdotool. It brings the app

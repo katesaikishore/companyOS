@@ -88,7 +88,7 @@ export const CATALOG: readonly ModelSpec[] = [
     file: 'nomic-embed-text-v1.5.Q8_0.gguf',
     sizeBytes: 146146432,
     sha256: '3e24342164b3d94991ba9692fdc0dd08e3fd7362e0aacc396a9a5c54a544c3b7',
-    summary: 'Not used yet. Setup downloads it with the chat model.',
+    summary: 'Not used yet. Setup does not offer it.',
   },
 ];
 

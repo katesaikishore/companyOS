@@ -39,7 +39,7 @@ npm install --no-save playwright
 NODE_PATH=$(npm root)/node_modules node apps/desktop/test/e2e.cjs
 ```
 
-The script uses a temporary data folder, and it needs network access to huggingface.co to download the embedding model. The decision-model step does not use the network: the script starts a local server with a 3 MB bundle and points the app at it through `COMPANYOS_TEST_LAYA_FIXTURE`, which a packaged build ignores.
+The script uses a temporary data folder, and it needs network access to huggingface.co to download the embedding model. Setup does not offer that model, so the script installs it through the app's own call as the real-download check. The decision-model step does not use the network: the script starts a local server with a 3 MB bundle and points the app at it through `COMPANYOS_TEST_LAYA_FIXTURE`, which a packaged build ignores.
 
 ## Decision-model tests
 

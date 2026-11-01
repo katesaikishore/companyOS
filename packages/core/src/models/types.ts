@@ -61,7 +61,6 @@ export interface SetupPlan {
   chat?: ModelFit;
   /** Every chat model, with its fit, so the person can choose another. */
   alternatives: ModelFit[];
-  embedding: ModelSpec;
   warnings: string[];
 }
 

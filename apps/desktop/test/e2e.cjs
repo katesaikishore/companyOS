@@ -3,7 +3,7 @@
 //
 //   npm run build && NODE_PATH="$(npm root -g)" xvfb-run -a node apps/desktop/test/e2e.cjs
 //
-// Needs network access to huggingface.co for the embedding-model download test.
+// Needs network access to huggingface.co for the real-download test, which installs the embedding model.
 const { createHash } = require('node:crypto');
 const { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
@@ -256,17 +256,26 @@ async function main(userDataDir, fixtureDir) {
     await page.waitForSelector('[data-testid="setup-plan-chat"]', { timeout: 30_000 });
     const chatModel = await page.getAttribute('[data-testid="setup-plan-chat"]', 'data-model-id');
     assert.ok(['qwen3-0.6b', 'qwen3-1.7b', 'qwen3-4b', 'qwen3-8b', 'qwen3-14b'].includes(chatModel), `chat model ${chatModel}`);
-    assert.equal(await page.getAttribute('[data-testid="setup-plan-embedding"]', 'data-model-id'), 'nomic-embed-text-v1.5');
+    assert.equal(await page.locator('[data-model-id="nomic-embed-text-v1.5"]').count(), 0, 'setup does not offer the embedding model');
     log('recommended chat model for this device:', chatModel);
     await shot(page, '03-setup-device');
 
-    // 3. A real embedding-model download, verified against its digest and recorded in the ledger.
-    await page.click('[data-testid="setup-plan-embedding"] [data-testid="install-model"]');
-    await page.waitForSelector('[data-testid="download-progress"][data-model-id="nomic-embed-text-v1.5"]', { timeout: 15_000 });
-    await page.waitForFunction(
-      () => document.querySelector('[data-testid="setup-plan-embedding"]')?.getAttribute('data-state') === 'installed',
-      null,
-      { timeout: 240_000 },
+    // 3. A real model download, verified against its digest and recorded in the ledger. Setup does not offer the embedding
+    // model, so the check installs it through the app's own call. It is the smallest real model in the catalogue.
+    await page.evaluate(() => window.twin.installModel('nomic-embed-text-v1.5'));
+    await waitForStatus(
+      page,
+      status => {
+        const download = status.downloads.find(entry => entry.modelId === 'nomic-embed-text-v1.5');
+        if (download?.status === 'failed') throw new Error(`the embedding model download failed: ${download.message ?? 'no reason given'}`);
+        return status.config.installedModels.some(model => model.id === 'nomic-embed-text-v1.5');
+      },
+      { timeout: 240_000, label: 'embedding model installed' },
+    );
+    const embeddingEntries = (await page.evaluate(() => window.twin.status())).network.filter(entry => entry.modelId === 'nomic-embed-text-v1.5');
+    assert.ok(
+      embeddingEntries.some(entry => entry.outcome === 'ok' && entry.sha256Verified === true),
+      'the embedding model download is in the ledger, verified against its digest',
     );
     log('embedding model downloaded and verified');
 

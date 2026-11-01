@@ -77,7 +77,13 @@ describe('planSetup', () => {
     expect(plan.alternatives.find(entry => entry.spec.id === 'qwen3-4b')?.spec.recommended).toBe(false);
     expect(plan.alternatives.find(entry => entry.spec.id === 'qwen3-8b')?.fit).toBe('tight');
     expect(plan.alternatives.find(entry => entry.spec.id === 'qwen3-14b')?.fit).toBe('too_large');
-    expect(plan.embedding.id).toBe('nomic-embed-text-v1.5');
+    // Only chat models are planned. The embedding model stays in the catalogue, but setup does not offer it.
+    expect(plan).not.toHaveProperty('embedding');
+    expect([plan.chat?.spec, ...plan.alternatives.map(entry => entry.spec)].every(spec => spec?.role === 'chat')).toBe(true);
+  });
+
+  it('plans from a catalogue that has no embedding model', () => {
+    expect(() => planSetup(hardware(), CATALOG.filter(model => model.role === 'chat'))).not.toThrow();
   });
 
   it('uses more of unified memory on Apple silicon', () => {
