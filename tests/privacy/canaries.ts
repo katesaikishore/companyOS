@@ -20,10 +20,29 @@ export const CANARIES = {
   typedText: 'CANARY_TYPED_TEXT_3E94F5',
   clipboard: 'CANARY_CLIPBOARD_C58D10',
   routineName: 'CANARY_ROUTINE_NAME_6A2C5D',
+  // Screen text. The stored frame's text is the only one that is kept. Each dropped frame plants its own canary, so a
+  // leak from a dropped frame is named by its canary and not hidden by the stored one.
+  screenOcr: 'CANARY_SCREEN_OCR_8A41C6',
+  screenOcrExcluded: 'CANARY_SCREEN_EXCLUDED_3C97E2',
+  screenOcrSecure: 'CANARY_SCREEN_SECURE_F05D18',
+  screenOcrUnknown: 'CANARY_SCREEN_UNKNOWN_72B4A9',
+  screenOcrLocked: 'CANARY_SCREEN_LOCKED_E61C03',
+  screenOcrBrowser: 'CANARY_SCREEN_BROWSER_19D8F4',
+  audioTranscript: 'CANARY_AUDIO_TRANSCRIPT_5E27B9',
+  searchQuery: 'CANARY_SEARCH_QUERY_E1F4A8',
   encodedForms: 'CANARY_FORMS_?>?/B2F90',
 } as const;
 
 export type CanaryName = keyof typeof CANARIES;
+
+/**
+ * Canaries a surface holds on purpose. Screen text is stored encrypted, and the owner's data key opens it, so the decrypted
+ * capture index holds the stored frame's text. Only that surface and that canary are excepted. The privacy test checks that
+ * the copy really is there, so the exception cannot pass on an empty store.
+ */
+export const HELD_BY_DESIGN: Readonly<Record<string, readonly CanaryName[]>> = {
+  'store:decrypted:capture': ['screenOcr'],
+};
 
 export type Encoding = 'raw' | 'base64' | 'base64url' | 'hex' | 'percent';
 
@@ -79,6 +98,7 @@ export function findLeaks(surfaces: readonly Surface[], canaries: Readonly<Recor
   for (const surface of surfaces) {
     const haystack = surface.text.toLowerCase();
     for (const [name, canary] of Object.entries(canaries)) {
+      if ((HELD_BY_DESIGN[surface.name] ?? []).includes(name as CanaryName)) continue;
       // A form can match at more than one alignment, so each form is reported once per surface.
       const reported = new Set<Encoding>();
       for (const { encoding, needle } of encodingsOf(canary)) {

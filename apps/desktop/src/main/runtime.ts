@@ -2,7 +2,12 @@ import {
   RETENTION_DAYS,
   TRIGGER_RULES,
   TwinAgent,
-  TwinConfigSchema,
+  classifyApp,
+  deriveMediaKey,
+  isBrowserApp,
+  isExcludedApp,
+  mergeConfigPatch,
+  screenDecision,
   KindLabelJob,
   describeWhen,
   effectOfOp,
@@ -10,15 +15,22 @@ import {
   modelWorkAllowed,
   planSetup,
   resolveStep,
+  type AudioRead,
   type Automation,
   type AutomationView,
   type AutonomyLevel,
+  type CaptureChannelState,
+  type CaptureHitView,
+  type CapturePermission,
+  type CaptureSearchRequest,
   type Decision,
   type DraftStep,
   type Executor,
   type HardwareProfile,
+  type LocalApiState,
   type NetworkEntry,
   type RunResult,
+  type ScreenRead,
   type SetupPlan,
   type Step,
   type SuggestionView,
@@ -26,14 +38,21 @@ import {
   type TwinStatus,
   type PendingRunView,
   type RoutineNamingJob,
+  type WindowClass,
   normalizeAppName,
 } from '@companyos/twin-core';
+import { desktopCapturer, systemPreferences } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { BROWSER_APP_NAMES, startBrowserBridge, type BrowserBridge, type BrowserVisit } from './browser-bridge';
 import { CaptureService } from './capture';
-import { destroyStoredSecrets, loadOrCreateDataKey } from './keys';
+import { AudioCaptureService, WhisperTranscriber, microphoneGranted } from './audio-capture';
+import { destroyStoredSecrets, loadOrCreateApiToken, loadOrCreateDataKey, rotateApiToken as replaceApiToken } from './keys';
+import { LOCAL_API_HOST, LOCAL_API_PORT, createLocalApi, type LocalApi } from './local-api';
+import { MediaStore } from './media-store';
+import { electronFrameSource, forkOcrWorker, ScreenCaptureService, type Frame, type ScreenContext } from './screen-capture';
+import { secureInputState } from './secure-input';
 import { detectHardware } from './hardware';
 import { LayaBundleManager, type LayaTestOptions } from './laya';
 import { LayaDecisionModel } from './decision-laya';
@@ -79,6 +98,15 @@ const LAYA_IDLE_RELEASE_MS = 5 * 60_000;
 const KIND_RELEASE_RETRY_MS = 30_000;
 /** After a pass that labelled nothing, how long to wait before the next look. Each look reads the whole history. */
 const KIND_QUIET_MS = 10 * 60_000;
+/** How often the capture channels get their current state, so a lock, pause or idle change is seen within this time. */
+const CAPTURE_SYNC_MS = 5_000;
+/** The image folder's cap. Once it is over, the oldest images go first. Their text stays. */
+const MEDIA_CAP_BYTES = 2 * 1024 ** 3;
+const MEDIA_CAP_BATCH = 200;
+/** Reading the image folder means looking at every file, so its size is refreshed at most this often while frames are kept. */
+const MEDIA_SIZE_REFRESH_MS = 60_000;
+/** A frame larger than this is not sent to the page. Frames are about 120 KB, so this only stops a runaway file. */
+const MAX_FRAME_BYTES = 512 * 1024;
 
 /**
  * Connects the twin engine to the operating system and to the model installer. It is the only thing the IPC
@@ -107,6 +135,23 @@ export class TwinRuntime {
   private pending: PendingRunView[] = [];
   /** Runs in progress. No offers are made while one runs, so the run's own app switches cannot trigger one. */
   private activeRuns = 0;
+  /** Screen and microphone capture. Each starts only while its setting is on. */
+  private readonly screen: ScreenCaptureService;
+  private readonly audio: AudioCaptureService;
+  private readonly media: MediaStore;
+  private readonly grabber = electronFrameSource();
+  private captureTimer: ReturnType<typeof setInterval> | undefined;
+  /** The app in front, from the last check. Undefined when it could not be named. */
+  private frontApp: string | undefined;
+  /** How many screen and microphone items are stored. Kept here, so a status read does not decrypt every row. */
+  private counts = { screen: 0, audio: 0 };
+  private mediaBytes = 0;
+  private mediaSizedAt = 0;
+  private apiState: LocalApiState = 'off';
+  private localApi: LocalApi | undefined;
+  private apiToken: string | undefined;
+  /** API and token changes run one at a time, as browser capture changes do. */
+  private apiChanges: Promise<void> = Promise.resolve();
 
   private constructor(
     private readonly options: RuntimeOptions,
@@ -115,7 +160,14 @@ export class TwinRuntime {
     dataKey: Buffer,
   ) {
     this.platform = platform;
-    this.agent = new TwinAgent({ dataDir: join(options.userData, 'twin'), dataKey });
+    this.media = new MediaStore(join(options.userData, 'media'), deriveMediaKey(dataKey));
+    this.agent = new TwinAgent({
+      dataDir: join(options.userData, 'twin'),
+      dataKey,
+      // Expired and excluded images are deleted through the media store. The delete is not awaited. A file it misses is
+      // removed by the next sweep, which finds every image file no stored item names.
+      deleteMedia: mediaIds => void this.media.remove(mediaIds).catch(() => undefined),
+    });
     this.capture = new CaptureService(
       {
         agent: this.agent,
@@ -126,6 +178,21 @@ export class TwinRuntime {
       },
       detail,
     );
+    this.screen = new ScreenCaptureService({
+      source: { grab: () => this.grabFrame() },
+      ocr: forkOcrWorker(join(__dirname, 'ocr-worker.js')),
+      media: { write: (mediaId, jpeg) => this.writeFrame(mediaId, jpeg), remove: mediaIds => this.media.remove(mediaIds) },
+      sink: { ingestScreen: read => this.keepScreenRead(read) },
+      now: () => Date.now(),
+      secureInput: () => this.checkSecureInput(),
+    });
+    this.audio = new AudioCaptureService({
+      transcriber: new WhisperTranscriber({
+        workerPath: join(__dirname, 'transcribe-worker.js'),
+        modelsDir: join(options.userData, 'models'),
+      }),
+      sink: { ingestAudio: segment => this.keepAudioSegment(segment) },
+    });
     this.models = new ModelManager({
       modelsDir: join(options.userData, 'models'),
       agent: this.agent,
@@ -166,10 +233,12 @@ export class TwinRuntime {
   }
 
   async start(): Promise<void> {
-    this.agent.prune();
+    await this.housekeeping();
     await this.models.reconcile();
     await this.laya.reconcile();
     this.capture.start();
+    this.startCapture();
+    void this.setLocalApi(this.agent.configuration.localApiEnabled);
     // A bridge that cannot start leaves the setting on with no browser URLs. The app still starts, and the capture card says why.
     if (this.agent.configuration.watchBrowsers) {
       await this.setBrowserCapture(true).catch(error => {
@@ -178,11 +247,13 @@ export class TwinRuntime {
     }
     this.namer.start();
     this.startKindLabels();
-    setInterval(() => this.agent.prune(), DAY_MS).unref();
+    setInterval(() => void this.housekeeping(), DAY_MS).unref();
   }
 
   stop(): void {
     this.capture.stop();
+    void this.stopCapture();
+    void this.setLocalApi(false);
     this.browserBridge?.stop();
     this.browserBridge = undefined;
     this.namer.stop();
@@ -191,10 +262,12 @@ export class TwinRuntime {
 
   setLocked(locked: boolean): void {
     this.capture.setLocked(locked);
+    this.refreshCapture();
   }
 
   setPaused(paused: boolean): void {
     this.capture.setPaused(paused);
+    this.refreshCapture();
   }
 
   hardware(): Promise<HardwareProfile> {
@@ -249,7 +322,10 @@ export class TwinRuntime {
       .reduce((sum, view) => sum + (view.automation.estimate?.minutesPerWeek ?? 0), 0);
     const observed = this.agent.observed();
     return {
-      capture: this.browserProblem ? { ...this.capture.status, detail: this.browserProblem } : this.capture.status,
+      capture: {
+        ...(this.browserProblem ? { ...this.capture.status, detail: this.browserProblem } : this.capture.status),
+        ...this.captureChannels(),
+      },
       browserCaptureSupported: isBrowserCaptureSupported(),
       config,
       usage: this.agent.appUsage(7),
@@ -287,13 +363,20 @@ export class TwinRuntime {
    * Turning browser capture on starts the local bridge and installs the native host first. If that fails, the
    * setting stays off and the error reaches the page.
    */
-  async updateConfig(patch: Partial<TwinConfig>): Promise<TwinConfig> {
-    const parsed = TwinConfigSchema.partial().parse(patch);
-    if (parsed.watchBrowsers !== undefined) {
-      await this.setBrowserCapture(parsed.watchBrowsers);
+  async updateConfig(patch: unknown): Promise<TwinConfig> {
+    // Checked as the saved config with the patch applied. Parsing the patch alone would reset every setting it leaves out.
+    const next = mergeConfigPatch(this.agent.configuration, patch);
+    const changed = patch as Partial<TwinConfig>;
+    if (changed.watchBrowsers !== undefined) {
+      await this.setBrowserCapture(next.watchBrowsers);
       this.browserProblem = undefined;
     }
-    return this.agent.updateConfig(parsed);
+    const saved = this.agent.updateConfig(next);
+    // Removing an app from the captured text happens when the exclusion list changes, so the counts are read again.
+    if (changed.excludedApps !== undefined) this.refreshCaptureCounts();
+    this.refreshCapture();
+    if (changed.localApiEnabled !== undefined) await this.setLocalApi(saved.localApiEnabled);
+    return saved;
   }
 
   stopAllAutomations(): void {
@@ -380,6 +463,8 @@ export class TwinRuntime {
    * the person set to level 3 or above, and only when the gate allows it. An offer never starts a run.
    */
   observeFocus(app: string): void {
+    // A focus change is a good moment for a screen frame. The frame still passes every check, so an excluded app is not read.
+    if (this.agent.configuration.screenCaptureEnabled) void this.screen.requestFrame('focus');
     if (this.activeRuns > 0) return;
     this.expireOffers();
     if (this.pending.length > 0) return;
@@ -490,16 +575,301 @@ export class TwinRuntime {
   }
 
   /**
-   * Destroys the stored data, the key and the installed models, including the decision-model bundle. Downloads are
-   * cancelled before the models folder goes, so none can write back into it. Nothing can be recovered afterwards.
+   * Destroys the stored data, the key, the captured screen images and microphone text, and the installed models,
+   * including the decision-model bundle. Downloads and screen reads are ended before their folders go, so nothing can be
+   * written back into them. Nothing can be recovered afterwards.
    */
   async deleteAll(): Promise<void> {
     this.stop();
+    await this.stopCapture();
     this.disableBrowserCapture();
+    await this.setLocalApi(false);
     await this.laya.wipe();
     await this.models.wipe();
+    await this.media.wipe();
     this.agent.wipe();
+    this.apiToken = undefined;
     destroyStoredSecrets(this.options.userData);
+  }
+
+  /** The microphone window's page id while that window is open. The permission handler lets only that page use the microphone. */
+  captureWebContentsId(): number | undefined {
+    return this.audio.captureWebContentsId;
+  }
+
+  /** Asks the operating system for screen or microphone access. Capture starts at once if the access is granted. */
+  async requestPermission(permission: CapturePermission): Promise<void> {
+    if (permission === 'microphone') await this.audio.requestPermission();
+    else await requestScreenAccess();
+    this.refreshCapture();
+  }
+
+  /** Searches the stored screen and microphone text, newest first. Words are matched as phrases. */
+  searchCapture(request: CaptureSearchRequest): CaptureHitView[] {
+    return this.agent.searchCapture(request);
+  }
+
+  /** A stored screen image as a JPEG data URL, or null when it is gone, cannot be read, or is too large to send. */
+  async frameImage(id: string): Promise<string | null> {
+    const bytes = await this.readFrame(id);
+    if (!bytes || bytes.length > MAX_FRAME_BYTES) return null;
+    return `data:image/jpeg;base64,${bytes.toString('base64')}`;
+  }
+
+  /** Deletes every stored screen image and all captured text. Activity history, automations and settings are kept. */
+  async deleteCapture(): Promise<void> {
+    // A read in progress ends first, so nothing new is stored after the delete.
+    await this.stopCapture();
+    try {
+      await this.media.remove(this.agent.deleteAllCapture());
+    } finally {
+      this.refreshCaptureCounts();
+      await this.refreshMediaBytes();
+      this.startCapture();
+    }
+  }
+
+  /** Copies the local API token through the given function. The token itself never reaches the page. */
+  async copyApiToken(copy: (text: string) => void): Promise<void> {
+    copy(await this.queueApi(() => this.apiTokenValue()));
+  }
+
+  /** Replaces the local API token. The API reads the token on every request, so the old one stops working at once. */
+  rotateApiToken(): Promise<void> {
+    return this.queueApi(async () => {
+      this.apiToken = await replaceApiToken(this.options.userData);
+    });
+  }
+
+  /** What activity capture says about the person now. Lock, pause and idle all keep the capture channels quiet. */
+  private captureFlags(): { locked: boolean; paused: boolean; idle: boolean } {
+    const state = this.capture.state;
+    return { locked: state === 'locked', paused: state === 'paused', idle: state === 'idle' };
+  }
+
+  private heldBack(): boolean {
+    const { locked, paused, idle } = this.captureFlags();
+    return locked || paused || idle;
+  }
+
+  /** The two channels' states and counts, and the local API's state. Holds no text, so the status and the API can return it. */
+  private captureChannels(): Omit<TwinStatus['capture'], 'state' | 'detail'> {
+    return {
+      screenState: this.screenState(),
+      audioState: this.audioState(),
+      apiState: this.apiState,
+      mediaBytes: this.mediaBytes,
+      screenCount: this.counts.screen,
+      audioCount: this.counts.audio,
+    };
+  }
+
+  private screenState(): CaptureChannelState {
+    if (!this.agent.configuration.screenCaptureEnabled) return 'off';
+    // Secure input cannot be read off macOS, so no frame is kept there. The channel says so, rather than looking on.
+    if (process.platform !== 'darwin') return 'unsupported';
+    if (!screenPermissionGranted()) return 'needs_permission';
+    return this.heldBack() ? 'paused' : 'on';
+  }
+
+  private audioState(): CaptureChannelState {
+    if (!this.agent.configuration.audioCaptureEnabled) return 'off';
+    if (!microphoneGranted()) return 'needs_permission';
+    return this.heldBack() ? 'paused' : 'on';
+  }
+
+  /**
+   * The screen policy's inputs from the current settings and the app in front. An app that cannot be named is treated as
+   * excluded, and so is the twin itself, so nothing it shows is read back.
+   */
+  private screenContext(): ScreenContext {
+    const config = this.agent.configuration;
+    const front = this.frontApp;
+    return {
+      enabled: config.screenCaptureEnabled,
+      ...this.captureFlags(),
+      app: front === undefined ? null : normalizeAppName(front),
+      appExcluded: front === undefined || isOwnApp(front) || isExcludedApp(front, config.excludedApps),
+      windowClass: windowClassOf(front),
+      permissionGranted: screenPermissionGranted(),
+    };
+  }
+
+  private async refreshFrontApp(): Promise<void> {
+    const app = await this.platform?.frontmost().catch(() => undefined);
+    this.frontApp = app || undefined;
+  }
+
+  /**
+   * The first step of a screen read, run before the policy. It reads the app in front again, so a switch the focus log
+   * dropped, such as one to an excluded app, is still seen. The secure input probe runs only when the read is otherwise
+   * allowed, since its answer would not change the outcome.
+   */
+  private async checkSecureInput(): Promise<boolean | 'unknown'> {
+    await this.refreshFrontApp();
+    const context = this.screenContext();
+    this.screen.setContext(context);
+    if (!screenDecision({ ...context, secureInput: false }).capture) return 'unknown';
+    return secureInputState();
+  }
+
+  /**
+   * The grab of one frame. The app in front is read again after the grab, and the frame goes on to OCR only when the same
+   * app was in front before and after it, and the policy allows that app now. A switch during the grab cannot then file
+   * one app's pixels under another, and an excluded app's frame is never read.
+   */
+  private async grabFrame(): Promise<Frame | null> {
+    const before = this.frontApp;
+    const frame = await this.grabber.grab();
+    if (frame === null) return null;
+    await this.refreshFrontApp();
+    const context = this.screenContext();
+    this.screen.setContext(context);
+    if (this.frontApp !== before || !screenDecision({ ...context, secureInput: false }).capture) return null;
+    return frame;
+  }
+
+  /** Gives both channels the current settings and state, and starts or stops the screen channel to match. */
+  private refreshCapture(): void {
+    const config = this.agent.configuration;
+    this.audio.setContext({ enabled: config.audioCaptureEnabled, ...this.captureFlags() });
+    if (config.screenCaptureEnabled) {
+      this.screen.setContext(this.screenContext());
+      this.screen.start();
+    } else {
+      void this.screen.stop();
+    }
+  }
+
+  /** Starts the microphone and the screen timers. Each channel still does nothing until its own setting is on. */
+  private startCapture(): void {
+    clearInterval(this.captureTimer);
+    this.audio.start();
+    this.captureTimer = setInterval(() => this.refreshCapture(), CAPTURE_SYNC_MS);
+    this.captureTimer.unref?.();
+    this.refreshCapture();
+  }
+
+  /** Stops both channels. The promise resolves once any screen read in progress has ended. */
+  private stopCapture(): Promise<void> {
+    clearInterval(this.captureTimer);
+    this.captureTimer = undefined;
+    this.audio.stop();
+    return this.screen.stop();
+  }
+
+  private async writeFrame(mediaId: string, jpeg: Buffer): Promise<void> {
+    await this.media.write(mediaId, jpeg);
+    this.noteFrameKept();
+  }
+
+  private noteFrameKept(): void {
+    const now = Date.now();
+    if (now - this.mediaSizedAt < MEDIA_SIZE_REFRESH_MS) return;
+    this.mediaSizedAt = now;
+    void this.refreshMediaBytes();
+  }
+
+  private keepScreenRead(read: ScreenRead): boolean {
+    const stored = this.agent.ingestScreen(read);
+    if (stored) this.counts.screen += 1;
+    return stored;
+  }
+
+  private keepAudioSegment(segment: AudioRead): boolean {
+    const stored = this.agent.ingestAudio(segment);
+    if (stored) this.counts.audio += 1;
+    return stored;
+  }
+
+  private refreshCaptureCounts(): void {
+    const summary = this.agent.captureSummary();
+    this.counts = { screen: summary.screenCount, audio: summary.audioCount };
+  }
+
+  private async refreshMediaBytes(): Promise<void> {
+    this.mediaBytes = await this.media.sizeBytes().catch(() => this.mediaBytes);
+  }
+
+  private readFrame(id: string): Promise<Buffer | null> {
+    return this.media.read(id).catch(() => null);
+  }
+
+  /**
+   * Removes text and images past their retention, keeps the image folder under its cap, and deletes image files that no
+   * stored item names. Runs at start and once a day. A failed sweep is tried again on the next run.
+   */
+  private async housekeeping(): Promise<void> {
+    try {
+      const { mediaIds } = this.agent.pruneWithMedia();
+      await this.media.remove(mediaIds);
+      await this.enforceMediaCap();
+      await this.media.reconcile(new Set(this.agent.liveMediaIds()));
+      this.refreshCaptureCounts();
+    } catch {
+      // The error is dropped. A path under the media folder or a stored id should not reach a log.
+    }
+  }
+
+  /** Removes the oldest images while the folder is over its cap. Their text stays. */
+  private async enforceMediaCap(): Promise<void> {
+    let bytes = await this.media.sizeBytes();
+    while (bytes > MEDIA_CAP_BYTES) {
+      const mediaIds = this.agent.evictScreenMedia(MEDIA_CAP_BATCH);
+      if (mediaIds.length === 0) break;
+      await this.media.remove(mediaIds);
+      bytes = await this.media.sizeBytes();
+    }
+    this.mediaBytes = bytes;
+  }
+
+  /** Starts or stops the local API, after the changes queued before it. */
+  private setLocalApi(enabled: boolean): Promise<void> {
+    return this.queueApi(() => (enabled ? this.enableLocalApi() : this.disableLocalApi()));
+  }
+
+  /** Starts the local API on the loopback address. A failure is shown in the status, and it never throws. */
+  private async enableLocalApi(): Promise<void> {
+    if (this.localApi) return;
+    try {
+      const api = createLocalApi({
+        host: LOCAL_API_HOST,
+        port: LOCAL_API_PORT,
+        token: () => this.apiToken ?? '',
+        search: request => this.agent.searchCapture(request),
+        frameImage: id => this.readFrame(id),
+        status: () => this.captureChannels(),
+      });
+      await this.apiTokenValue();
+      await api.start();
+      this.localApi = api;
+      this.apiState = 'listening';
+    } catch {
+      this.apiState = 'failed';
+    }
+  }
+
+  private async disableLocalApi(): Promise<void> {
+    const api = this.localApi;
+    this.localApi = undefined;
+    this.apiState = 'off';
+    await api?.stop();
+  }
+
+  /** Runs a change once the ones queued before it have finished. A failed change does not block the next one. */
+  private queueApi<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.apiChanges.then(task);
+    this.apiChanges = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  /** The bearer token, loaded or created on first use. Call it only through queueApi. */
+  private async apiTokenValue(): Promise<string> {
+    this.apiToken ??= await loadOrCreateApiToken(this.options.userData);
+    return this.apiToken;
   }
 
   /**
@@ -610,4 +980,34 @@ export class TwinRuntime {
       };
     });
   }
+}
+
+/** The same rule capture.ts uses for focus. The twin's own windows are never read back. */
+function isOwnApp(app: string): boolean {
+  const name = app.toLowerCase();
+  return name.includes('companyos') || name === 'electron';
+}
+
+/** A browser is never read. Any other app takes its class from the catalogue. An app that cannot be named is 'other'. */
+function windowClassOf(app: string | undefined): WindowClass {
+  if (app === undefined) return 'other';
+  return isBrowserApp(app) ? 'browser' : classifyApp(app);
+}
+
+/**
+ * Whether macOS lets this app read the screen. Other systems never read it, since secure input cannot be checked there
+ * (see secureInputState), so they report granted here and are stopped by the secure input check.
+ */
+function screenPermissionGranted(): boolean {
+  if (process.platform !== 'darwin') return true;
+  return systemPreferences.getMediaAccessStatus('screen') === 'granted';
+}
+
+/**
+ * Asks macOS for screen recording access. Electron has no call for it, so a screen source is requested instead, which
+ * makes macOS show its prompt while the access is undecided. The thumbnail is thrown away.
+ */
+async function requestScreenAccess(): Promise<void> {
+  if (process.platform !== 'darwin') return;
+  await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1, height: 1 } }).catch(() => []);
 }

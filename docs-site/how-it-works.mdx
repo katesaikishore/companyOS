@@ -10,6 +10,7 @@ The twin polls the operating system every few seconds and records the name of th
 - **Pause** stops recording until you resume. Locking the screen pauses it too, and it resumes at unlock unless you paused it yourself.
 - **Exclusions** tell the twin never to record an app. Excluding an app removes its recent events. Handoff records saved by an earlier version keep the app name until they are removed after 90 days, or until you delete everything.
 - **Browser capture** is off by default. When it is on, Chrome and Edge report only the host and a short path shape of the active tab. Titles, query strings and fragments are dropped. Private windows are skipped, so no page address is recorded for them, but the browser's name is still recorded as the app in front. It works on macOS and Linux only.
+- **Screen text and microphone text** are a separate feature, called Recall, and both are off by default. When you turn one on, the twin reads text from the screen or the microphone and keeps it for search. Read [Recall](/recall) for what is read, where it is kept and when it stops.
 
 ## 2. Segment and mine
 
@@ -34,4 +35,4 @@ See [Automations](/automations) for the levels and the promotion gate.
 
 ## What it does not do
 
-Typing, clicking and sending are not built, and neither is level 5. The twin does not read screenshots, keystrokes, page text or window titles at any point.
+Typing, clicking and sending are not built, and neither is level 5. Activity capture never reads keystrokes, page text or window titles. Recall is the one exception, and it is off until you turn it on. When it is on, it reads the text visible on the primary screen, which can include window titles and page text, and it reads the microphone in parts. See [Recall](/recall).

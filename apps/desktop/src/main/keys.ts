@@ -44,6 +44,30 @@ export async function loadOrCreateDataKey(userData: string): Promise<Buffer> {
   return key;
 }
 
+const API_KEY_FILE = 'api-key.bin';
+
+/** A new bearer token for the local API: 32 random bytes as hex, so it can be pasted into a header as it is. */
+function newApiToken(): string {
+  return randomBytes(32).toString('hex');
+}
+
+/** The local API's bearer token. Created on first use, and sealed like the data key, so it is never written in clear. */
+export async function loadOrCreateApiToken(userData: string): Promise<string> {
+  const path = join(userData, API_KEY_FILE);
+  const existing = await readSealed(path);
+  if (existing) return existing.toString('utf8');
+  const token = newApiToken();
+  await writeSealed(path, Buffer.from(token, 'utf8'));
+  return token;
+}
+
+/** Replaces the local API's bearer token. The caller swaps it in at once, so the old token stops working straight away. */
+export async function rotateApiToken(userData: string): Promise<string> {
+  const token = newApiToken();
+  await writeSealed(join(userData, API_KEY_FILE), Buffer.from(token, 'utf8'));
+  return token;
+}
+
 /** Removes every sealed secret. Without the data key the stored records are unreadable. */
 export function destroyStoredSecrets(userData: string): void {
   rmSync(join(userData, 'data-key.bin'), { force: true });

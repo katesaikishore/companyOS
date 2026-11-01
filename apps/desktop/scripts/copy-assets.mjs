@@ -6,8 +6,11 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const source = join(root, 'src', 'renderer');
 const target = join(root, 'dist', 'renderer');
 
-/** Copies the static parts of the renderer (pages, styles, fonts, licences). TypeScript output is written by tsc. */
-const STATIC = new Set(['.html', '.css', '.woff2', '.woff', '.txt', '.svg', '.png']);
+/**
+ * Copies the static parts of the renderer (pages, styles, fonts, licences). TypeScript output is written by tsc. Plain
+ * .js files are copied too, because tsc does not compile them: the audio worklet is one (worklets/pcm-worklet.js).
+ */
+const STATIC = new Set(['.html', '.css', '.woff2', '.woff', '.txt', '.svg', '.png', '.js']);
 
 function walk(folder) {
   for (const name of readdirSync(folder)) {

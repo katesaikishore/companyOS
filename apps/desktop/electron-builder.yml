@@ -58,11 +58,22 @@ asarUnpack:
   # disk, so the whole bin folder is unpacked. electron-builder unpacks a whole package that contains a .node file, so the
   # package's JavaScript is unpacked with it (checked in an unpacked build).
   - "**/node_modules/onnxruntime-node/bin/**"
+  # tesseract.js starts its recognition worker from a file, and it reads the English data from disk. The worker cannot be
+  # started from inside the archive, so the engine, its wasm core and the data package are unpacked (src/main/ocr-worker.ts).
+  - "**/node_modules/tesseract.js/**"
+  - "**/node_modules/tesseract.js-core/**"
+  - "**/node_modules/@tesseract.js-data/**"
+  # transformers.js loads sharp for image inputs, and sharp loads a native library from disk, which asar cannot serve.
+  - "**/node_modules/@img/**"
 mac:
-  # onnxruntime-node holds the bindings of every platform in one package. Each build keeps only its own.
+  # onnxruntime-node and sharp hold the bindings of every platform in their packages. Each build keeps only its own.
   files:
     - "!**/node_modules/onnxruntime-node/bin/napi-v6/{linux,win32}/**"
     - "!**/node_modules/onnxruntime-node/bin/napi-v6/darwin/!(${arch})/**"
+    - "!**/node_modules/@img/sharp-{linux,linuxmusl,win32}-*/**"
+    - "!**/node_modules/@img/sharp-libvips-{linux,linuxmusl,win32}*/**"
+    - "!**/node_modules/@img/sharp-darwin-!(${arch})/**"
+    - "!**/node_modules/@img/sharp-libvips-darwin-!(${arch})/**"
   category: public.app-category.productivity
   icon: build/icon.icns
   target:
@@ -76,6 +87,10 @@ mac:
   extendInfo:
     # macOS shows this text when the twin first asks to see the frontmost app through System Events.
     NSAppleEventsUsageDescription: companyOS Twin asks macOS which app is in front, so it can understand your routines on this device.
+    # macOS needs this text before the app can use the microphone. The app listens only while microphone capture is on.
+    NSMicrophoneUsageDescription: companyOS Twin listens to the microphone only when you turn on microphone capture, and keeps the words it hears as searchable text on this device.
+    # Screen recording has no prompt of its own on every macOS version. The text states the purpose in the app's Info.plist.
+    NSScreenCaptureUsageDescription: companyOS Twin reads the screen only when you turn on screen capture, and keeps the text it reads and sealed images on this device.
 dmg:
   # Signed when a Developer ID identity is configured. electron-builder does not notarise the image, so
   # scripts/package.mjs does that in a release build.
@@ -84,6 +99,9 @@ win:
   files:
     - "!**/node_modules/onnxruntime-node/bin/napi-v6/{darwin,linux}/**"
     - "!**/node_modules/onnxruntime-node/bin/napi-v6/win32/!(${arch})/**"
+    - "!**/node_modules/@img/sharp-{darwin,linux,linuxmusl}-*/**"
+    - "!**/node_modules/@img/sharp-libvips-{darwin,linux,linuxmusl}*/**"
+    - "!**/node_modules/@img/sharp-win32-!(${arch})/**"
   icon: build/icon.ico
   target:
     - nsis
@@ -92,6 +110,10 @@ linux:
   files:
     - "!**/node_modules/onnxruntime-node/bin/napi-v6/{darwin,win32}/**"
     - "!**/node_modules/onnxruntime-node/bin/napi-v6/linux/!(${arch})/**"
+    - "!**/node_modules/@img/sharp-{darwin,win32}-*/**"
+    - "!**/node_modules/@img/sharp-libvips-{darwin,win32}*/**"
+    - "!**/node_modules/@img/sharp-linux-!(${arch})/**"
+    - "!**/node_modules/@img/sharp-libvips-linux-!(${arch})/**"
     # npm install fetches these two GPU providers (about 285 MB) for linux/x64. The decision model runs on the CPU, so they stay out.
     - "!**/node_modules/onnxruntime-node/bin/napi-v6/linux/*/libonnxruntime_providers_cuda.so"
     - "!**/node_modules/onnxruntime-node/bin/napi-v6/linux/*/libonnxruntime_providers_tensorrt.so"

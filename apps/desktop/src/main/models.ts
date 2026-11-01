@@ -3,11 +3,18 @@ import {
   HUGGING_FACE_HOSTS,
   LocalModelClient,
   RoutineNamingJob,
+  WHISPER_BUNDLE,
+  bundleDirectory,
+  bundleSizesMatch,
+  bundleTotalBytes,
+  downloadBundle,
   downloadModel,
   findModel,
   modelUrl,
   modelWorkAllowed,
+  verifyBundle,
   verifyModelFile,
+  type BundleSpec,
   type DownloadState,
   type ModelSpec,
   type NetworkEntry,
@@ -17,6 +24,16 @@ import {
 import { utilityProcess, type UtilityProcess } from 'electron';
 import { mkdir, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
+
+/**
+ * Multi-file bundles this manager installs, such as the speech model. They use the same queue, progress and cancel as the
+ * single-file catalog, and each file is checked against its pin before it is kept.
+ */
+const BUNDLES: readonly BundleSpec[] = [WHISPER_BUNDLE];
+
+function findBundle(id: string): BundleSpec | undefined {
+  return BUNDLES.find(bundle => bundle.id === id);
+}
 
 export interface ModelManagerOptions {
   modelsDir: string;
@@ -58,20 +75,28 @@ export class ModelManager {
     return join(this.options.modelsDir, spec.file);
   }
 
+  /** The folder a bundle is installed in. The transcription worker checks every file in it before use. */
+  bundlePath(bundle: BundleSpec): string {
+    return bundleDirectory(this.options.modelsDir, bundle);
+  }
+
   /** Queues an install. Resolves once it is queued; progress arrives through states(). */
   install(modelId: string): void {
-    const spec = findModel(modelId);
-    if (!spec) throw new Error('Unknown model.');
+    const target = findModel(modelId) ?? findBundle(modelId);
+    if (!target) throw new Error('Unknown model.');
     if (this.wiping) throw new Error('The models are being deleted.');
     const existing = this.active.get(modelId);
     if (existing && existing.state.status === 'running') return;
     if (this.options.agent.configuration.installedModels.some(installed => installed.id === modelId)) return;
 
     const controller = new AbortController();
-    const state: DownloadState = { modelId, status: 'running', receivedBytes: 0, totalBytes: spec.sizeBytes };
+    const totalBytes = 'files' in target ? bundleTotalBytes(target) : target.sizeBytes;
+    const state: DownloadState = { modelId, status: 'running', receivedBytes: 0, totalBytes };
     this.active.set(modelId, { controller, state });
     this.options.onChange();
-    this.queue = this.queue.then(() => this.run(spec, controller.signal, state));
+    this.queue = this.queue.then(() =>
+      'files' in target ? this.runBundle(target, controller.signal, state) : this.run(target, controller.signal, state),
+    );
   }
 
   cancel(modelId: string): void {
@@ -94,17 +119,23 @@ export class ModelManager {
 
   /** Deletes an installed model file. Only files inside the models folder, named by the catalog, are removed. */
   async remove(modelId: string): Promise<void> {
-    const spec = findModel(modelId);
-    if (!spec) throw new Error('Unknown model.');
-    await rm(join(this.options.modelsDir, spec.file), { force: true });
+    const target = findModel(modelId) ?? findBundle(modelId);
+    if (!target) throw new Error('Unknown model.');
+    if ('files' in target) await rm(this.bundlePath(target), { recursive: true, force: true });
+    else await rm(join(this.options.modelsDir, target.file), { force: true });
     this.active.delete(modelId);
     this.options.agent.removeModelRecord(modelId);
     this.options.onChange();
   }
 
-  /** Forgets installs whose file is gone or no longer the right size. Runs at launch. */
+  /** Forgets installs whose file is gone or no longer the right size. Runs at launch. A bundle is kept only if every file is there. */
   async reconcile(): Promise<void> {
     for (const installed of this.options.agent.configuration.installedModels) {
+      const bundle = findBundle(installed.id);
+      if (bundle) {
+        if (!(await bundleSizesMatch(bundle, this.bundlePath(bundle)))) this.options.agent.removeModelRecord(installed.id);
+        continue;
+      }
       const spec = findModel(installed.id);
       const path = spec ? join(this.options.modelsDir, spec.file) : undefined;
       const info = path ? await stat(path).catch(() => undefined) : undefined;
@@ -114,6 +145,11 @@ export class ModelManager {
 
   async hasVerifiedFile(spec: ModelSpec): Promise<boolean> {
     return verifyModelFile(join(this.options.modelsDir, spec.file), spec);
+  }
+
+  /** True when every file of the bundle is present and matches its pin. Hashes each file. */
+  async hasVerifiedBundle(bundle: BundleSpec): Promise<boolean> {
+    return verifyBundle(bundle, this.bundlePath(bundle));
   }
 
   private async run(spec: ModelSpec, signal: AbortSignal, state: DownloadState): Promise<void> {
@@ -158,6 +194,42 @@ export class ModelManager {
     } catch (error) {
       const cancelled = error instanceof DownloadError && error.code === 'cancelled';
       record(cancelled ? 'cancelled' : 'failed', state.receivedBytes, false, url.hostname);
+      state.status = cancelled ? 'cancelled' : 'failed';
+      state.message = cancelled ? undefined : error instanceof Error ? error.message : 'The download failed.';
+    }
+    this.options.onChange();
+  }
+
+  /**
+   * Installs a multi-file bundle. Each file is ledgered as it is requested, so the bundle needs no entry of its own. The
+   * installed record carries the bundle digest, which covers the revision and every file.
+   */
+  private async runBundle(bundle: BundleSpec, signal: AbortSignal, state: DownloadState): Promise<void> {
+    if (signal.aborted) {
+      state.status = 'cancelled';
+      this.options.onChange();
+      return;
+    }
+
+    await mkdir(this.options.modelsDir, { recursive: true, mode: 0o700 });
+    try {
+      const result = await downloadBundle({
+        spec: bundle,
+        destinationDir: this.bundlePath(bundle),
+        allowedHosts: HUGGING_FACE_HOSTS,
+        signal,
+        fetchImpl: this.options.fetchImpl,
+        onProgress: received => {
+          state.receivedBytes = received;
+          this.options.onChange();
+        },
+        record: entry => this.options.agent.recordNetworkCall(entry),
+      });
+      this.options.agent.markModelInstalled({ id: bundle.id, sha256: result.digest, bytes: result.bytes, installedAt: Date.now() });
+      state.status = 'done';
+      state.receivedBytes = result.bytes;
+    } catch (error) {
+      const cancelled = error instanceof DownloadError && error.code === 'cancelled';
       state.status = cancelled ? 'cancelled' : 'failed';
       state.message = cancelled ? undefined : error instanceof Error ? error.message : 'The download failed.';
     }

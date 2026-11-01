@@ -54,7 +54,12 @@ function render(): void {
             'div',
             { class: 'tray-brand-text' },
             h('strong', null, captureTitle(status.capture.state)),
-            h('span', { class: 'tray-muted small' }, 'Text-only · screenshots off'),
+            h(
+              'span',
+              { class: 'tray-muted small', 'data-testid': 'tray-capture-note' },
+              // Screen text is off by default. The note says so, or says it is being recorded once it is on.
+              status.config.screenCaptureEnabled ? 'Screen text is being recorded' : 'Text-only · screenshots off',
+            ),
           ),
         ),
         button(paused ? 'Resume' : 'Pause', {

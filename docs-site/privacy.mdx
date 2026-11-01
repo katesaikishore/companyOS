@@ -10,7 +10,9 @@ Your activity is stored on this device and nowhere else. Apart from the calls li
 - The name of the app in front, its window type, and whether you are idle.
 - With browser capture on, which host and path shape the active tab used. Titles and query strings are dropped. The extension skips private and incognito windows, so no page address is recorded for them. The browser's name is still recorded as the app in front, as for any app.
 
-It never records window titles, page text, typed text, the clipboard, screenshots or keystrokes.
+Activity capture never records window titles, page text, typed text, the clipboard or keystrokes.
+
+Screen text and screen images are recorded only when you turn on **Read text on screen**, and microphone text only when you turn on **Transcribe the microphone**. Both are off by default, and they are described in [Recall](/recall). Screen text is what OCR reads from the primary display, so it can include window titles and page text that are visible on screen. Screen text is not read while a password field may have focus, or when the app cannot check for one. Password managers are excluded by default.
 
 The only text you type that the app keeps is a name you give inside companyOS itself: a task in the end-of-day review, or an automation you rename. It stays in the encrypted store and is never captured from another app. An export shows a placeholder in its place.
 
@@ -19,12 +21,14 @@ The only text you type that the app keeps is a name you give inside companyOS it
 - One encrypted database (SQLCipher). Its 32-byte key is sealed by the operating system's keychain.
 - If the keychain cannot protect the key, the app does not start, rather than storing data unprotected.
 - Raw events are kept for 90 days, then removed. Routines and automations are kept until you remove them.
+- Screen text and microphone text are kept in the same database for 90 days, then removed. Screen images are sealed with a key derived from the data key, kept in a folder only your user account can read, and removed after 1, 3, 7 or 14 days, which you choose. The folder holds up to 2 GB, and the oldest images go first.
 - Handoff records saved by an earlier version of the app are no longer read or shown. They are kept for 90 days from when they were sent, then removed. Delete everything removes them at once.
 
 ## What leaves the device
 
 - **Model downloads.** Only when you install a model. The download comes from Hugging Face hosts, and its SHA-256 digest is checked before the model is used.
 - **Decision model download.** Only if you choose it in setup or in Settings. It is five files, about 1.7 GB, from the `receptron/laya-onnx` repository on `huggingface.co`, taken from one fixed commit. Hugging Face serves them from its own `*.hf.co` hosts. Each file's SHA-256 is checked against a digest stored in the app, and a file that does not match is deleted. No account or token is sent. An interrupted download keeps what it fetched and continues from there. Once it is installed, it labels a routine that includes an app companyOS does not know, and it runs on this device. The app sends it only app names, and it sends nothing over the network to answer.
+- **Speech model download.** Only when you install the speech model for microphone text. It is Whisper tiny.en, about 44 MB in seven files, from the `onnx-community/whisper-tiny.en` repository on `huggingface.co`, taken from one fixed commit. Each file's SHA-256 is checked before it is used, and each file is recorded in the network ledger. The speech model runs on this device, and no recording or text is sent to answer.
 - **Update checks.** Only in a packaged build with an HTTPS update feed set. No feed is configured yet. A feed may redirect, as a GitHub Release does, and the ledger lists only the first address. See [Releasing](/releasing#update-feed).
 
 Update files downloaded automatically after a check are not listed in the network ledger. The model and update hosts see the connection, including your IP address, but they receive no activity data.
@@ -35,9 +39,14 @@ The ledger lists every model download and update check the device made, as it wa
 
 ## Export and delete
 
-- **Export** writes a plain JSON file, after a warning that it is unencrypted. It includes any handoff records saved by an earlier version, with their replies.
-- **Delete everything** removes the database, the data key and the installed model files, including the decision model and any partial download of it, and cancels any download in progress. An export you saved elsewhere is yours, and it is not touched.
+- **Export** writes a plain JSON file, after a warning that it is unencrypted. It includes any handoff records saved by an earlier version, with their replies. For screen and microphone text it includes only the number of items and their date range, never the text or the images.
+- **Delete screen and audio text** in Settings removes every stored screen and microphone item, with its text and its images.
+- **Delete everything** removes the database, the data key, the installed model files, including the decision model and any partial download of it, and every screen image. It also cancels any download in progress. An export you saved elsewhere is yours, and it is not touched.
+
+## Local API
+
+The local API is off by default. When it is on, programs on this device can search stored screen and microphone text, and read screen images, with a token that you can rotate. It listens on `127.0.0.1` only and refuses browser requests. Nothing on it leaves the device. See [Recall](/recall#local-api).
 
 ## Excluded apps
 
-An excluded app is not recorded from then on, and its recent events are removed. Handoff records saved by an earlier version may still name the app until they are removed after 90 days, or until you delete everything.
+An excluded app is not recorded from then on, and its recent events are removed. Its screen and microphone text is removed as well. Handoff records saved by an earlier version may still name the app until they are removed after 90 days, or until you delete everything.

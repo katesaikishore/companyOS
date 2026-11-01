@@ -1,4 +1,4 @@
-import { COLLECTIONS, EncryptedStore } from '@companyos/twin-core';
+import { COLLECTIONS, EncryptedStore, MAX_CAPTURE_HITS, deriveMediaKey, openMedia } from '@companyos/twin-core';
 import childProcess from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import http from 'node:http';
@@ -24,13 +24,26 @@ function posixPath(path: string): string {
 
 /**
  * Everything the app left on disk under its data folder, as the attacker would see it. Files inside the encrypted
- * store are read three ways: raw bytes, each base64 line decoded, and each record decrypted with the data key.
+ * store are read three ways: raw bytes, each base64 line decoded, and each record decrypted with the data key. Each
+ * sealed screen image is read two ways: its raw bytes, and its plain bytes once opened with the media key.
  */
-export function diskSurfaces(root: string, storeDir: string, key: Buffer): Surface[] {
+export function diskSurfaces(root: string, storeDir: string, key: Buffer, mediaDir: string = join(root, 'media')): Surface[] {
   const files = listFiles(root);
   const surfaces: Surface[] = [{ name: 'disk:names', text: files.map(path => posixPath(relative(root, path))).join('\n') }];
+  const mediaKey = deriveMediaKey(key);
   for (const path of files) {
     const text = readFileSync(path).toString('latin1');
+    if (path.startsWith(mediaDir + sep)) {
+      const name = posixPath(relative(mediaDir, path));
+      surfaces.push({ name: `media:raw:${name}`, text });
+      // Only a file under an image id's name is a sealed image. Anything else in the folder is read raw only.
+      if (name.endsWith('.bin')) {
+        const id = name.slice(0, -'.bin'.length);
+        const plain = openMedia(mediaKey, readFileSync(path), Buffer.from(`media:${id}`));
+        surfaces.push({ name: `media:decrypted:${name}`, text: plain.toString('latin1') });
+      }
+      continue;
+    }
     if (!path.startsWith(storeDir + sep)) {
       surfaces.push({ name: `disk:raw:${posixPath(relative(root, path))}`, text });
       continue;
@@ -51,6 +64,10 @@ export function diskSurfaces(root: string, storeDir: string, key: Buffer): Surfa
     for (const collection of COLLECTIONS) {
       surfaces.push({ name: `store:decrypted:${collection}`, text: JSON.stringify(store.readAll(collection), null, 2) });
     }
+    // The text of each capture item is kept in the search index, not in its record. An empty term list lists every item
+    // with its text, so the index is read here as a surface of its own.
+    const items = store.searchCapture({ terms: [], from: 0, to: Number.MAX_SAFE_INTEGER, limit: MAX_CAPTURE_HITS });
+    surfaces.push({ name: 'store:decrypted:capture', text: JSON.stringify(items, null, 2) });
   } finally {
     // Windows will not delete the store's files while this handle is open.
     store.close();

@@ -13,5 +13,8 @@
     <!-- Lets the app ask System Events which app is in front. The usage text is NSAppleEventsUsageDescription in electron-builder.yml. -->
     <key>com.apple.security.automation.apple-events</key>
     <true/>
+    <!-- Lets the hidden capture window use the microphone under the hardened runtime. The usage text is NSMicrophoneUsageDescription in electron-builder.yml. -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
   </dict>
 </plist>

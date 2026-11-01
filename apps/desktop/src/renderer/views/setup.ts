@@ -6,7 +6,7 @@ import { formatBytes, formatDecimalBytes } from '../format.js';
 import { browserCaptureNote, fitLabel, layaFraction, layaState, layaStateLabel, modelFraction, modelState, modelStateLabel } from '../labels.js';
 import { act, bridge, call, errorText, go, pending, requestRender, saveConfig, state } from '../store.js';
 
-const TITLES = ['Welcome', 'What companyOS can see', 'Your device and models', 'Decision model (optional)', 'Start observing'];
+const TITLES = ['Welcome', 'What companyOS can see', 'Recall', 'Your device and models', 'Decision model (optional)', 'Start observing'];
 const LAST_STEP = TITLES.length;
 
 /** Opens the wizard at a step. The step-3 device check runs when that step is shown. */
@@ -18,7 +18,7 @@ export function openSetup(step: number): void {
 export function goStep(step: number): void {
   state.wizardStep = Math.min(LAST_STEP, Math.max(1, step));
   state.altOpen = false;
-  if (state.wizardStep === 3) void loadPlan();
+  if (state.wizardStep === 4) void loadPlan();
   requestRender();
 }
 
@@ -102,8 +102,7 @@ function rail(step: number): HTMLElement {
 }
 
 function stepBody(step: number, status: TwinStatus): HTMLElement {
-  const content =
-    step === 1 ? welcome() : step === 2 ? permissions(status) : step === 3 ? devices(status) : step === 4 ? decisionModel(status) : finish(status);
+  const content = stepContent(step, status);
   return h(
     'div',
     { class: 'setup-step', 'data-testid': 'setup-step', 'data-step': String(step) },
@@ -111,6 +110,23 @@ function stepBody(step: number, status: TwinStatus): HTMLElement {
     h('h1', { class: 'setup-title' }, TITLES[step - 1] ?? ''),
     ...content,
   );
+}
+
+function stepContent(step: number, status: TwinStatus): Child[] {
+  switch (step) {
+    case 1:
+      return welcome();
+    case 2:
+      return permissions(status);
+    case 3:
+      return recallStep(status);
+    case 4:
+      return devices(status);
+    case 5:
+      return decisionModel(status);
+    default:
+      return finish(status);
+  }
 }
 
 function welcome(): Child[] {
@@ -149,7 +165,9 @@ function permissions(status: TwinStatus): Child[] {
             onChange: checked => void saveConfig('setup-browsers', { watchBrowsers: checked }),
           }),
         ),
-        permRow('Screenshots', 'not in this version', 'This version does not take screenshots.', chip('Not in this version')),
+        config.screenCaptureEnabled
+          ? permRow('Screen text', 'on', 'Screen text is being recorded. The Recall step and Settings change it.', chip('On', 'teal'))
+          : permRow('Screenshots', 'not in this version', 'This version does not take screenshots.', chip('Not in this version')),
         permRow('Key contents', 'never recorded', 'The twin does not record what you type.', chip('Never recorded')),
       ),
       h(
@@ -168,6 +186,48 @@ function permissions(status: TwinStatus): Child[] {
         ),
       ),
     ),
+  ];
+}
+
+/**
+ * The Recall step: screen text and microphone text. Both start off, and each switch saves at once, as the browser
+ * switch does. Nothing is recorded until the person turns one on here or in Settings.
+ */
+function recallStep(status: TwinStatus): Child[] {
+  const config = status.config;
+  return [
+    h(
+      'p',
+      { class: 'lede' },
+      'Recall searches text the twin reads on the screen or hears on the microphone. Both are off, and nothing is recorded until you turn one on.',
+    ),
+    h(
+      'div',
+      { class: 'perm-list' },
+      permRow(
+        'Screen text',
+        'off by default',
+        `Reads the primary display when what is on it changes. Password fields, browser windows and excluded apps are skipped. Images are kept ${config.frameRetentionDays} days.`,
+        toggleRow({
+          testid: 'setup-screen',
+          label: 'Read text on screen',
+          checked: config.screenCaptureEnabled,
+          onChange: checked => void saveConfig('setup-screen', { screenCaptureEnabled: checked }),
+        }),
+      ),
+      permRow(
+        'Microphone text',
+        'off by default',
+        'Turns speech into text on this device. It also hears people nearby and on calls, so check the recording rules where you work.',
+        toggleRow({
+          testid: 'setup-audio',
+          label: 'Transcribe the microphone',
+          checked: config.audioCaptureEnabled,
+          onChange: checked => void saveConfig('setup-audio', { audioCaptureEnabled: checked }),
+        }),
+      ),
+    ),
+    h('p', { class: 'muted small' }, 'You can change either later in Settings, under Screen and audio.'),
   ];
 }
 
@@ -477,6 +537,8 @@ function finish(status: TwinStatus): Child[] {
       summaryRow('Models installed', String(status.config.installedModels.length)),
       summaryRow('Decision model', layaSummary(status.laya)),
       summaryRow('Capture', captureValue),
+      summaryRow('Screen text', status.config.screenCaptureEnabled ? 'on' : 'off'),
+      summaryRow('Microphone text', status.config.audioCaptureEnabled ? 'on' : 'off'),
     ),
   ];
 }
@@ -512,11 +574,11 @@ function footer(step: number, status: TwinStatus): HTMLElement {
   const noChat = hasPlan && state.setup.plan?.chat === undefined;
   const right: Child[] = [];
   if (step === 2) right.push(h('span', { class: 'muted small' }, 'You can change these later in Settings.'));
-  if (step === 3) {
-    right.push(h('span', { class: 'muted small' }, 'You can install a model later in Settings.'));
-    right.push(button('Skip for now', { variant: 'ghost', testid: 'setup-skip', onClick: () => goStep(4) }));
-  }
   if (step === 4) {
+    right.push(h('span', { class: 'muted small' }, 'You can install a model later in Settings.'));
+    right.push(button('Skip for now', { variant: 'ghost', testid: 'setup-skip', onClick: () => goStep(5) }));
+  }
+  if (step === 5) {
     const layaCurrent = layaState(status.laya);
     if (layaCurrent === 'downloading') right.push(h('span', { class: 'muted small' }, 'The download keeps going if you continue.'));
     else if (layaCurrent !== 'installed') {
@@ -525,7 +587,7 @@ function footer(step: number, status: TwinStatus): HTMLElement {
     }
   }
   right.push(
-    button(step === 3 && noChat ? 'Continue without a model' : 'Continue', {
+    button(step === 4 && noChat ? 'Continue without a model' : 'Continue', {
       variant: 'primary',
       testid: 'setup-next',
       onClick: () => goStep(step + 1),

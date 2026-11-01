@@ -78,6 +78,14 @@ async function seedActivity(app) {
       agent.ingest({ kind: 'focus', ts: at(ago, 13, 45), app: 'Visual Studio Code' });
       agent.ingest({ kind: 'idle_start', ts: at(ago, 14) });
     }
+    // Screen and microphone text for the Recall page. Both channels are off by default, so they are switched on only for
+    // these writes, then switched off again. The text is seeded without an image, so no media file is made.
+    agent.updateConfig({ screenCaptureEnabled: true, audioCaptureEnabled: true });
+    for (let ago = 10; ago >= 1; ago -= 3) {
+      agent.ingestScreen({ ts: at(ago, 10, 30), app: 'Microsoft Excel', windowClass: 'spreadsheet', text: `Quarterly invoice summary ${ago}`, mediaId: null });
+      agent.ingestAudio({ ts: at(ago, 11, 15), durationMs: 30_000, text: 'Follow up on the invoice with the client' });
+    }
+    agent.updateConfig({ screenCaptureEnabled: false, audioCaptureEnabled: false });
     // One task with two stretches, so the review offers a split, then a second task after a longer break.
     agent.ingest({ kind: 'focus', ts: at(0, 9), app: 'Microsoft Excel' });
     agent.ingest({ kind: 'idle_start', ts: at(0, 9, 10) });
@@ -496,7 +504,7 @@ async function main(userDataDir, fixtureDir) {
 
     // 11. The window has one fixed size. Every main route holds the checks in responsiveProblems at 900x600, and the
     // window still reports that it cannot be resized, maximised or made full screen.
-    const ROUTES = ['overview', 'suggestions', 'automations', 'readiness', 'knows', 'review', 'ledger', 'settings'];
+    const ROUTES = ['overview', 'recall', 'suggestions', 'automations', 'readiness', 'knows', 'review', 'ledger', 'settings'];
     for (const route of ROUTES) {
       if (route === 'review') {
         // The review has no sidebar link. It opens from the Overview, and its route still has to lay out.
@@ -505,6 +513,8 @@ async function main(userDataDir, fixtureDir) {
         await page.click(`[data-testid="nav-${route}"]`);
       }
       await page.waitForTimeout(250);
+      // The Recall page is reached from its sidebar link, and its view must render at this size.
+      if (route === 'recall') await page.waitForSelector('[data-testid="view-recall"]', { timeout: 15_000 });
       await noDocumentScroll(page, `${route} route`);
       const problems = await responsiveProblems(page);
       assert.deepEqual(problems, [], `${route} at 900x600: ${problems.join('; ')}`);
