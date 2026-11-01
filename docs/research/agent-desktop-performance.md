@@ -1,7 +1,11 @@
 # agent-desktop: measured behaviour and performance
 
 Recorded 2026-11-01 with the executor code from `main` (commit `dd830ce`). Scope: Linux on X11 only, one machine. macOS and
-Windows were not measured here. What the hosted macOS and Windows runners showed is in
+Windows were not measured here.
+
+**Changed since this record was made (PR #29).** The focus by name is now the built-in adapter's on every platform. The
+program only counts an app's windows before it, and a press on Linux is built-in. The stages below that call the program's
+focus measure the code before #29, so the production numbers describe the earlier focus path. What the hosted macOS and Windows runners showed is in
 [`adapter-smoke-results.md`](adapter-smoke-results.md).
 
 Terms used below. **The program** is the `agent-desktop` command-line tool. The **final pair** is `run-1.json` and
@@ -211,8 +215,9 @@ spellings with `focus-window --app`, and its output, with the temporary profile 
 succeeded, so for that one name the match was not case-sensitive. The stored form, `chromium-browser`, and the window title were
 not tried on Chromium, and the built-in press was not tried on it.
 
-What this means: for the test window the program rejected the stored name `testapp.py`, so the executor's focus step would
-return failure. For Chromium it rejected `Chromium-browser` and `chromium`, and matching looks case-insensitive (`chrome` and
+What this means, for the executor before #29: the program rejected the stored name `testapp.py`, so its focus step would
+return failure. Since #29 the focus is built-in and the program's answer only sets the window count, so this no longer fails
+a focus (see Finding 6). For Chromium it rejected `Chromium-browser` and `chromium`, and matching looks case-insensitive (`chrome` and
 `Chrome` both worked), so the stored form `chromium-browser` would very likely fail too, but it was not tried. The production
 numbers above were taken with a window whose class equals its process name, so they show speed and survival, not how often the
 names line up. Two apps is too few to say how common the mismatch is. Two ways to close it, neither built: fall back to the
@@ -271,8 +276,9 @@ on 2026-11-01, the version tested, so no release with a fix was benchmarked.
    dead window.
 5. **Linux has a built-in press adapter.** The first record said it did not. Pressing a shortcut on X11 through `xdotool`
    was merged in PR #4.
-6. **The two mechanisms name apps differently.** See "App names". With the program path set, a Linux focus step can fail
-   because the program does not know the name capture recorded, and a failed focus fails the run and lowers its level.
+6. **The two mechanisms name apps differently.** See "App names". Before #29 this could fail a Linux focus, because the
+   focus went through the program. Since #29 the focus is built-in, and the program only counts an app's windows, so a
+   name mismatch can miss an app's several windows but cannot fail a focus.
 
 ## Limits
 

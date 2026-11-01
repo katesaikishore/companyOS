@@ -122,9 +122,10 @@ name routines. Typing, clicking and sending are not built, and no release has be
   GitHub-hosted macOS 26 and Windows Server 2025 machines, where focus, key presses and file open worked. Permission
   prompts and a non-elevated Windows user are not verified. See
   [`docs/research/adapter-smoke-results.md`](docs/research/adapter-smoke-results.md). An optional agent-desktop "hands"
-  executor can run key steps on macOS and Windows. It can run focus steps on any platform, but on Linux the program knows
-  an app by its process name while companyOS records the window class, and the two differed for both apps tried. It is off
-  by default, it needs a program path set in Settings, and the program is not bundled.
+  executor counts an app's windows before a focus on any platform, and it presses keys on macOS and Windows. On Linux the
+  program knows an app by its process name, while companyOS records the window class, so for an app whose two names differ
+  the count can miss several windows. Focus and key presses on Linux use the built-in adapters. It is off by default, it
+  needs a program path set in Settings, and the program is not bundled.
   Typing, clicking and sending are not built. A design is in
   [`docs/research/input-steps-proposal.md`](docs/research/input-steps-proposal.md). Level 5 is not built. A web site
   step focuses its browser and checks it. It does not open the site.
