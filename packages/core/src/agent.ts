@@ -1,7 +1,7 @@
 import { AutomationSchema, compileRoutine, effectsOf, fitName, type Automation } from './automation';
 import { isExcludedApp, normalizeAppName } from './classify';
 import { TriggerGate, openingApps } from './triggers';
-import { addSignature, matchesDismissed, signatureOf } from './dismissed';
+import { addSignature, matchesDismissed, signatureOf, signaturesWithNamesIn, withoutExcludedApps } from './dismissed';
 import { DEFAULT_MINING, mineRoutines, type Routine } from './mine';
 import { computeReadiness } from './readiness';
 import { habits as computeHabits, HABITS_WINDOW_DAYS } from './habits';
@@ -123,8 +123,12 @@ export class TwinAgent {
   }
 
   updateConfig(patch: Partial<TwinConfig>): TwinConfig {
-    const next = TwinConfigSchema.parse({ ...this.config, ...patch });
-    const excludedChanged = JSON.stringify(next.excludedApps) !== JSON.stringify(this.config.excludedApps);
+    const parsed = TwinConfigSchema.parse({ ...this.config, ...patch });
+    const excludedChanged = JSON.stringify(parsed.excludedApps) !== JSON.stringify(this.config.excludedApps);
+    // The dismissed signatures that name an excluded app go with its events, from the saved config as well.
+    const next = excludedChanged
+      ? { ...parsed, dismissedRoutineSignatures: withoutExcludedApps(parsed.dismissedRoutineSignatures, parsed.excludedApps) }
+      : parsed;
     if (this.config.automationsEnabled && !next.automationsEnabled) this.stopGeneration++;
     if (this.config.allowUnattended && !next.allowUnattended) this.unattendedGeneration++;
     this.config = next;
@@ -133,7 +137,7 @@ export class TwinAgent {
     return this.configuration;
   }
 
-  /** An app added to the exclusion list is forgotten, not just ignored from now on. */
+  /** An app added to the exclusion list is forgotten, not just ignored from now on. Its dismissed signatures go in updateConfig. */
   private purgeExcluded(): void {
     const all = this.store.readAll<TwinEvent>('events');
     const kept = all.filter(event => !event.app || !isExcludedApp(event.app, this.config.excludedApps));
@@ -153,7 +157,9 @@ export class TwinAgent {
 
   analyze(): { segments: Segment[]; routines: Routine[] } {
     const segments = segment(this.minableEvents(ANALYSIS_DAYS), this.config.idleGapMs);
-    return { segments, routines: mineRoutines(segments, DEFAULT_MINING) };
+    const routines = mineRoutines(segments, DEFAULT_MINING);
+    this.adoptLegacyDismissals(routines);
+    return { segments, routines };
   }
 
   /**
@@ -231,17 +237,23 @@ export class TwinAgent {
 
   /**
    * "Not a routine". The routine is not suggested again, and neither is one that differs from it by a single step. A
-   * dismissal counts as a decline, so it lengthens the routine's wait the same way.
+   * dismissal counts as a decline, so it lengthens the routine's wait the same way. A routine dismissed by an earlier
+   * version has its id only, so dismissing it again stores its signature when it is still detected.
    */
   dismissRoutine(routineId: string): void {
-    if (this.config.dismissedRoutineIds.includes(routineId)) return;
     const routine = this.analyze().routines.find(candidate => candidate.id === routineId);
-    if (routine) this.gate.recordDecline(routineId);
+    const alreadyDismissed = this.config.dismissedRoutineIds.includes(routineId);
+    const signatures = routine
+      ? addSignature(this.config.dismissedRoutineSignatures, signatureOf(routine))
+      : this.config.dismissedRoutineSignatures;
+    // Already dismissed with its signature kept: nothing to change, and no decline is counted again.
+    if (alreadyDismissed && signatures.length === this.config.dismissedRoutineSignatures.length) return;
+    if (routine && !alreadyDismissed) this.gate.recordDecline(routineId);
     this.updateConfig({
-      dismissedRoutineIds: [...this.config.dismissedRoutineIds, routineId].slice(-500),
-      dismissedRoutineSignatures: routine
-        ? addSignature(this.config.dismissedRoutineSignatures, signatureOf(routine))
-        : this.config.dismissedRoutineSignatures,
+      dismissedRoutineIds: alreadyDismissed
+        ? this.config.dismissedRoutineIds
+        : [...this.config.dismissedRoutineIds, routineId].slice(-500),
+      dismissedRoutineSignatures: signatures,
       declinedRoutines: this.gate.declineRecords(),
     });
   }
@@ -513,13 +525,18 @@ export class TwinAgent {
     return this.store.sizeBytes();
   }
 
-  /** Drops events, handoff records and task decisions older than the retention window. Returns how many records were removed. */
+  /**
+   * Drops events, handoff records, task decisions and dismissed signatures past the retention window. A signature goes
+   * once the events no longer hold the sites or unknown apps it names. Returns how many records were removed.
+   */
   prune(): number {
     const cutoff = this.now() - RETENTION_DAYS * DAY_MS;
     const all = this.store.readAll<TwinEvent>('events');
     const kept = all.filter(event => event.ts >= cutoff);
     if (kept.length !== all.length) this.store.replaceAll('events', kept);
-    return all.length - kept.length + this.pruneHandoffs(cutoff) + this.pruneTaskDecisions(cutoff);
+    return (
+      all.length - kept.length + this.pruneHandoffs(cutoff) + this.pruneTaskDecisions(cutoff) + this.pruneSignatures(kept)
+    );
   }
 
   /**
@@ -611,6 +628,35 @@ export class TwinAgent {
   }
 
   /**
+   * A dismissed signature names the sites and unknown apps it was copied from, so it is kept only while the events still
+   * hold them, and lasts no longer than those events. One that names an excluded app goes too, even when the exclusion
+   * was saved before this check existed. Returns how many were removed.
+   */
+  private pruneSignatures(events: readonly TwinEvent[]): number {
+    const signatures = this.config.dismissedRoutineSignatures;
+    const kept = signaturesWithNamesIn(withoutExcludedApps(signatures, this.config.excludedApps), events);
+    if (kept.length === signatures.length) return 0;
+    this.updateConfig({ dismissedRoutineSignatures: kept });
+    return signatures.length - kept.length;
+  }
+
+  /**
+   * A routine dismissed by an earlier version has its id only. When it is detected again, its signature is stored, so its
+   * near copies are hidden too, as every other dismissal is. Written once per routine, and only when one is missing.
+   */
+  private adoptLegacyDismissals(routines: readonly Routine[]): void {
+    const legacy = routines.filter(routine => this.config.dismissedRoutineIds.includes(routine.id));
+    if (legacy.length === 0) return;
+    const signatures = legacy.reduce<string[]>(
+      (kept, routine) => addSignature(kept, signatureOf(routine)),
+      this.config.dismissedRoutineSignatures,
+    );
+    if (signatures.length !== this.config.dismissedRoutineSignatures.length) {
+      this.updateConfig({ dismissedRoutineSignatures: signatures });
+    }
+  }
+
+  /**
    * A handoff record is kept for the same window as an event, counted from the time it was sent. A row with no readable
    * send time cannot be aged, so it is removed. Returns how many were removed.
    */
@@ -636,9 +682,14 @@ export class TwinAgent {
     return withEffects(state, this.requireAutomation(automationId));
   }
 
+  /** Writes an automation in its place, so a rename keeps the order of the list. A new automation goes last. */
   private writeAutomation(automation: Automation): void {
-    const others = this.readAutomations().filter(candidate => candidate.id !== automation.id);
-    this.store.replaceAll('automations', [...others, automation]);
+    const current = this.readAutomations();
+    const exists = current.some(candidate => candidate.id === automation.id);
+    const next = exists
+      ? current.map(candidate => (candidate.id === automation.id ? automation : candidate))
+      : [...current, automation];
+    this.store.replaceAll('automations', next);
   }
 
   private writeState(state: AutonomyState): void {

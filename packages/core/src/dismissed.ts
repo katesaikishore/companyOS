@@ -1,5 +1,6 @@
+import { excludesBrowser, isExcludedApp } from './classify';
 import { stepKey, type Routine } from './mine';
-import { MAX_SIGNATURE_CHARS } from './types';
+import { MAX_SIGNATURE_CHARS, type TwinEvent } from './types';
 
 /** The most dismissed signatures kept. The oldest go first, as the dismissed ids do. */
 const MAX_SIGNATURES = 500;
@@ -8,6 +9,8 @@ const MAX_SIGNATURES = 500;
  * in two is half of it.
  */
 const MIN_NEAR_STEPS = 3;
+/** The start of the step key of an unknown app. See stepKey. */
+const OTHER_PREFIX = 'other:';
 
 /**
  * The signature of a routine: its step keys in order, joined with '>'. A step key is its window class, or "other:" and
@@ -41,6 +44,38 @@ export function matchesDismissed(routine: Routine, dismissedIds: readonly string
 export function addSignature(signatures: readonly string[], signature: string): string[] {
   if (signature.length > MAX_SIGNATURE_CHARS || signatures.includes(signature)) return [...signatures];
   return [...signatures, signature].slice(-MAX_SIGNATURES);
+}
+
+/**
+ * The signatures that name no excluded app. A step names a browser site ("browser@host/path") or an unknown app ("other:name").
+ * A site does not say which browser it came from, so once a browser is excluded, every site-named signature goes.
+ */
+export function withoutExcludedApps(signatures: readonly string[], excluded: readonly string[]): string[] {
+  const browsers = excludesBrowser(excluded);
+  return signatures.filter(
+    signature =>
+      !signature.split('>').some(key => {
+        if (key.startsWith('browser@')) return browsers;
+        return key.startsWith(OTHER_PREFIX) && isExcludedApp(key.slice(OTHER_PREFIX.length), excluded);
+      }),
+  );
+}
+
+/**
+ * The signatures whose sites and unknown apps the events still hold. A step that names a site or an unknown app must match
+ * a step key the events produce. A signature that names neither holds only window classes, so it is kept.
+ */
+export function signaturesWithNamesIn(signatures: readonly string[], events: readonly TwinEvent[]): string[] {
+  const present = new Set(
+    events.flatMap(event =>
+      event.app && event.windowClass
+        ? [stepKey({ windowClass: event.windowClass, app: event.app, urlTemplate: event.urlTemplate })]
+        : [],
+    ),
+  );
+  return signatures.filter(signature =>
+    signature.split('>').every(key => !(key.startsWith('browser@') || key.startsWith(OTHER_PREFIX)) || present.has(key)),
+  );
 }
 
 /** True when two step sequences are the same, or differ by one step: one added or removed, or one changed. */

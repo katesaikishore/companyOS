@@ -10,7 +10,8 @@ const SEGMENT_ID = /^[0-9a-z]{1,12}-\d{1,6}$/;
 
 /**
  * The longest break that keeps two segments in one task. A design value: a longer break is taken as the end of one piece
- * of work. The break runs from the last focus event of the earlier segment to the first of the later one.
+ * of work. The break runs from the moment the earlier segment's last stretch ended (see stretchEnded) to the first focus
+ * event of the later one.
  */
 export const TASK_GAP_MS = 30 * MINUTE_MS;
 /** The longest name the person can give a task. */
@@ -169,7 +170,34 @@ function applyDecision(tasks: readonly WorkTask[], decision: TaskDecision): Work
 function dayTaskList(events: readonly TwinEvent[], decisions: readonly TaskDecision[], day: string, idleGapMs: number): WorkTask[] {
   const { start, end } = dayBounds(day);
   const inDay = events.filter(event => event.ts >= start && event.ts < end);
-  return applyDecisions(groupSegments(segment(inDay, idleGapMs)), decisions.filter(decision => decision.day === day));
+  const works = stretchEnded(segment(inDay, idleGapMs), inDay);
+  return applyDecisions(groupSegments(works), decisions.filter(decision => decision.day === day));
+}
+
+/**
+ * The segments with each end moved to when its last stretch ended: at the idle start or lock that closed it, or at the
+ * next focus event. Segments close only at an idle start, a lock or a long gap, so the next focus event after a segment's
+ * last one is where the following segment begins. A last stretch with no later event keeps its last focus event as its
+ * end. So an app left in front without an idle signal counts as work, not as a break. The events are in time order, and
+ * each segment's last focus event is found by identity, since segments hold the events themselves.
+ */
+function stretchEnded(segments: readonly Segment[], events: readonly TwinEvent[]): Segment[] {
+  const ordered = [...events].sort((a, b) => a.ts - b.ts);
+  let cursor = 0;
+  return segments.map(work => {
+    const last = work.events[work.events.length - 1];
+    const at = ordered.indexOf(last, cursor);
+    if (at === -1) return work;
+    cursor = at + 1;
+    let next = at + 1;
+    while (next < ordered.length && !endsStretch(ordered[next])) next++;
+    return { ...work, endTs: next < ordered.length ? ordered[next].ts : work.endTs };
+  });
+}
+
+/** An event that ends a stretch: an idle start, a lock, or a focus event that starts the next segment. */
+function endsStretch(event: TwinEvent): boolean {
+  return event.kind === 'idle_start' || event.kind === 'lock' || event.kind === 'focus';
 }
 
 function taskView(task: WorkTask): TaskView {

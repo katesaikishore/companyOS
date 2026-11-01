@@ -82,15 +82,56 @@ describe('grouping a day into tasks', () => {
   });
 
   it('keeps tasks together when the break is exactly 30 minutes', () => {
-    const result = view([focus(at(0, 9), 'microsoft excel'), idle(at(0, 9, 5)), focus(at(0, 9, 30), 'microsoft excel')]);
+    // The break runs from the idle start at 09:05 to the focus at 09:35: exactly 30 minutes.
+    const result = view([focus(at(0, 9), 'microsoft excel'), idle(at(0, 9, 5)), focus(at(0, 9, 35), 'microsoft excel')]);
 
     expect(result.tasks).toHaveLength(1);
   });
 
   it('splits tasks when the break is more than 30 minutes', () => {
+    // The break runs from the idle start at 09:05 to the focus at 09:36: 31 minutes.
+    const result = view([focus(at(0, 9), 'microsoft excel'), idle(at(0, 9, 5)), focus(at(0, 9, 36), 'microsoft excel')]);
+
+    expect(result.tasks.map(task => task.startTs)).toEqual([at(0, 9), at(0, 9, 36)]);
+  });
+
+  it('measures a break from the idle start, not from the start of the stretch before it', () => {
+    // Idle starts at 09:05, five minutes into the stretch. The break is 26 minutes, so the task is kept whole.
     const result = view([focus(at(0, 9), 'microsoft excel'), idle(at(0, 9, 5)), focus(at(0, 9, 31), 'microsoft excel')]);
 
-    expect(result.tasks.map(task => task.startTs)).toEqual([at(0, 9), at(0, 9, 31)]);
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0]).toMatchObject({ startTs: at(0, 9), endTs: at(0, 9, 31) });
+  });
+
+  it('does not count a long stretch in one app as a break when no idle signal closes it', () => {
+    // Word, then Excel from 09:00 to 11:05 with no idle event: the focus change at 11:05 starts the next segment, so the
+    // break is nothing and the two stretches are one task.
+    const result = view([focus(at(0, 8, 50), 'microsoft word'), focus(at(0, 9), 'microsoft excel'), focus(at(0, 11, 5), 'microsoft word')]);
+
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0]).toMatchObject({ startTs: at(0, 8, 50), endTs: at(0, 11, 5) });
+  });
+
+  it('keeps one task across a 7-minute break after a stretch that switched between two apps', () => {
+    // Word, then Excel, then idle at 09:45. Back at 09:50 in Word. The break runs from 09:45 to 09:52.
+    const result = view([
+      focus(at(0, 9), 'microsoft word'),
+      focus(at(0, 9, 2), 'microsoft excel'),
+      idle(at(0, 9, 45)),
+      focus(at(0, 9, 52), 'microsoft word'),
+    ]);
+
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0]).toMatchObject({ name: 'Microsoft Word and Microsoft Excel', startTs: at(0, 9), endTs: at(0, 9, 52) });
+  });
+
+  it('ends the first task when its last stretch went idle, and starts the next task at its return', () => {
+    // Excel for five minutes, idle, then Excel again after 36 minutes away: two tasks, the first ending at the idle start.
+    const result = view([focus(at(0, 9), 'microsoft excel'), idle(at(0, 9, 5)), focus(at(0, 9, 41), 'microsoft excel')]);
+
+    expect(result.tasks).toHaveLength(2);
+    expect(result.tasks[0]).toMatchObject({ startTs: at(0, 9), endTs: at(0, 9, 5) });
+    expect(result.tasks[1]).toMatchObject({ startTs: at(0, 9, 41), endTs: at(0, 9, 41) });
   });
 
   it('splits tasks when the apps share less than half of each segment', () => {

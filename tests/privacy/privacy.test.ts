@@ -1,9 +1,13 @@
-import { templateUrl } from '@companyos/twin-core';
+import { TwinAgent, dayKeyOf, templateUrl } from '@companyos/twin-core';
 import childProcess from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import https from 'node:https';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
-import { findLeaks, describeLeak, type Surface } from './canaries';
-import { PLANTED, runPlantedScenario, type ScenarioRun } from './scenario';
+import { CANARIES, findLeaks, describeLeak, type Surface } from './canaries';
+import { PLANTED, at, runPlantedScenario, type ScenarioRun } from './scenario';
 import { refuseOutbound } from './surfaces';
 
 // The model manager imports Electron's utility process. The suite never forks a model, so a stand-in is enough.
@@ -134,6 +138,24 @@ describe('known gaps, asserted so they stay visible', () => {
   // once the gap is closed, and then `it.fails` should become `it`.
   it.fails('a lowercase identifier in the first path segment becomes :id (plan 5.4)', () => {
     expect(templateUrl('https://github.com/jsmith')).toBe('github.com/:id');
+  });
+
+  // Not fixed here. A task rename holds the name the person typed, and the data export carries it in plain text. Whether a
+  // typed label may be kept in the export is for the owner to decide, since the automation names already are. This
+  // assertion flips to a failure once the gap is closed, and then `it.fails` should become `it`.
+  it.fails('a typed task name stays out of the data export (owner decision pending)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'twin-privacy-rename-'));
+    const agent = new TwinAgent({ dataDir: join(root, 'twin'), dataKey: randomBytes(32), now: () => at(10, 0) });
+    try {
+      agent.ingest({ kind: 'focus', ts: at(9, 9), app: 'Microsoft Excel' });
+      agent.ingest({ kind: 'focus', ts: at(9, 9, 10), app: 'Slack' });
+      const day = dayKeyOf(at(9, 12));
+      agent.decideTask({ day, kind: 'rename', taskId: agent.dayTasks(day).tasks[0].id, name: CANARIES.typedText });
+      expect(JSON.stringify(agent.exportAll())).not.toContain(CANARIES.typedText);
+    } finally {
+      agent.close();
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

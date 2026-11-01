@@ -156,6 +156,15 @@ export function isBrowserApp(name: string): boolean {
 }
 
 /**
+ * True when the exclusion list covers any web browser, by a name or an alias it is known by. A browser site does not
+ * say which browser visited it, so this decides for every browser's sites at once.
+ */
+export function excludesBrowser(excluded: readonly string[]): boolean {
+  const browsers = [...Object.keys(CATALOG).filter(name => CATALOG[name] === 'browser'), ...UNCATALOGUED_BROWSERS];
+  return browsers.some(name => isExcludedApp(name, excluded));
+}
+
+/**
  * Shells, script hosts and interpreters by name, including the Windows tools that run a script, a library or an
  * installer. Terminal apps the catalogue lists are matched by their window class. The terminal emulators and remote
  * shells it does not list are named here, so they are never mined either.

@@ -11,6 +11,7 @@ import {
   mineRoutines,
   normalizeSignal,
   segment,
+  signatureOf,
   type Executor,
   type Routine,
   type TwinConfig,
@@ -411,6 +412,137 @@ describe('near copies of a dismissed routine', () => {
     agent.dismissRoutine(sheet);
     const learned = agent.readiness().rows.flatMap(row => row.learned);
     expect(learned.find(item => item.routineId === near)?.status).toBe('dismissed');
+    agent.close();
+  });
+
+  it('hides a near copy of a routine that an earlier version dismissed by id alone, and stores its signature', () => {
+    const { agent } = nearCopies();
+    const sheet = agent.suggestions().find(suggestion => flowOf(suggestion.routine) === SHEET_FLOW)!.routine.id;
+    // An earlier version kept the id and no signature. The routine is still detected, so its near copy must stay hidden.
+    agent.updateConfig({ dismissedRoutineIds: [sheet] });
+
+    expect(agent.suggestions().map(suggestion => flowOf(suggestion.routine))).toEqual([OTHER_FLOW]);
+    // Dismissing it again changes nothing, and a dismissal that was already kept counts no decline.
+    agent.dismissRoutine(sheet);
+    const config = (agent.exportAll() as { config: TwinConfig }).config;
+    expect(config.dismissedRoutineSignatures).toEqual(['spreadsheet>document>chat>design']);
+    expect(config.declinedRoutines).toEqual([]);
+    agent.close();
+  });
+
+  it('keeps the order of the automations when one is renamed', () => {
+    const { agent } = nearCopies();
+    const views = [SHEET_FLOW, NEAR_FLOW, OTHER_FLOW].map(flow => {
+      const routine = agent.suggestions().find(suggestion => flowOf(suggestion.routine) === flow)!.routine.id;
+      return agent.acceptRoutine(routine);
+    });
+    const order = views.map(view => view.automation.id);
+
+    agent.renameAutomation(order[0], 'Month-end sheet');
+    expect(agent.automations().map(view => view.automation.id)).toEqual(order);
+    expect(agent.automations()[0].automation.name).toBe('Month-end sheet');
+    agent.renameAutomation(order[1], 'Near copy');
+    expect(agent.automations().map(view => view.automation.id)).toEqual(order);
+    agent.close();
+  });
+});
+
+describe('dismissed signatures and the apps they name', () => {
+  const SITE_FLOW = 'browser@docs.example.com/doc>spreadsheet>chat';
+  const CLASSES_FLOW = 'document>chat>design';
+
+  /** Ten mornings in a browser site, a spreadsheet and chat, and ten afternoons of document, chat and design. */
+  function siteAndClasses(agent: TwinAgent, site: string): void {
+    agent.updateConfig({ watchBrowsers: true });
+    for (let day = 0; day < 10; day++) {
+      agent.ingest({ kind: 'focus', ts: at(day, 9), app: 'Google Chrome', url: `https://${site}/1ab2cd3ef4567890/edit?token=SECRET123456` });
+      agent.ingest({ kind: 'focus', ts: at(day, 9, 10), app: 'Microsoft Excel' });
+      agent.ingest({ kind: 'focus', ts: at(day, 9, 20), app: 'Slack' });
+      agent.ingest({ kind: 'idle_start', ts: at(day, 9, 30) });
+      agent.ingest({ kind: 'focus', ts: at(day, 13), app: 'Microsoft Word' });
+      agent.ingest({ kind: 'focus', ts: at(day, 13, 10), app: 'Slack' });
+      agent.ingest({ kind: 'focus', ts: at(day, 13, 20), app: 'Figma' });
+      agent.ingest({ kind: 'idle_start', ts: at(day, 13, 30) });
+    }
+  }
+
+  /** Dismisses the suggested routine whose signature is the given one. */
+  function dismiss(agent: TwinAgent, signature: string): void {
+    const suggestion = agent.suggestions().find(candidate => signatureOf(candidate.routine) === signature);
+    if (!suggestion) throw new Error(`no routine with signature ${signature}`);
+    agent.dismissRoutine(suggestion.routine.id);
+  }
+
+  it('forgets a browser site once a browser is excluded, and keeps the other dismissals', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'twin-exclude-site-'));
+    const agent = openAgent(dir, randomBytes(32), at(10, 0));
+    siteAndClasses(agent, 'docs.example.com/doc');
+    dismiss(agent, SITE_FLOW);
+    dismiss(agent, CLASSES_FLOW);
+    expect((agent.exportAll() as { config: TwinConfig }).config.dismissedRoutineSignatures).toEqual(expect.arrayContaining([SITE_FLOW, CLASSES_FLOW]));
+
+    agent.updateConfig({ excludedApps: [...agent.configuration.excludedApps, 'Google Chrome'] });
+
+    const config = (agent.exportAll() as { config: TwinConfig }).config;
+    expect(config.dismissedRoutineSignatures).toEqual([CLASSES_FLOW]);
+    expect(JSON.stringify(config)).not.toContain('docs.example.com');
+    agent.close();
+  });
+
+  it('forgets a dismissed routine that names an unknown app once that app is excluded', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'twin-exclude-other-'));
+    const agent = openAgent(dir, randomBytes(32), at(10, 0));
+    for (let day = 0; day < 10; day++) {
+      agent.ingest({ kind: 'focus', ts: at(day, 9), app: 'Acme Planner' });
+      agent.ingest({ kind: 'focus', ts: at(day, 9, 10), app: 'Microsoft Word' });
+      agent.ingest({ kind: 'focus', ts: at(day, 9, 20), app: 'Slack' });
+      agent.ingest({ kind: 'idle_start', ts: at(day, 9, 30) });
+    }
+    dismiss(agent, 'other:acme planner>document>chat');
+    expect((agent.exportAll() as { config: TwinConfig }).config.dismissedRoutineSignatures).toEqual(['other:acme planner>document>chat']);
+
+    agent.updateConfig({ excludedApps: [...agent.configuration.excludedApps, 'Acme Planner'] });
+
+    const exported = agent.exportAll() as { config: TwinConfig; events: TwinEvent[] };
+    expect(exported.config.dismissedRoutineSignatures).toEqual([]);
+    expect(exported.events.some(event => event.app?.includes('acme'))).toBe(false);
+    agent.close();
+  });
+
+  it('drops a dismissed site once no stored event holds it, and keeps the signatures whose sites are still there', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'twin-prune-site-'));
+    const key = randomBytes(32);
+    const first = openAgent(dir, key, at(9, 12));
+    first.updateConfig({
+      watchBrowsers: true,
+      dismissedRoutineSignatures: ['browser@docs.example.com/doc>spreadsheet>chat', 'browser@wiki.example.com/page>spreadsheet>chat', CLASSES_FLOW],
+    });
+    // The docs site was last visited on day 0, the wiki on day 9. Only the wiki site is still in the store, after pruning.
+    first.ingest({ kind: 'focus', ts: at(0, 9), app: 'Google Chrome', url: 'https://docs.example.com/doc/1ab2/edit' });
+    first.ingest({ kind: 'focus', ts: at(9, 9), app: 'Google Chrome', url: 'https://wiki.example.com/page/x' });
+    first.close();
+
+    const later = openAgent(dir, key, at(0, 9) + (RETENTION_DAYS + 1) * DAY);
+    expect(later.prune()).toBeGreaterThan(0);
+    const config = (later.exportAll() as { config: TwinConfig }).config;
+    expect(config.dismissedRoutineSignatures).toEqual(['browser@wiki.example.com/page>spreadsheet>chat', CLASSES_FLOW]);
+    expect(JSON.stringify(later.exportAll())).not.toContain('docs.example.com');
+    later.close();
+  });
+
+  it('drops a signature that names an app excluded before the exclusion was forgotten, at the next prune', () => {
+    // A config saved by an earlier version: Chrome is excluded, and its site is still among the dismissed signatures.
+    const dir = mkdtempSync(join(tmpdir(), 'twin-legacy-exclusion-'));
+    const key = randomBytes(32);
+    const store = new EncryptedStore(dir, key);
+    store.replaceAll('settings', [
+      { ...DEFAULT_CONFIG, excludedApps: [...DEFAULT_CONFIG.excludedApps, 'Google Chrome'], dismissedRoutineSignatures: [SITE_FLOW, CLASSES_FLOW] },
+    ]);
+    store.close();
+
+    const agent = openAgent(dir, key, at(0, 9));
+    expect(agent.prune()).toBe(1);
+    expect((agent.exportAll() as { config: TwinConfig }).config.dismissedRoutineSignatures).toEqual([CLASSES_FLOW]);
     agent.close();
   });
 });
