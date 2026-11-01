@@ -2,17 +2,17 @@ import type { TwinConfig, TwinStatus } from '@companyos/twin-core';
 import { h, type Child } from '../dom.js';
 import { button, chip, exclusionEditor, toggleRow } from '../components/ui.js';
 import { formatBytes } from '../format.js';
+import { layaState, layaStateLabel } from '../labels.js';
 import { act, bridge, confirmDeleteAll, pending, saveConfig, setNotice, state } from '../store.js';
 import { openSetup } from './setup.js';
 
 type Theme = TwinConfig['theme'];
 type InstalledModel = TwinStatus['config']['installedModels'][number];
-type SectionId = 'capture' | 'automations' | 'agents' | 'models' | 'appearance' | 'data';
+type SectionId = 'capture' | 'automations' | 'models' | 'appearance' | 'data';
 
 const SECTIONS: ReadonlyArray<{ id: SectionId; label: string }> = [
   { id: 'capture', label: 'Capture' },
   { id: 'automations', label: 'Automations' },
-  { id: 'agents', label: 'OpenMausBot agents' },
   { id: 'models', label: 'Models' },
   { id: 'appearance', label: 'Appearance' },
   { id: 'data', label: 'Your data' },
@@ -60,7 +60,6 @@ export function settingsView(status: TwinStatus): HTMLElement {
         { class: 'settings-card' },
         capturePanel(config.watchBrowsers, config.excludedApps, config.idleGapMs),
         automationsPanel(config),
-        openMausBotPanel(config),
         modelsPanel(status),
         appearancePanel(config.theme),
         dataPanel(),
@@ -169,72 +168,6 @@ function textBlock(title: string, note: string): HTMLElement {
   );
 }
 
-function openMausBotPanel(config: TwinConfig): HTMLElement {
-  const key = 'openmausbot-settings';
-  const command = h('input', {
-    class: 'input mono',
-    type: 'text',
-    maxlength: 512,
-    autocomplete: 'off',
-    spellcheck: false,
-    value: config.openMausBotCommand,
-    'aria-label': 'OpenMausBot CLI executable',
-    'data-testid': 'settings-openmausbot-command',
-    oninput: () => state.dirty.add(key),
-  });
-  const target = h('input', {
-    class: 'input',
-    type: 'text',
-    maxlength: 120,
-    autocomplete: 'off',
-    spellcheck: false,
-    value: config.openMausBotTarget,
-    placeholder: 'Existing lead bot or room',
-    'aria-label': 'OpenMausBot lead bot or room',
-    'data-testid': 'settings-openmausbot-target',
-    oninput: () => state.dirty.add(key),
-  });
-  return sectionCard(
-    {
-      id: 'agents',
-      testid: 'settings-openmausbot',
-      title: 'OpenMausBot agents',
-      note: 'Delegate a task from any accepted routine to its existing agent harness.',
-      stack: true,
-    },
-    h('label', { class: 'settings-field' }, h('span', { class: 'settings-field-label' }, 'CLI executable'), command),
-    h('label', { class: 'settings-field' }, h('span', { class: 'settings-field-label' }, 'Lead bot or room'), target),
-    h(
-      'p',
-      { class: 'settings-note' },
-      'Install with ',
-      h('code', { class: 'settings-code mono' }, 'npm install -g openmausbot'),
-      ' (Node.js 24+) and configure its models, lead bot or room, and connected apps in OpenMausBot. companyOS starts one job and waits for its nested agent tasks.',
-    ),
-    h(
-      'p',
-      { class: 'settings-note' },
-      'A handoff sends the task brief, routine name, app sequence and estimated cadence after a native confirmation. The prompt excludes activity history, screenshots, window contents and companyOS credentials. OpenMausBot may use its own configured credentials and permissions, outside companyOS autonomy controls. Handoffs are kept on this device for 90 days, or until you delete everything.',
-    ),
-    h(
-      'div',
-      { class: 'actions' },
-      button('Save OpenMausBot settings', {
-        variant: 'primary',
-        testid: 'settings-openmausbot-save',
-        disabled: pending(key),
-        onClick: () => {
-          state.dirty.delete(key);
-          void act(key, async () => {
-            await bridge().updateConfig({ openMausBotCommand: command.value.trim(), openMausBotTarget: target.value.trim() });
-          });
-        },
-      }),
-      h('a', { class: 'settings-link', href: '#/harness', 'data-testid': 'settings-open-harness' }, 'Open agent harness'),
-    ),
-  );
-}
-
 function appearancePanel(current: Theme): HTMLElement {
   return sectionCard(
     { id: 'appearance', testid: 'settings-appearance', title: 'Appearance' },
@@ -276,7 +209,7 @@ function capturePanel(watchBrowsers: boolean, excluded: readonly string[], idleG
     block(
       textBlock(
         'Excluded apps',
-        'The twin forgets anything it recorded from an excluded app and never records it again. Handoffs you already sent still name the app until they expire or you delete everything.',
+        'The twin forgets anything it recorded from an excluded app and never records it again. Handoff records saved by an earlier version may still name the app until they are removed after 90 days, or until you delete everything.',
       ),
       exclusionEditor('exclusions:settings', excluded, 'settings-exclusions', next =>
         void saveConfig('exclusions:settings', { excludedApps: next }),
@@ -297,7 +230,7 @@ function automationsPanel(config: TwinConfig): HTMLElement {
       toggleRow({
         testid: 'settings-automations-toggle',
         label: 'Automations on',
-        note: 'When off, no automation runs, on any level. It does not stop tasks you send to OpenMausBot.',
+        note: 'When off, no automation runs, on any level.',
         checked: config.automationsEnabled,
         onChange: checked => void saveConfig('automations', { automationsEnabled: checked }),
       }),
@@ -322,6 +255,47 @@ function automationsPanel(config: TwinConfig): HTMLElement {
         note: 'Local and reversible steps only. Needs the highest level set to 4.',
         checked: config.allowUnattended,
         onChange: checked => void saveConfig('unattended', { allowUnattended: checked }),
+      }),
+    ),
+    agentDesktopBlock(config.agentDesktopPath),
+  );
+}
+
+/** The optional agent-desktop program for focus and key steps. Blank keeps the built-in adapters. */
+function agentDesktopBlock(path: string): HTMLElement {
+  const key = 'agent-desktop-settings';
+  const program = h('input', {
+    class: 'input mono',
+    type: 'text',
+    maxlength: 512,
+    autocomplete: 'off',
+    spellcheck: false,
+    value: path,
+    placeholder: 'Leave empty to use the built-in adapters',
+    'aria-label': 'Agent-desktop program path',
+    'data-testid': 'settings-agent-desktop-path',
+    oninput: () => state.dirty.add(key),
+  });
+  return block(
+    h('label', { class: 'settings-field' }, h('span', { class: 'settings-field-label' }, 'Agent-desktop program'), program),
+    h(
+      'p',
+      { class: 'settings-note' },
+      'Optional, and not bundled with companyOS. Set the absolute path of an installed program to run focus and key steps through it. A path that is not an existing file blocks those two steps, and the run says why.',
+    ),
+    h(
+      'div',
+      { class: 'actions' },
+      button('Save program path', {
+        variant: 'primary',
+        testid: 'settings-agent-desktop-save',
+        disabled: pending(key),
+        onClick: () => {
+          state.dirty.delete(key);
+          void act(key, async () => {
+            await bridge().updateConfig({ agentDesktopPath: program.value.trim() });
+          });
+        },
       }),
     ),
   );
@@ -357,14 +331,42 @@ function modelsPanel(status: TwinStatus): HTMLElement {
     installed.length === 0
       ? row(h('p', { class: 'muted small' }, 'No models installed. The twin uses simple rule-based labels until you install one.'))
       : installed.map(model => modelRow(model)),
+    layaRow(status.laya),
     row(
       h(
         'div',
         { class: 'actions', 'data-testid': 'settings-setup' },
         button('Choose models again', { onClick: () => void openSetup(3) }),
+        button('Decision model', { testid: 'settings-laya-setup', onClick: () => void openSetup(4) }),
         button('Run setup again', { onClick: () => void openSetup(1) }),
       ),
     ),
+  );
+}
+
+/** The optional decision model. Its row is always shown, so a partial download is never hidden from the person who owns the disk. */
+function layaRow(laya: TwinStatus['laya']): HTMLElement {
+  const current = layaState(laya);
+  const removable = current === 'installed' || laya.hasPartial;
+  return h(
+    'div',
+    { class: 'settings-row settings-model', 'data-testid': 'settings-laya', 'data-state': current },
+    h(
+      'div',
+      { class: 'settings-model-main' },
+      h('span', { class: 'mono settings-model-id' }, 'laya-onnx (decision model, not used yet)'),
+      h('span', { class: 'settings-row-note mono', 'data-label-laya': 'true' }, layaStateLabel(laya)),
+    ),
+    current === 'downloading'
+      ? button('Cancel', { testid: 'settings-laya-cancel', onClick: () => void act('laya-cancel', () => bridge().cancelLaya()) })
+      : undefined,
+    removable && current !== 'downloading'
+      ? button(current === 'installed' ? 'Remove' : 'Delete partial download', {
+          testid: 'settings-laya-remove',
+          disabled: pending('laya-remove'),
+          onClick: () => void act('laya-remove', () => bridge().removeLaya()),
+        })
+      : undefined,
   );
 }
 

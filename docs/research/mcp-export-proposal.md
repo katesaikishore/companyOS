@@ -1,6 +1,6 @@
 # Research: exporting twin data through MCP (proposal)
 
-Status: proposal, no code. Written 2026-10-31 against origin/main (0b95130). The decisions this needs are in section 9.
+Status: proposal, no code. Written 2026-10-31 against origin/main (0b95130). The decisions this needs are in section 9. Update: the OpenMausBot handoff named below was removed from the product the same day (plan D15), so those references are historical.
 
 ## 0. Summary
 - **Export automations before data.** Plan §10 Phase 2 names MCP for automations ("Automations exported as MCP tools or agent skills"). Build that surface first. A caller can list automations and read run status. It can start an automation only through the local policy engine, with a native confirmation on the device when policy requires one. Results carry status, never content.

@@ -576,61 +576,6 @@
   color: var(--warn-ink);
 }
 
-/* Delegate a task tree */
-
-.auto-delegate {
-  gap: 12px;
-  padding: 16px;
-}
-
-.auto-field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
-
-.auto-field-label {
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.auto-brief {
-  flex: 0 0 auto;
-  background: var(--inset);
-  border-radius: 10px;
-  font-size: 13px;
-}
-
-.auto-delegate-foot {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-}
-
-.auto-delegate-note {
-  flex: 1 1 200px;
-  min-width: 0;
-  font-size: 11px;
-  color: var(--muted);
-  overflow-wrap: anywhere;
-}
-
-.auto-link {
-  display: inline-flex;
-  align-items: center;
-  min-height: 28px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--accent-text);
-  text-decoration: none;
-}
-
-.auto-link:hover {
-  text-decoration: underline;
-}
-
 /* Narrow containers stack their columns. The screen stacks the list above the detail under 560px. */
 
 @container automations-screen (max-width: 559px) {

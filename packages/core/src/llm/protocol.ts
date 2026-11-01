@@ -1,4 +1,10 @@
 /**
+ * The most characters the worker accepts in the system text or the prompt of one request. The worker refuses a longer
+ * one, and a refusal looks like a model failure, so the prompt builder keeps inside this limit (see prompt.ts).
+ */
+export const MAX_WORKER_TEXT_CHARS = 4_000;
+
+/**
  * Messages between the engine's worker client and the utility process that runs the model. Every reply carries the id
  * of the request it answers. Failures carry only a stage, never error text, because error text can name file paths.
  */

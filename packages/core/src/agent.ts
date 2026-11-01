@@ -19,8 +19,6 @@ import {
 import { runAutomation, type Executor, type RunMode, type RunRequest, type RunResult } from './runner';
 import { segment, type Segment } from './segment';
 import { EncryptedStore } from './store';
-import { HANDOFF_READ_LIMIT, HandoffSchema, UNKNOWN_HANDOFF_SUMMARY } from './handoff';
-import type { HandoffView } from './contract';
 import type { InstalledModel, NetworkEntry } from './models/types';
 import {
   DEFAULT_CONFIG,
@@ -33,7 +31,7 @@ import {
 
 const DAY_MS = 86_400_000;
 const ANALYSIS_DAYS = 30;
-/** Raw events and handoffs older than this are pruned. The desktop status reports the same figure to the Overview. */
+/** Raw events and handoff records older than this are pruned. The desktop status reports the same figure to the Overview. */
 export const RETENTION_DAYS = 90;
 /** Names kept in memory for detected routines. The oldest are dropped first. */
 const MAX_ROUTINE_NAMES = 200;
@@ -64,9 +62,26 @@ function withEffects(state: AutonomyState, automation: Automation): AutonomyStat
   return { ...state, effects: effectsOf(automation) };
 }
 
-/** The id of a stored handoff row. A row that does not parse still has its id, so a write can find it. */
-function handoffRowId(row: unknown): unknown {
-  return typeof row === 'object' && row !== null ? (row as { id?: unknown }).id : undefined;
+/**
+ * Config keys removed with the OpenMausBot integration. A config saved before that still holds them, so they are
+ * dropped before the strict schema reads it. Their values are not read, and the next save writes the config without them.
+ */
+const RETIRED_CONFIG_KEYS = ['openMausBotCommand', 'openMausBotTarget'] as const;
+
+function withoutRetiredKeys(saved: unknown): unknown {
+  if (typeof saved !== 'object' || saved === null) return saved;
+  const kept: Record<string, unknown> = { ...(saved as Record<string, unknown>) };
+  for (const key of RETIRED_CONFIG_KEYS) delete kept[key];
+  return kept;
+}
+
+/**
+ * The send time of a stored handoff record from an earlier version, or undefined when the row has none readable. Such a
+ * row cannot be dated, so pruning removes it: a record that cannot be aged must not be kept past the window.
+ */
+function handoffSentAt(row: unknown): number | undefined {
+  const sentAt = typeof row === 'object' && row !== null ? (row as { sentAt?: unknown }).sentAt : undefined;
+  return typeof sentAt === 'number' && Number.isFinite(sentAt) ? sentAt : undefined;
 }
 
 /**
@@ -90,7 +105,7 @@ export class TwinAgent {
     this.store = new EncryptedStore(options.dataDir, options.dataKey);
     this.now = options.now ?? (() => Date.now());
     const saved = this.store.readAll<unknown>('settings').at(-1);
-    this.config = saved ? TwinConfigSchema.parse(saved) : { ...DEFAULT_CONFIG };
+    this.config = saved ? TwinConfigSchema.parse(withoutRetiredKeys(saved)) : { ...DEFAULT_CONFIG };
   }
 
   /** Closes the encrypted store. Windows will not delete the store's files while it is open, so tests close before cleanup. */
@@ -339,46 +354,6 @@ export class TwinAgent {
     return this.store.readAll<NetworkEntry>('ledger');
   }
 
-  /**
-   * Writes a handoff, or replaces the stored one with the same id in place. The runtime writes it as "sending" before
-   * the CLI starts, so a send is on record even if it never returns. Every other stored row is passed back as it was
-   * read, so a row this version cannot read survives the write.
-   */
-  recordHandoff(view: HandoffView): void {
-    const record = HandoffSchema.parse(view);
-    const rows = this.store.readAll<unknown>('handoffs');
-    const index = rows.findIndex(row => handoffRowId(row) === record.id);
-    const next = index === -1 ? [...rows, record] : rows.map((row, position) => (position === index ? record : row));
-    this.store.replaceAll('handoffs', next);
-  }
-
-  /** The newest handoffs first. A read returns at most HANDOFF_READ_LIMIT, whatever limit is asked for. */
-  handoffs(limit: number = HANDOFF_READ_LIMIT): HandoffView[] {
-    const requested = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : HANDOFF_READ_LIMIT;
-    return this.readHandoffs()
-      .map((record, position) => ({ record, position }))
-      .sort((a, b) => b.record.sentAt - a.record.sentAt || b.position - a.position)
-      .slice(0, Math.min(HANDOFF_READ_LIMIT, requested))
-      .map(item => item.record);
-  }
-
-  /**
-   * Closes every handoff still "sending" when the app starts. Nothing can still be waiting for its reply, so each one is
-   * recorded as unknown: the job may have started. Other rows are passed back as they were read. Returns how many were
-   * closed.
-   */
-  closeInterruptedHandoffs(): number {
-    let closed = 0;
-    const next = this.store.readAll<unknown>('handoffs').map(row => {
-      const parsed = HandoffSchema.safeParse(row);
-      if (!parsed.success || parsed.data.state !== 'sending') return row;
-      closed++;
-      return { ...parsed.data, state: 'unknown', summary: UNKNOWN_HANDOFF_SUMMARY, localFailure: true };
-    });
-    if (closed > 0) this.store.replaceAll('handoffs', next);
-    return closed;
-  }
-
   /** Records a model that was downloaded and verified. A model with the same id is replaced. */
   markModelInstalled(model: InstalledModel): void {
     const others = this.config.installedModels.filter(installed => installed.id !== model.id);
@@ -464,7 +439,7 @@ export class TwinAgent {
     return this.store.sizeBytes();
   }
 
-  /** Drops events and handoffs older than the retention window. Returns how many records were removed. */
+  /** Drops events and handoff records older than the retention window. Returns how many records were removed. */
   prune(): number {
     const cutoff = this.now() - RETENTION_DAYS * DAY_MS;
     const all = this.store.readAll<TwinEvent>('events');
@@ -473,7 +448,10 @@ export class TwinAgent {
     return all.length - kept.length + this.pruneHandoffs(cutoff);
   }
 
-  /** Everything the twin holds about the person, for the person. */
+  /**
+   * Everything the twin holds about the person, for the person. Handoff rows from earlier versions are included as they
+   * were stored, so the export does not lose them. Nothing else reads them.
+   */
   exportAll(): object {
     return {
       exportedAt: new Date(this.now()).toISOString(),
@@ -482,7 +460,7 @@ export class TwinAgent {
       automations: this.readAutomations(),
       autonomy: this.readStates(),
       network: this.networkLedger(),
-      handoffs: this.readHandoffs(),
+      handoffs: this.store.readAll<unknown>('handoffs'),
     };
   }
 
@@ -522,23 +500,15 @@ export class TwinAgent {
     return this.store.readAll<AutonomyState>('autonomy');
   }
 
-  /** A stored record that no longer fits the schema is left out, rather than failing every read of the page. */
-  private readHandoffs(): HandoffView[] {
-    return this.store.readAll<unknown>('handoffs').flatMap(record => {
-      const parsed = HandoffSchema.safeParse(record);
-      return parsed.success ? [parsed.data] : [];
-    });
-  }
-
   /**
-   * A handoff is kept for the same window as an event, counted from the time it was sent. A stored row that no longer
-   * parses has no readable send time, so it is kept as it is. Returns how many were removed.
+   * A handoff record is kept for the same window as an event, counted from the time it was sent. A row with no readable
+   * send time cannot be aged, so it is removed. Returns how many were removed.
    */
   private pruneHandoffs(cutoff: number): number {
     const rows = this.store.readAll<unknown>('handoffs');
     const kept = rows.filter(row => {
-      const parsed = HandoffSchema.safeParse(row);
-      return !parsed.success || parsed.data.sentAt >= cutoff;
+      const sentAt = handoffSentAt(row);
+      return sentAt !== undefined && sentAt >= cutoff;
     });
     if (kept.length !== rows.length) this.store.replaceAll('handoffs', kept);
     return rows.length - kept.length;

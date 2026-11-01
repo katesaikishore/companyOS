@@ -4,8 +4,6 @@ import {
   TriggerGate,
   TwinAgent,
   TwinConfigSchema,
-  type AgentDelegationResult,
-  type HandoffView,
   effectOfOp,
   effectsOf,
   planSetup,
@@ -35,9 +33,10 @@ import { BROWSER_APP_NAMES, startBrowserBridge, type BrowserBridge, type Browser
 import { CaptureService } from './capture';
 import { destroyStoredSecrets, loadOrCreateDataKey } from './keys';
 import { detectHardware } from './hardware';
+import { LayaBundleManager, type LayaTestOptions } from './laya';
 import { ModelManager, createRoutineNamer } from './models';
 import { browserCapturePaths, installNativeHost, isBrowserCaptureSupported, removeNativeHost } from './native-host-install';
-import { observedAppSequence, runOpenMausBotTask, sendHandoff } from './openmausbot';
+import { handsExecutor } from './agent-desktop';
 import { choosePlatform, executorFor, type Platform } from './platform';
 
 export interface RuntimeOptions {
@@ -57,6 +56,8 @@ export interface RuntimeOptions {
   /** The native messaging host script shipped with the app. Browser capture cannot start without it. */
   browserHostScript?: string;
   fetchImpl?: typeof fetch;
+  /** Test-only. Points the decision-model download at a local server. The main process never sets it in a packaged build. */
+  laya?: LayaTestOptions;
 }
 
 const NO_CONTROL: Executor = {
@@ -77,6 +78,8 @@ export class TwinRuntime {
   private readonly capture: CaptureService;
   private readonly platform: Platform | undefined;
   private readonly models: ModelManager;
+  /** The optional decision-model bundle. Nothing in the app asks it for a decision. */
+  private readonly laya: LayaBundleManager;
   /** Listens for visits from the browser extension. Exists only while browser capture is on. */
   private browserBridge: BrowserBridge | undefined;
   private browserChanges: Promise<void> = Promise.resolve();
@@ -114,6 +117,14 @@ export class TwinRuntime {
       onChange: options.onChange,
       fetchImpl: options.fetchImpl,
     });
+    // Inside the models folder, so wiping that folder removes the bundle with it.
+    this.laya = new LayaBundleManager({
+      rootDir: join(options.userData, 'models', 'laya'),
+      record: entry => this.agent.recordNetworkCall(entry),
+      onChange: options.onChange,
+      fetchImpl: options.fetchImpl,
+      ...options.laya,
+    });
     this.namer = createRoutineNamer({
       agent: this.agent,
       models: this.models,
@@ -132,9 +143,8 @@ export class TwinRuntime {
 
   async start(): Promise<void> {
     this.agent.prune();
-    // A handoff still sending from the last run was cut off with the app. Its reply can no longer arrive.
-    this.agent.closeInterruptedHandoffs();
     await this.models.reconcile();
+    await this.laya.reconcile();
     this.capture.start();
     // A bridge that cannot start leaves the setting on with no browser URLs. The app still starts, and the capture card says why.
     if (this.agent.configuration.watchBrowsers) {
@@ -182,6 +192,18 @@ export class TwinRuntime {
     return this.models.remove(modelId);
   }
 
+  installLaya(): void {
+    this.laya.install();
+  }
+
+  cancelLaya(): void {
+    this.laya.cancel();
+  }
+
+  removeLaya(): Promise<void> {
+    return this.laya.remove();
+  }
+
   completeSetup(): void {
     this.agent.completeSetup();
   }
@@ -214,7 +236,6 @@ export class TwinRuntime {
       retentionDays: RETENTION_DAYS,
       readiness: this.agent.readiness(),
       habits: this.agent.habits(),
-      handoffs: this.agent.handoffs(),
       stats: {
         routinesLearned: suggestions.length + automations.length,
         waiting: suggestions.length + drafts,
@@ -229,6 +250,7 @@ export class TwinRuntime {
         observedDays: observed.observedDays,
       },
       downloads: this.models.states(),
+      laya: this.laya.view(),
       pendingRuns: this.livePending(),
     };
   }
@@ -287,41 +309,24 @@ export class TwinRuntime {
           mode: 'supervised',
           approve: (step, decision) => this.options.approve(automation, step, decision),
         },
-        executorFor(platform),
+        this.runExecutor(platform),
       );
     });
   }
 
   /**
-   * Sends an approved brief to OpenMausBot. The handoff is written as "sending" before the CLI starts, so no send
-   * goes unrecorded, then updated with the reply, or with companyOS's message when the CLI could not be run or gave no
-   * reply. The caller asks the person first, so a cancelled confirmation never gets here and is never recorded.
+   * The executor for one run. An empty agent-desktop path keeps the built-in adapters, so focus and key steps work as
+   * before. A path sends those two steps through the program, and an unusable path blocks them with the reason. The
+   * program's exit status and duration are logged, and nothing it was given is.
    */
-  async delegateRoutine(automationId: string, taskBrief: string): Promise<AgentDelegationResult> {
-    const automation = this.agent.automations().find(view => view.automation.id === automationId)?.automation;
-    if (!automation) throw new Error('Unknown automation.');
-    const config = this.agent.configuration;
-    const handoff: HandoffView = {
-      id: randomUUID(),
-      automationId,
-      routineName: automation.name,
-      target: config.openMausBotTarget,
-      brief: taskBrief,
-      apps: observedAppSequence(automation),
-      cadencePerWeek: automation.estimate?.occurrencesPerWeek,
-      sentAt: Date.now(),
-      state: 'sending',
-      summary: '',
-      localFailure: false,
-    };
-    return sendHandoff(this.agent, handoff, () =>
-      runOpenMausBotTask({
-        command: config.openMausBotCommand,
-        target: config.openMausBotTarget,
-        automation,
-        taskBrief,
-      }),
-    );
+  private runExecutor(platform: Platform): Executor {
+    const native = executorFor(platform);
+    const binary = this.agent.configuration.agentDesktopPath.trim();
+    if (binary === '') return native;
+    return handsExecutor(native, {
+      binary,
+      record: entry => console.info(`[agent-desktop] ${entry.step} exit=${entry.exit} duration=${entry.durationMs}ms`),
+    });
   }
 
   /**
@@ -369,7 +374,7 @@ export class TwinRuntime {
         this.agent.run(
           automationId,
           { mode: 'unattended' },
-          executorFor(platform),
+          this.runExecutor(platform),
         ),
       );
       this.options.onUnattendedRun?.(result);
@@ -440,12 +445,13 @@ export class TwinRuntime {
   }
 
   /**
-   * Destroys the stored data, the key and the installed models. Downloads are cancelled before the models folder goes,
-   * so none can write back into it. Nothing can be recovered afterwards.
+   * Destroys the stored data, the key and the installed models, including the decision-model bundle. Downloads are
+   * cancelled before the models folder goes, so none can write back into it. Nothing can be recovered afterwards.
    */
   async deleteAll(): Promise<void> {
     this.stop();
     this.disableBrowserCapture();
+    await this.laya.wipe();
     await this.models.wipe();
     this.agent.wipe();
     destroyStoredSecrets(this.options.userData);

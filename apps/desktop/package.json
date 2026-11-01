@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "companyOS Twin desktop app (Electron)",
+  "homepage": "https://github.com/katesaikishore/companyOS",
   "main": "dist/main/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.main.json && tsc -p tsconfig.renderer.json && node scripts/copy-assets.mjs",
@@ -15,14 +16,13 @@
     "test:e2e": "node test/e2e.cjs"
   },
   "devDependencies": {
-    "@types/cross-spawn": "^6.0.6",
     "electron": "45.1.0",
     "electron-builder": "^26.18.0",
     "typescript": "^5.9.3"
   },
   "dependencies": {
     "@companyos/twin-core": "0.1.0",
-    "cross-spawn": "^7.0.6",
+    "@receptron/laya": "0.2.0",
     "electron-updater": "^6.8.10",
     "node-llama-cpp": "3.22.1"
   }

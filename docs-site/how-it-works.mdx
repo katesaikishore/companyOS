@@ -8,7 +8,7 @@ description: "From capture to a routine you can run: what the twin records, how 
 The twin polls the operating system every few seconds and records the name of the app in front, its window class, and whether you are idle. It records nothing else about the app.
 
 - **Pause** stops recording until you resume. Locking the screen pauses it too, and it resumes at unlock unless you paused it yourself.
-- **Exclusions** tell the twin never to record an app. Excluding an app removes its recent events. Handoffs you already sent keep the app name until they expire or you delete everything.
+- **Exclusions** tell the twin never to record an app. Excluding an app removes its recent events. Handoff records saved by an earlier version keep the app name until they are removed after 90 days, or until you delete everything.
 - **Browser capture** is off by default. When it is on, Chrome and Edge report only the host and a short path shape of the active tab. Titles, query strings and fragments are dropped, and private windows are never reported. It works on macOS and Linux only.
 
 ## 2. Segment and mine
@@ -20,6 +20,8 @@ Routine detection is rule-based. No model is consulted to decide what counts as 
 ## 3. Name
 
 Each routine gets a rule-based name. Once a chat model is installed, a background worker can name routines instead, and the rule-based name is the fallback. Names are kept in memory only. The naming path has not been checked with a real model file yet, because the tests use a fake worker.
+
+Setup also offers an optional decision model (Laya, about 1.7 GB). It can be downloaded and checked, but nothing in this version asks it a question, so installing it changes no behaviour. The checks in the next step stay fixed rules.
 
 ## 4. Draft, check and run
 

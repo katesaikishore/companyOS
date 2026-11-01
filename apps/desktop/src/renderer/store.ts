@@ -8,7 +8,6 @@ export type Route =
   | { name: 'ledger' }
   /** The app readiness list, or one app's detail when the route names an app. */
   | { name: 'readiness'; app?: string }
-  | { name: 'harness' }
   | { name: 'settings' };
 
 export interface Notice {
@@ -43,12 +42,8 @@ export const state = {
   selectedSuggestion: undefined as string | undefined,
   selectedLedger: undefined as string | undefined,
   /** The tab the automation detail shows. It is here, with the other selections, so a tab click redraws the page. */
-  automationTab: 'workflow' as 'workflow' | 'autonomy' | 'delegate',
+  automationTab: 'workflow' as 'workflow' | 'autonomy',
   runResults: new Map<string, StoredRun>(),
-  /** Briefs typed for OpenMausBot, by automation. The replies come from the twin's handoffs, not from here. */
-  agentTaskBriefs: new Map<string, string>(),
-  /** The handoff the harness page shows in its conversation. Unset means the newest. */
-  selectedHandoff: undefined as string | undefined,
 };
 
 let renderer: (() => void) | undefined;
@@ -121,7 +116,7 @@ export function saveConfig(key: string, patch: Partial<TwinConfig>): Promise<voi
 }
 
 export function confirmDeleteAll(): void {
-  if (!window.confirm('Delete everything the twin knows about you? This removes all events, automations, OpenMausBot handoffs (briefs, replies, job trees, thread ids) and installed models on this device. It cannot be undone.')) {
+  if (!window.confirm('Delete everything the twin knows about you? This removes all events, automations, any handoff records saved by an earlier version, and installed models on this device, including the optional decision model. It cannot be undone.')) {
     return;
   }
   void call('delete', twin => twin.deleteAll());
@@ -151,8 +146,6 @@ export function routeFromHash(hash: string): Route {
       return { name: 'ledger' };
     case 'readiness':
       return parts[1] ? { name: 'readiness', app: safeDecode(parts[1]) } : { name: 'readiness' };
-    case 'harness':
-      return { name: 'harness' };
     case 'settings':
       return { name: 'settings' };
     default:

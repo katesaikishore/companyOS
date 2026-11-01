@@ -17,8 +17,8 @@ Level 5 is not built. Only the promotion step raises an automation to level 4, a
 
 The gate has eight conditions, and the automation's page shows each one:
 
-1. It has run at level 3.
-2. The unattended switch is on in Settings.
+1. It has been raised to level 3.
+2. Unattended runs are switched on in Settings, and the highest level there is set to 4.
 3. Every effect of the routine is local and reversible.
 4. You have supervised at least 10 runs at level 3.
 5. It has at least 25 runs in the last 14 days.
@@ -26,7 +26,7 @@ The gate has eight conditions, and the automation's page shows each one:
 7. None of its runs was reverted in the last 14 days.
 8. None of its runs failed in the last 14 days.
 
-If a check fails or a run is undone, the automation drops back to level 3 at once.
+If a run fails, which includes a failed check, or if you undo a run, the automation drops back to level 3 at once. A blocked run is not a failure and does not lower the level.
 
 ## Steps
 
@@ -34,12 +34,43 @@ If a check fails or a run is undone, the automation drops back to level 3 at onc
 | --- | --- |
 | Focus an app | Everywhere app capture works: macOS, Windows, and Linux on X11 |
 | Check focus | Everywhere app capture works |
-| Open a link | macOS and Windows only |
-| Open a file | macOS and Windows only, and it asks each time |
-| Press a shortcut | macOS, Windows, and Linux on X11 through xdotool. The app is brought to the front first, and nothing is sent if it does not get there. Blocked on Wayland |
+| Open a link | macOS, Windows, and Linux on X11 when gio is installed. The Linux adapter is tested with stand-in apps only. See below |
+| Open a file | macOS, Windows, and Linux on X11 when gio is installed. It asks each time. See below |
+| Press a shortcut | macOS and Windows, whose adapters ran on GitHub-hosted runners only, with permission prompts and a non-elevated Windows user unverified, and Linux on X11 through xdotool. The app is brought to the front first, and nothing is sent if it does not get there. Blocked on Wayland |
 
 Typing, clicking and sending are not built.
 
+## Opening links and files on Linux
+
+Linux has no command that opens a link in a named app, so the twin looks the app up itself. It reads the installed desktop entries (the `.desktop` files in the user and system `applications` folders) and finds the one entry the step names. Then it starts that entry with `gio launch`, with the checked address or file as the only argument. It uses an argument list, never a shell, and stops the launcher after 8 seconds. It never calls `xdg-open`, because that opens the target in the system's default app and not in the app you approved.
+
+The name is matched against the entry's window class (`StartupWMClass`), then its file name, then its `Name`. The first of these that matches decides. Name the app the way capture records it, which on X11 is the window class, such as `firefox`. A step that names an app by its menu name can open the link and then fail the check that the app is in front, because the front window reports its class.
+
+The step is refused, and nothing is launched, when:
+
+- no installed entry has that name;
+- more than one entry has that name at the same level;
+- the entry cannot take the target. A link needs a web browser entry that handles that scheme and has a `%u` or `%U` in its command. A file needs a `%f`, `%F`, `%u` or `%U`;
+- the entry runs in a terminal, is a terminal emulator, or starts a shell or a script interpreter. The path of a file can hold characters such as `$` and `;`, which a shell would read.
+
+A refused step is blocked, not failed, and it shows the reason. After the launch, the twin asks the window manager to bring the app forward, and the run then checks that it is in front, as it does on macOS and Windows.
+
+The steps are offered only on X11 and only when `gio` supports `launch` (GLib 2.50 or later, in the `libglib2.0-bin` package on Debian and Ubuntu). On Wayland they are blocked, as is all app capture.
+
+What is verified: the tests use a stand-in launcher and stand-in tools, and also run the real `gio launch` to check that a link, a file name with shell characters and a file URI arrive as one argument. A one-off run under Xvfb with Openbox, which is not part of the test suite, started stand-in apps from desktop entries, brought them to the front and passed the in-front check. What is not verified: real browsers and editors, Flatpak and Snap entries, and GNOME or KDE focus rules, which can refuse to raise a window that was not started by a click.
+
+## Optional agent-desktop program
+
+Focusing an app and pressing a shortcut can run through an external agent-desktop program instead of the built-in adapters. The program is not bundled with companyOS, and the option is off by default. Set the absolute path of an installed program under Automations in Settings to turn it on. With the path left empty, those two steps use the built-in adapters above.
+
+When a path is set:
+
+- Focus steps start the program with a fixed argument list and never through a shell: `focus-window --app <name>`. Before a focus by name, the program is asked for the app's windows with `list-windows --app <name>`. When the app has more than one window, the focus is refused and nothing is brought forward. The run is blocked and says why, so close the extra windows and run it again. A block is not a failure, so it does not lower the automation's level. A press by name gets the same check, since its first step is a focus. Otherwise a press runs `focus-window --app <name>` first, then `press <chord> --app <name>`. A step succeeds only when the program exits with status 0. On Linux a press always uses the built-in adapter, because the program's press crashed some GTK apps in testing. Only focus goes through the program there.
+- An application name or key chord must match a strict pattern before the program starts. Anything else is refused, and nothing runs.
+- A path that is not an existing file blocks both steps, and the run says why.
+- Each call is stopped after 10 seconds, and its output is capped. The window list is read to count the windows and is not kept. The log keeps only the step name, the exit status and the duration. A focus or press refused for several windows is logged as `ambiguous`.
+- A press still asks you first, as it does without the program. Opening a link or a file is not affected.
+
 ## Stop
 
-**Stop all automations** in the sidebar turns every automation off. The Settings switch that controls automations works the same way, and it does not stop tasks you have sent to OpenMausBot.
+**Stop all automations** in the sidebar turns every automation off. The Settings switch that controls automations works the same way.

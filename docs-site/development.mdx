@@ -29,7 +29,7 @@ npm start
 
 ## End-to-end tests
 
-The end-to-end script launches the built app through Electron and drives it with Playwright. It covers setup, the overview, suggestions, automations, the tray, the network ledger, and the fixed 900 by 600 window. It checks that every main route fits the window with no sideways scroll, and that the window cannot be resized, maximised or made full screen.
+The end-to-end script launches the built app through Electron and drives it with Playwright. It covers setup (including the optional decision-model step), the overview, suggestions, automations, the tray, the network ledger, Delete everything, and the fixed 900 by 600 window. It checks that every main route fits the window with no sideways scroll, and that the window cannot be resized, maximised or made full screen.
 
 Playwright is not a dependency of the repository, so install it outside the tree:
 
@@ -39,8 +39,51 @@ npm install --no-save playwright
 NODE_PATH=$(npm root)/node_modules node apps/desktop/test/e2e.cjs
 ```
 
-The script uses a temporary data folder, and it needs network access to huggingface.co to download the embedding model.
+The script uses a temporary data folder, and it needs network access to huggingface.co to download the embedding model. The decision-model step does not use the network: the script starts a local server with a 3 MB bundle and points the app at it through `COMPANYOS_TEST_LAYA_FIXTURE`, which a packaged build ignores.
+
+## Decision-model tests
+
+`apps/desktop/test/laya.test.ts` tests the bundle manager against a local server that stands in for Hugging Face. It never downloads the real bundle. One opt-in test uses the real bundle already on your machine. It reads the files, checks them against the pinned digests, loads the model and asks one question:
+
+```bash
+COMPANYOS_REAL_LAYA=1 COMPANYOS_LAYA_CACHE=/path/to/cache npm test -w @companyos/desktop -- laya
+```
+
+The cache folder holds `receptron--laya-onnx/<commit>/`, the layout the `@receptron/laya` package uses. The test only reads it.
 
 ## Continuous integration
 
 `.github/workflows/ci.yml` runs on every push and pull request. It runs the typecheck, the unit tests, the privacy suite, the build and an unpacked package on Ubuntu, macOS and Windows. The end-to-end script runs on Linux under a virtual display.
+
+`.github/workflows/docs.yml` runs on pull requests that change `docs-site`, and checks the documentation (see below). `.github/workflows/release.yml` runs when a version tag is pushed. See [Releasing](/releasing).
+
+## Checking the docs
+
+Run these from the repository root. They need Node.js 22 or later and no Mintlify account.
+
+```bash
+node scripts/docs/check-docs.mjs
+cd docs-site
+npx --yes mint@4.2.1184 validate
+npx --yes mint@4.2.1184 broken-links
+```
+
+- `scripts/docs/check-docs.mjs` has no dependencies. It checks that every page in `docs.json` has a file and every page file is in the navigation, that each page has a title and description, and that internal links, images and `#heading` links resolve. It does not fetch external links.
+- `mint validate` is the Mintlify CLI's content check and strict build. It exits 1 when it finds errors.
+- `mint broken-links` is the CLI's link check. It exits 1 when it finds a broken link.
+
+All three ran without a login. The pull request workflow runs the same three, with the CLI version pinned. `mint dev` serves a local preview.
+
+## Publishing the docs
+
+The workflow above only checks. Nothing publishes the docs yet. Publishing is done by Mintlify, and every step below **needs the owner's Mintlify account**, so none of them has been run or checked here. The names of menus in the Mintlify dashboard change, so follow the dashboard if it differs.
+
+1. **Needs the owner's Mintlify account.** Create one at mintlify.com, or run `mint signup` from `docs-site`. The CLI says the Starter plan is free and needs no credit card.
+2. **Connect GitHub** in the Mintlify dashboard. Install the Mintlify GitHub app on the `katesaikishore` account and give it access to the `companyOS` repository. This needs the repository owner's permission.
+3. **Pick the repository and the branch.** Choose `katesaikishore/companyOS` and the branch to publish, `main`.
+4. **Set the docs folder to `docs-site`.** `docs.json` is in `docs-site`, not at the repository root, so use the dashboard's Git settings and its monorepo option, and give it the path `docs-site`. Without this, Mintlify looks for `docs.json` at the root and finds nothing.
+5. **Save and wait for the first deployment.** After that, each push to the chosen branch redeploys the site. The CLI says the site is then live at an address of the form `https://<subdomain>.mintlify.site`. The pull request check keeps broken pages from reaching the branch.
+6. **Optional: a custom domain.** Add one in the dashboard (the CLI has `mint add-domain <domain>`). It also needs DNS records at your domain provider.
+7. **Add the live address to the README**, and to the repository's website field on GitHub, once it exists.
+
+`mint --help` also lists `mint deploy`, which makes an anonymous site and prints Git push instructions. It was not run, because it creates a site.

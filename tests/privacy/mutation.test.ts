@@ -2,18 +2,14 @@ import { randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { EncryptedStore, TwinAgent, type Automation } from '@companyos/twin-core';
+import { EncryptedStore, TwinAgent } from '@companyos/twin-core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildOpenMausBotPrompt, runOpenMausBotTask } from '../../apps/desktop/src/main/openmausbot';
 import { CANARIES, findLeaks, type Encoding, type Surface } from './canaries';
-import { spawnLog } from './fake-spawn';
 import { at, runPlantedScenario } from './scenario';
 import { ConsoleCapture, diskSurfaces, errorText, recordingFetch } from './surfaces';
 
 // The suite must be able to fail. This file swaps in a deliberately leaking redaction, and it plants a leak on each
 // output channel, then checks that the same scanner reports every one of them.
-vi.mock('cross-spawn', async () => ({ default: (await import('./fake-spawn')).fakeSpawn }));
-
 vi.mock('../../packages/core/src/redact', async importOriginal => {
   const actual = await importOriginal<typeof import('../../packages/core/src/redact')>();
   // Deliberately leaky. It skips the schema, the secure-input check, the private-window check and the excluded-app list,
@@ -49,20 +45,6 @@ function seedStore(storeDir: string, key: Buffer, record: unknown): void {
   } finally {
     store.close();
   }
-}
-
-function automationNamed(name: string): Automation {
-  return {
-    id: 'auto_channel',
-    name,
-    version: 1,
-    routineId: 'routine_channel',
-    params: [],
-    steps: [
-      { op: 'focus_app', app: 'Slack' },
-      { op: 'check_focus', app: 'Slack' },
-    ],
-  };
 }
 
 function caught(surfaces: readonly Surface[]): Array<[string, string, string]> {
@@ -134,18 +116,11 @@ describe('each output channel is scanned, so a leak planted on it is caught', ()
   it('the full data export, through a setting that ends up in it', () => {
     const { storeDir, key } = freshFolder();
     const agent = new TwinAgent({ dataDir: storeDir, dataKey: key, now: () => at(0, 12) });
-    agent.updateConfig({ openMausBotTarget: CANARIES.routineName });
+    agent.updateConfig({ excludedApps: [CANARIES.routineName] });
     expect(caught([{ name: 'export', text: JSON.stringify(agent.exportAll()) }])).toEqual([
       ['export', 'routineName', 'raw'],
     ]);
     agent.close();
-  });
-
-  it('the OpenMausBot prompt preview', () => {
-    const prompt = buildOpenMausBotPrompt(automationNamed(CANARIES.routineName), 'Summarise the follow-ups');
-    expect(caught([{ name: 'prompt:openmausbot', text: prompt }])).toEqual([
-      ['prompt:openmausbot', 'routineName', 'raw'],
-    ]);
   });
 
   it('an outbound model download request', async () => {
@@ -171,18 +146,6 @@ describe('each output channel is scanned, so a leak planted on it is caught', ()
     seedStore(storeDir, key, { kind: 'focus', app: 'slack' });
     writeFileSync(join(storeDir, 'debug-dump.txt'), Buffer.from(CANARIES.encodedForms).toString('base64url'));
     expect(caught(diskSurfaces(root, storeDir, key))).toEqual([['store:raw:debug-dump.txt', 'encodedForms', 'base64url']]);
-  });
-
-  it('outbound OpenMausBot command-line arguments', async () => {
-    spawnLog.length = 0;
-    await runOpenMausBotTask({
-      command: 'openmausbot',
-      target: 'Lead Bot',
-      automation: automationNamed(CANARIES.routineName),
-      taskBrief: 'Summarise the follow-ups',
-    });
-    const text = spawnLog.map(call => [call.command, ...call.args].join('\n')).join('\n---\n');
-    expect(caught([{ name: 'outbound:spawn', text }])).toEqual([['outbound:spawn', 'routineName', 'raw']]);
   });
 });
 

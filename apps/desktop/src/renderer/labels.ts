@@ -1,5 +1,5 @@
-import type { AutomationView, EffectClass, Fit, HandoffView, Param, RunRecord, Step, TwinStatus } from '@companyos/twin-core';
-import { formatBytes, clamp01 } from './format.js';
+import type { AutomationView, EffectClass, Fit, LayaBundleView, Param, RunRecord, Step, TwinStatus } from '@companyos/twin-core';
+import { formatBytes, formatDecimalBytes, clamp01 } from './format.js';
 
 export const LEVEL_NAMES = ['Observe', 'Suggest', 'Draft', 'Run with you', 'On its own', 'External'];
 
@@ -16,24 +16,6 @@ export function levelTone(level: number): 'teal' | 'ink' | 'neutral' {
   if (level >= 4) return 'teal';
   if (level === 3) return 'ink';
   return 'neutral';
-}
-
-/** The colour of a handoff's state chip. Sending and unknown states stay neutral: nothing is decided yet. */
-export function handoffTone(state: HandoffView['state']): 'teal' | 'warn' | 'danger' | 'neutral' {
-  switch (state) {
-    case 'completed':
-      return 'teal';
-    case 'needs-input':
-      return 'warn';
-    case 'failed':
-    case 'stalled':
-    case 'timed-out':
-      return 'danger';
-    case 'sending':
-    case 'unknown':
-    default:
-      return 'neutral';
-  }
 }
 
 export function effectLabel(effect: EffectClass): string {
@@ -207,5 +189,41 @@ export function modelStateLabel(status: TwinStatus, modelId: string): string {
       return 'Cancelled';
     case 'not_installed':
       return 'Not installed';
+  }
+}
+
+export type LayaUiState = 'unsupported' | ModelState;
+
+/** The decision-model bundle in the five states the page shows. Downloading covers the checksum pass too. */
+export function layaState(laya: LayaBundleView): LayaUiState {
+  if (laya.status === 'installed') return 'installed';
+  if (laya.status === 'downloading' || laya.status === 'verifying') return 'downloading';
+  if (!laya.supported) return 'unsupported';
+  if (laya.status === 'failed') return 'failed';
+  if (laya.status === 'cancelled') return 'cancelled';
+  return 'not_installed';
+}
+
+export function layaFraction(laya: LayaBundleView): number {
+  if (laya.status === 'installed') return 1;
+  return laya.totalBytes <= 0 ? 0 : clamp01(laya.receivedBytes / laya.totalBytes);
+}
+
+export function layaStateLabel(laya: LayaBundleView): string {
+  const done = formatDecimalBytes(laya.receivedBytes);
+  const total = formatDecimalBytes(laya.totalBytes);
+  switch (laya.status) {
+    case 'downloading':
+      return `Downloading · ${done} of ${total}`;
+    case 'verifying':
+      return laya.file ? `Checking ${laya.file}` : 'Checking files';
+    case 'installed':
+      return 'Installed';
+    case 'failed':
+      return 'Failed';
+    case 'cancelled':
+      return laya.hasPartial ? `Cancelled · ${done} kept` : 'Cancelled';
+    case 'not_installed':
+      return !laya.supported ? 'Not available' : laya.hasPartial ? `Partly downloaded · ${done} of ${total}` : 'Not installed';
   }
 }

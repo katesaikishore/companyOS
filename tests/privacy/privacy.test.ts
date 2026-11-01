@@ -3,11 +3,9 @@ import childProcess from 'node:child_process';
 import https from 'node:https';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { findLeaks, describeLeak, type Surface } from './canaries';
-import { HANDOFF_BRIEF, PLANTED, runPlantedScenario, type ScenarioRun } from './scenario';
+import { PLANTED, runPlantedScenario, type ScenarioRun } from './scenario';
 import { refuseOutbound } from './surfaces';
 
-// The OpenMausBot handoff starts a real CLI. The suite replaces it with a recorder, so the arguments can be checked.
-vi.mock('cross-spawn', async () => ({ default: (await import('./fake-spawn')).fakeSpawn }));
 // The model manager imports Electron's utility process. The suite never forks a model, so a stand-in is enough.
 vi.mock('electron', () => ({
   utilityProcess: {
@@ -39,13 +37,13 @@ describe('the planted inputs reach the pipeline and take the designed path', () 
     expect(run.facts.chromeTemplate).toBe('docs.example.com/doc');
   });
 
-  it('records the model download in the ledger and starts the CLI once', () => {
+  it('records the model download in the ledger', () => {
     expect(run.facts.ledgerEntries).toBe(1);
-    expect(run.facts.spawnCalls).toBe(1);
     expect(run.facts.downloadStatus).toEqual(['failed']);
   });
 
-  it('makes no network or process call the suite did not plan', () => {
+  // The suite plans no process call, so any child process the app starts is refused and counted here.
+  it('makes no network or process call other than the recorded model download', () => {
     expect(run.facts.unexpectedOutboundCalls).toBe(0);
   });
 });
@@ -83,10 +81,6 @@ describe('no canary appears on any output surface', () => {
     expectNoLeaks(run.surfaces, name => name === 'habits');
   });
 
-  it('the OpenMausBot prompt preview', () => {
-    expectNoLeaks(run.surfaces, name => name === 'prompt:openmausbot');
-  });
-
   it('thrown error messages, with their causes and hidden properties', () => {
     expectNoLeaks(run.surfaces, name => name === 'errors');
   });
@@ -95,23 +89,8 @@ describe('no canary appears on any output surface', () => {
     expectNoLeaks(run.surfaces, name => name === 'outbound:fetch');
   });
 
-  it('outbound payloads: OpenMausBot command-line arguments', () => {
-    expectNoLeaks(run.surfaces, name => name === 'outbound:spawn');
-  });
-
   it('every surface together, in every encoding the suite knows', () => {
     expectNoLeaks(run.surfaces, () => true);
-  });
-});
-
-describe('the OpenMausBot handoff keeps no raw activity', () => {
-  it('records the handoff through the send path, so the checks below read a stored handoff', () => {
-    expect(run.facts.handoffStates).toEqual(['completed']);
-    expect(run.surfaces.find(surface => surface.name === 'store:decrypted:handoffs')?.text).toContain(HANDOFF_BRIEF);
-  });
-
-  it('the handoff store, the export and the console hold no raw canary', () => {
-    expectNoLeaks(run.surfaces, name => name === 'store:decrypted:handoffs' || name === 'export' || name === 'console');
   });
 });
 

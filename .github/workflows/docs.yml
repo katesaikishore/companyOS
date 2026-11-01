@@ -1,0 +1,46 @@
+name: docs
+
+# Checks the Mintlify site in docs-site on pull requests that change it. It only checks. Nothing is published from here.
+# Publishing is done by Mintlify, from the dashboard of the owner's account (see docs-site/development.mdx).
+#   check-docs.mjs:   dependency-free. Every page in docs.json exists and every page file is in the navigation, front
+#                     matter has a title and description, and internal links, images and #headings resolve.
+#   mint validate:    the Mintlify CLI's content check and strict build.
+#   mint broken-links: the Mintlify CLI's link check.
+# The Mintlify CLI needs no login for these commands. It is pinned so a new release cannot break a pull request by
+# itself. Move the version up on purpose, and run the same commands from docs-site first.
+
+on:
+  pull_request:
+    paths:
+      - 'docs-site/**'
+      - 'scripts/docs/**'
+      - '.github/workflows/docs.yml'
+
+permissions:
+  contents: read
+
+env:
+  MINT_VERSION: 4.2.1184
+
+jobs:
+  validate:
+    name: validate the docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check navigation, front matter and internal links
+        run: node scripts/docs/check-docs.mjs
+
+      - name: Validate the site (Mintlify CLI)
+        working-directory: docs-site
+        run: npx --yes "mint@$MINT_VERSION" validate
+
+      - name: Check for broken links (Mintlify CLI)
+        working-directory: docs-site
+        run: npx --yes "mint@$MINT_VERSION" broken-links

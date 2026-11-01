@@ -4,11 +4,13 @@
 //   npm run build && NODE_PATH="$(npm root -g)" xvfb-run -a node apps/desktop/test/e2e.cjs
 //
 // Needs network access to huggingface.co for the embedding-model download test.
-const { mkdtempSync, mkdirSync } = require('node:fs');
+const { createHash } = require('node:crypto');
+const { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const { _electron: electron } = require('playwright');
+const { createRangeServer } = require('./range-server.cjs');
 
 const APP = path.resolve(__dirname, '..');
 const CORE = path.resolve(__dirname, '../../../packages/core/dist/index.js');
@@ -18,11 +20,17 @@ mkdirSync(SHOTS, { recursive: true });
 
 const log = (...args) => console.log('[e2e]', ...args);
 
-async function launch(userDataDir) {
+async function launch(userDataDir, layaFixture) {
   const app = await electron.launch({
     executablePath: require('electron'),
     args: [APP, '--no-sandbox', '--password-store=basic', `--user-data-dir=${userDataDir}`],
-    env: { ...process.env, COMPANYOS_TEST_BASIC_STORE: '1', COMPANYOS_TEST_FAKE_PLATFORM: path.join(userDataDir, 'front-app.txt') },
+    env: {
+      ...process.env,
+      COMPANYOS_TEST_BASIC_STORE: '1',
+      COMPANYOS_TEST_FAKE_PLATFORM: path.join(userDataDir, 'front-app.txt'),
+      // A local server stands in for Hugging Face, so the decision-model step runs for real without fetching 1.7 GB.
+      COMPANYOS_TEST_LAYA_FIXTURE: layaFixture,
+    },
     timeout: 60_000,
   });
   return app;
@@ -165,9 +173,41 @@ async function responsiveProblems(page) {
   });
 }
 
+const LAYA_REVISION = '0123456789abcdef0123456789abcdef01234567';
+const LAYA_DATA = 'laya.onnx.data';
+
+/** Deterministic bytes, so a run can be reproduced. */
+function layaBytes(label, length) {
+  const out = Buffer.alloc(length);
+  let block = createHash('sha256').update(label).digest();
+  for (let at = 0; at < length; at += block.length) {
+    block.copy(out, at, 0, Math.min(block.length, length - at));
+    block = createHash('sha256').update(block).digest();
+  }
+  return out;
+}
+
+/** A small bundle with the real file names, a local server for it, and the fixture file the app reads (see src/main/laya.ts). */
+async function layaFixture(dir) {
+  const sizes = { 'laya.onnx': 120_000, [LAYA_DATA]: 3_000_000, 'laya_config.json': 355, 'tokenizer/tokenizer.json': 60_000, 'tokenizer/tokenizer_config.json': 308 };
+  const files = Object.fromEntries(Object.entries(sizes).map(([name, size]) => [name, layaBytes(name, size)]));
+  const spec = {
+    repo: 'receptron/laya-onnx',
+    revision: LAYA_REVISION,
+    files: Object.entries(files).map(([name, data]) => ({ path: name, bytes: data.length, sha256: createHash('sha256').update(data).digest('hex') })),
+  };
+  const server = await createRangeServer(files, { revision: LAYA_REVISION, chunkBytes: 32_768 });
+  const file = path.join(dir, 'laya-fixture.json');
+  writeFileSync(file, JSON.stringify({ baseUrl: server.url, spec, minFreeBytes: 1 }));
+  return { server, file, spec, files };
+}
+
 async function main() {
   const userDataDir = mkdtempSync(path.join(tmpdir(), 'companyos-e2e-'));
-  const app = await launch(userDataDir);
+  const fixtureDir = mkdtempSync(path.join(tmpdir(), 'companyos-e2e-laya-'));
+  const laya = await layaFixture(fixtureDir);
+  const layaDir = path.join(userDataDir, 'models', 'laya', 'receptron--laya-onnx', LAYA_REVISION);
+  const app = await launch(userDataDir, laya.file);
   const consoleErrors = [];
   try {
     const page = await mainPage(app);
@@ -222,7 +262,54 @@ async function main() {
     );
     log('cancelled chat-model install shows as cancelled');
 
+    // 3b. The optional decision-model step. Nothing is requested until the person chooses to download.
     await page.click('[data-testid="setup-next"]');
+    await page.waitForSelector('[data-testid="setup-step"][data-step="4"]');
+    await page.waitForSelector('[data-testid="setup-laya"][data-state="not_installed"]');
+    assert.match(await page.textContent('[data-testid="setup-laya-note"]'), /Nothing uses it yet/);
+    // The page states the size of the bundle it will fetch. Here that is the 3 MB test bundle. The real one reads "about 1.7 GB" (laya-labels.test.ts).
+    assert.match(await page.textContent('[data-testid="setup-step"]'), /about 3 MB/, 'the step states the size of the bundle');
+    assert.equal(await page.locator('[data-testid="setup-laya-skip"]').count(), 1, 'Skip is offered before the download');
+    assert.equal(laya.server.requests.length, 0, 'nothing was requested before the person chose to download');
+    await shot(page, '03b-setup-decision-model');
+    await noDocumentScroll(page, 'decision-model step');
+
+    // The first request for the big file stalls, so Cancel has something to stop.
+    let stall = true;
+    laya.server.rules.push(({ name }) => (name === LAYA_DATA && stall ? { stallAt: 1_000_000 } : undefined));
+    await page.click('[data-testid="laya-install"]');
+    await page.waitForSelector('[data-testid="laya-progress"]', { timeout: 15_000 });
+    await waitForStatus(page, status => status.laya.status === 'downloading' && status.laya.receivedBytes > 800_000, { timeout: 20_000, label: 'laya progress' });
+    assert.match(await page.textContent('[data-testid="laya-status"]'), /^Downloading/);
+    assert.equal(await page.locator('[data-testid="setup-laya-skip"]').count(), 0, 'Skip is replaced by the note while it downloads');
+    await shot(page, '03c-setup-decision-model-downloading');
+    await page.click('[data-testid="laya-cancel"]');
+    await page.waitForSelector('[data-testid="setup-laya"][data-state="cancelled"]', { timeout: 20_000 });
+    const partial = path.join(layaDir, `${LAYA_DATA}.part`);
+    assert.ok(existsSync(partial), 'cancel keeps the partial file');
+    const kept = readFileSync(partial).length;
+    assert.ok(kept > 0 && kept < 3_000_000, `kept ${kept} bytes`);
+    assert.equal((await page.textContent('[data-testid="laya-install"]')).trim(), 'Resume download');
+    await shot(page, '03d-setup-decision-model-cancelled');
+    log('decision-model download cancelled, partial file kept:', kept, 'bytes');
+
+    // Resume continues the same file with a Range request, and the digests of all five files are checked.
+    stall = false;
+    await page.click('[data-testid="laya-install"]');
+    await page.waitForSelector('[data-testid="setup-laya"][data-state="installed"]', { timeout: 30_000 });
+    assert.equal(laya.server.requests.filter(request => request.url.endsWith(LAYA_DATA)).at(-1).headers.range, `bytes=${kept}-`, 'resume asked for the rest only');
+    for (const file of laya.spec.files) {
+      assert.ok(readFileSync(path.join(layaDir, file.path)).equals(laya.files[file.path]), `${file.path} was kept with the right bytes`);
+    }
+    assert.equal(existsSync(partial), false, 'no partial file is left');
+    for (const request of laya.server.requests) assert.equal(request.headers.authorization, undefined, 'no token is sent');
+    assert.equal(await page.locator('[data-testid="setup-laya-skip"]').count(), 0);
+    await shot(page, '03e-setup-decision-model-installed');
+    log('decision-model download resumed, verified and installed');
+
+    await page.click('[data-testid="setup-next"]');
+    await page.waitForSelector('[data-testid="setup-step"][data-step="5"]');
+    assert.match(await page.textContent('[data-testid="setup-step"]'), /Decision modelInstalled, not used yet/);
     await page.click('[data-testid="setup-start-observing"]');
     await page.waitForSelector('[data-testid="app-shell"]', { timeout: 15_000 });
     log('setup finished, app shell visible');
@@ -248,6 +335,24 @@ async function main() {
     assert.notEqual(darkBackground, lightBackground, 'dark and light backgrounds differ');
     log('theme switches the palette');
 
+    // 6b. Settings lists the decision model with its state, and Remove deletes every file. The wizard's Skip then
+    // leaves it off, and nothing is requested.
+    await page.waitForSelector('[data-testid="settings-laya"][data-state="installed"]');
+    await page.click('[data-testid="settings-laya-remove"]');
+    await page.waitForSelector('[data-testid="settings-laya"][data-state="not_installed"]', { timeout: 15_000 });
+    assert.equal(existsSync(path.join(userDataDir, 'models', 'laya')), false, 'Remove deletes the whole decision-model folder');
+    const requestsBefore = laya.server.requests.length;
+    await page.click('[data-testid="settings-laya-setup"]');
+    await page.waitForSelector('[data-testid="setup-step"][data-step="4"]');
+    await page.waitForSelector('[data-testid="setup-laya"][data-state="not_installed"]');
+    await page.click('[data-testid="setup-laya-skip"]');
+    await page.waitForSelector('[data-testid="setup-step"][data-step="5"]');
+    assert.match(await page.textContent('[data-testid="setup-step"]'), /Decision modelNot installed, rules are used/);
+    await page.click('[data-testid="setup-close"]');
+    await page.waitForSelector('[data-testid="settings-laya"]');
+    assert.equal(laya.server.requests.length, requestsBefore, 'skipping requested nothing');
+    log('decision model removed from Settings, and Skip keeps the rules path');
+
     // 7. Suggestions: accept one, then dismiss another.
     await page.click('[data-testid="nav-suggestions"]');
     await page.waitForSelector('[data-testid="suggestion-card"]');
@@ -272,7 +377,7 @@ async function main() {
       assert.ok(bottom <= limit, `${selector} sits below the fold: bottom ${bottom}px of ${limit}px`);
     }
     await shot(page, '07-automation-detail-light');
-    for (const name of ['Autonomy', 'Delegate to agents', 'Workflow', 'Autonomy']) {
+    for (const name of ['Autonomy', 'Workflow', 'Autonomy']) {
       await selectTab(page, name);
       await noDocumentScroll(page, `automation ${name} tab`);
     }
@@ -285,6 +390,18 @@ async function main() {
     assert.match(ledgerText, /Model download/);
     assert.match(ledgerText, /verified/i);
     await shot(page, '08-ledger-light');
+    // The decision-model download wrote one entry per file, with the file name, the pinned commit in the path, and no token.
+    const network = await page.evaluate(async () => (await window.twin.status()).network);
+    const layaEntries = network.filter(entry => entry.modelId === 'laya-onnx');
+    assert.deepEqual(
+      [...new Set(layaEntries.map(entry => entry.file))].sort(),
+      laya.spec.files.map(file => file.path).sort(),
+      'every file of the bundle is in the ledger',
+    );
+    assert.ok(layaEntries.some(entry => entry.file === LAYA_DATA && entry.outcome === 'cancelled'), 'the cancelled attempt is recorded');
+    assert.ok(layaEntries.filter(entry => entry.outcome === 'ok').every(entry => entry.sha256Verified === true && entry.host === '127.0.0.1'));
+    assert.ok(layaEntries.every(entry => entry.path.includes(`/resolve/${LAYA_REVISION}/`)), 'the pinned commit is in every path');
+    assert.match(await page.textContent('[data-testid="view-ledger"]'), /127\.0\.0\.1 · laya\.onnx\.data/);
 
     // 10. Stop switch from the tray. The tray is a separate window; open it and press the button.
     const trayResult = await app.evaluate(({ BrowserWindow }) => {
@@ -352,14 +469,9 @@ async function main() {
 
     // 11. The window has one fixed size. Every main route holds the checks in responsiveProblems at 900x600, and the
     // window still reports that it cannot be resized, maximised or made full screen.
-    const ROUTES = ['overview', 'suggestions', 'automations', 'readiness', 'harness', 'ledger', 'settings'];
+    const ROUTES = ['overview', 'suggestions', 'automations', 'readiness', 'ledger', 'settings'];
     for (const route of ROUTES) {
-      if (route === 'harness') {
-        // The harness has no sidebar link any more; it opens from an automation. Its route still has to lay out.
-        await page.evaluate(() => { location.hash = '#/harness'; });
-      } else {
-        await page.click(`[data-testid="nav-${route}"]`);
-      }
+      await page.click(`[data-testid="nav-${route}"]`);
       await page.waitForTimeout(250);
       await noDocumentScroll(page, `${route} route`);
       const problems = await responsiveProblems(page);
@@ -386,9 +498,27 @@ async function main() {
       [],
       'no page errors or CSP violations',
     );
+    // 12. Delete everything removes the decision model too, even while a download of it is running. Install it again,
+    // stall the download, and delete. The native dialog and the relaunch are replaced, so the test can watch the result.
+    laya.server.rules.length = 0;
+    laya.server.rules.push(({ name }) => (name === LAYA_DATA ? { stallAt: 500_000 } : undefined));
+    await page.evaluate(() => window.twin.installLaya());
+    await waitForStatus(page, status => status.laya.status === 'downloading' && status.laya.receivedBytes > 300_000, { timeout: 20_000, label: 'second laya download' });
+    assert.ok(existsSync(path.join(layaDir, `${LAYA_DATA}.part`)), 'a partial download is on disk');
+    await app.evaluate(({ app: electronApp, dialog }) => {
+      dialog.showMessageBox = async () => ({ response: 0, checkboxChecked: false });
+      electronApp.relaunch = () => {};
+    });
+    const closed = new Promise(resolve => app.once('close', resolve));
+    await page.evaluate(() => window.twin.deleteAll()).catch(() => {});
+    await Promise.race([closed, new Promise(resolve => setTimeout(resolve, 30_000))]);
+    assert.equal(existsSync(path.join(userDataDir, 'models')), false, 'Delete everything removed the models folder, with the decision model and its partial file');
+    log('Delete everything removed the decision model and its partial download');
+
     log('all checks passed; screenshots in', SHOTS);
   } finally {
     await app.close().catch(() => {});
+    await laya.server.close();
   }
 }
 

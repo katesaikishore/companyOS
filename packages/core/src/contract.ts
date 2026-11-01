@@ -1,7 +1,7 @@
 import type { AutomationView } from './agent';
 import type { GateRequirement } from './autonomy';
 import type { EffectClass, TwinConfig, AutonomyLevel, WindowClass } from './types';
-import type { DownloadState, HardwareProfile, InstalledModel, NetworkEntry, SetupPlan } from './models/types';
+import type { DownloadState, HardwareProfile, InstalledModel, LayaBundleView, NetworkEntry, SetupPlan } from './models/types';
 import type { RunResult } from './runner';
 
 /**
@@ -73,19 +73,6 @@ export interface PendingRunView {
   app: string;
   createdAt: number;
   expiresAt: number;
-}
-
-/** Sanitized result from an explicitly approved OpenMausBot handoff. */
-export interface AgentDelegationResult {
-  state: 'completed' | 'idle' | 'needs-input' | 'failed' | 'stalled' | 'timed-out' | 'cancelled';
-  summary: string;
-  threadId?: string;
-  /** The harness job tree only; transcripts and screenshots are never passed to the renderer. */
-  taskTree?: string;
-  /** True when companyOS wrote the summary, not OpenMausBot, because the CLI gave no reply. */
-  localFailure?: boolean;
-  /** True when the person clicked Cancel on the confirmation. The state is then "cancelled" too. */
-  cancelledByPerson?: boolean;
 }
 
 /** How one app's switches fall across the three groups. The badge on each row reads this. */
@@ -206,30 +193,6 @@ export type HabitsView =
       stretchMinutes: StretchMinutesView[];
     };
 
-/** A routine handed to OpenMausBot. It is kept on this device, so its result survives a restart. */
-export interface HandoffView {
-  id: string;
-  automationId: string;
-  routineName: string;
-  /** The lead bot or room the handoff was sent to. */
-  target: string;
-  /** The outcome the person described. */
-  brief: string;
-  /** The app names the prompt carried, in order. No activity history. */
-  apps: string[];
-  /** Estimated occurrences per week, as the prompt carried it. */
-  cadencePerWeek?: number;
-  sentAt: number;
-  /** "sending" while the CLI runs. "unknown" when the handoff closed without a reply, so the job may already exist. */
-  state: AgentDelegationResult['state'] | 'sending' | 'unknown';
-  summary: string;
-  threadId?: string;
-  /** The harness job tree, as sanitised JSON text. */
-  taskTree?: string;
-  /** True when companyOS wrote the summary, not OpenMausBot. The summary is then companyOS's message, not a reply. */
-  localFailure: boolean;
-}
-
 export interface TwinStatus {
   capture: { state: 'capturing' | 'paused' | 'idle' | 'locked' | 'unsupported'; detail: string };
   /** Whether browser capture can run on this system. The browser bridge is available on macOS and Linux only. */
@@ -249,14 +212,14 @@ export interface TwinStatus {
   retentionDays: number;
   stats: StatsView;
   downloads: DownloadState[];
+  /** The optional decision-model bundle. Nothing in the app uses it yet. */
+  laya: LayaBundleView;
   /** Offers waiting for an answer. Expired offers are removed. */
   pendingRuns: PendingRunView[];
   /** How much of each app's repeated work could run on its own, over the last seven days. */
   readiness: AppReadinessView;
   /** How the person usually works, over the last four weeks. Rebuilt from the stored events on each read. */
   habits: HabitsView;
-  /** Handoffs sent to OpenMausBot, newest first. */
-  handoffs: HandoffView[];
 }
 
 /** Everything a page may ask of the main process. Each call is validated there. */
@@ -267,6 +230,12 @@ export interface TwinBridge {
   installModel(modelId: string): Promise<void>;
   cancelDownload(modelId: string): Promise<void>;
   removeModel(modelId: string): Promise<void>;
+  /** Starts or resumes the optional decision-model download. Progress arrives through status().laya. */
+  installLaya(): Promise<void>;
+  /** Stops the download. What was already downloaded stays, so installLaya() continues from there. */
+  cancelLaya(): Promise<void>;
+  /** Deletes the bundle and any partial download. */
+  removeLaya(): Promise<void>;
   completeSetup(): Promise<void>;
 
   setPaused(paused: boolean): Promise<void>;
@@ -282,8 +251,6 @@ export interface TwinBridge {
   revertLast(automationId: string): Promise<AutomationView>;
   /** Answers an offer. `run: true` starts a supervised run, where each external step still asks. */
   answerPendingRun(id: string, run: boolean): Promise<void>;
-  /** Starts a multi-agent job for an accepted routine after a native data-sharing confirmation. */
-  delegateRoutine(automationId: string, taskBrief: string): Promise<AgentDelegationResult>;
 
   exportData(): Promise<string>;
   deleteAll(): Promise<void>;
@@ -294,4 +261,4 @@ export interface TwinBridge {
   onNavigate(listener: (route: string) => void): () => void;
 }
 
-export type { InstalledModel, DownloadState, HardwareProfile, SetupPlan, NetworkEntry };
+export type { InstalledModel, DownloadState, HardwareProfile, SetupPlan, NetworkEntry, LayaBundleView };

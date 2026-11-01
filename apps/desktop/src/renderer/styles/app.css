@@ -103,13 +103,6 @@ a {
   --tone-ink: var(--purple-ink);
 }
 
-.tone-indigo {
-  --tone: var(--indigo);
-  --tone-hi: var(--indigo-hi);
-  --tone-soft: var(--indigo-soft);
-  --tone-ink: var(--indigo-ink);
-}
-
 .tone-cyan {
   --tone: var(--cyan);
   --tone-hi: var(--cyan-hi);
@@ -117,18 +110,53 @@ a {
   --tone-ink: var(--cyan-ink);
 }
 
-.tone-berry {
-  --tone: var(--berry);
-  --tone-hi: var(--berry-hi);
-  --tone-soft: var(--berry-soft);
-  --tone-ink: var(--berry-ink);
-}
-
 .tone-steel {
   --tone: var(--steel);
   --tone-hi: var(--steel-hi);
   --tone-soft: var(--steel-soft);
   --tone-ink: var(--steel-ink);
+}
+
+/* App colours. An app-<name> class sets --app, and an app's letter mark fills with it. */
+
+.app-excel {
+  --app: var(--app-excel);
+}
+
+.app-word {
+  --app: var(--app-word);
+}
+
+.app-outlook {
+  --app: var(--app-outlook);
+}
+
+.app-powerpoint {
+  --app: var(--app-powerpoint);
+}
+
+.app-teams {
+  --app: var(--app-teams);
+}
+
+.app-onenote {
+  --app: var(--app-onenote);
+}
+
+.app-code {
+  --app: var(--app-code);
+}
+
+.app-slack {
+  --app: var(--app-slack);
+}
+
+.app-figma {
+  --app: var(--app-figma);
+}
+
+.app-other {
+  --app: var(--app-other);
 }
 
 .stack {
@@ -1595,41 +1623,6 @@ a {
   color: var(--ink);
   font: inherit;
   font-size: 14px;
-}
-
-.task-brief {
-  width: 100%;
-  min-height: 96px;
-  padding: 10px 12px;
-  resize: vertical;
-  line-height: 1.5;
-}
-
-.agent-task-result {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
-}
-
-.agent-task-result p {
-  margin: 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.agent-task-tree summary {
-  width: fit-content;
-  color: var(--accent);
-  cursor: pointer;
-  font-size: 13px;
-}
-
-.agent-task-tree .code-block {
-  max-height: 360px;
-  margin: 10px 0 0;
-  overflow: auto;
 }
 
 .model-list {

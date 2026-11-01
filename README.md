@@ -5,6 +5,10 @@ spreadsheet, then a document, then an editor, and offers to run that sequence fo
 draft. You run it with your approval, and it runs on its own only after it has earned that. Your activity is stored
 encrypted on your device. This is an early preview.
 
+[![A one-minute tour of companyOS Twin: the overview, a suggested routine, the autonomy ladder, app readiness, the network ledger and dark mode](docs/companyos-twin-film-poster.jpg)](docs/companyos-twin-film.mp4)
+
+A one-minute tour of the app, without sound, recorded with synthetic activity. Select the image to open the video.
+
 ![The companyOS Twin overview on a fixed 900 by 600 window, with synthetic activity](docs-site/images/overview.png)
 
 Documentation lives in [`docs-site`](docs-site), a Mintlify site that builds and validates locally. Publishing it needs
@@ -26,33 +30,45 @@ the owner's Mintlify account.
 - **Capture.** Reads the app in front on macOS, Windows and Linux X11, with pause, idle detection, an exclusion list,
   and a pause while the screen is locked. Browser capture is off by default. It works on macOS and Linux only, for
   Chrome and Edge, and it never reports incognito windows.
-- **Store.** Encrypted at rest. Raw events and handoffs are kept for 90 days. Export writes a plain file after a
-  warning. Delete everything removes the database, the data key and the installed models.
+- **Store.** Encrypted at rest. Raw events and handoff records from earlier versions are kept for 90 days. Export
+  writes a plain file after a warning. Delete everything removes the database, the data key and the installed models.
 - **Routines and automations.** Repeated sequences on at least three different days are suggested. An accepted routine
   becomes a draft that can be dry-run. At level 3 you start each run, from the tray offer or with Run now. At level 4,
   with the unattended switch on, a routine of local, reversible steps can run when its app comes to the front. A
   promotion gate and demotion after a failed or undone run keep that honest.
 - **App readiness.** For each app, the share of its switches in the last seven days that could run on their own,
   worked out by fixed rules.
-- **OpenMausBot handoffs.** Sent after a native confirmation. Each one, with its replies and job tree, opens from its automation.
 - **Window.** The main window is a fixed 900 by 600. It cannot be resized, maximised or made full screen, and zoom is off, so the layout is designed for that one size. The sidebar stays in place, and the page column scrolls inside the window.
 
 ## Not done yet
 
-- **Model use** stops at naming. Routine detection, labels, policy and safety checks are rule-based. The embedding
-  model is downloaded but never loaded. Naming with a real chat model has not been checked, because the tests use a fake
-  worker.
+- **Model use** stops at naming. Routine detection, labels, policy and safety checks are rule-based. Naming has been run
+  with a real chat model (Qwen3 0.6B, Linux CPU, outside Electron). It works, but the names are poor: about a quarter are
+  rejected, and most of the rest are one word. Larger models, Electron, macOS and Windows were not tried. The embedding
+  model loads and gives sensible vectors in an opt-in check, but nothing in the app uses it. Setup offers an optional
+  Laya decision model (about 1.7 GB, checked against pinned SHA-256 digests). This version only downloads it. Nothing
+  uses it yet.
 - **Steps** are limited. Focusing an app and checking focus work wherever app capture works. Opening a link or a file
-  works on macOS and Windows only, and a file asks each time. Pressing a shortcut works on macOS, on Windows and on X11
-  through xdotool. It brings the app forward and sends nothing unless the app is in front. Wayland blocks it.
-  Typing, clicking and sending are not built. Level 5 is not built.
-- **Platforms.** Wayland has no app capture, and Linux cannot open links or files. Windows has no browser capture.
+  works on macOS, Windows and Linux X11 (where `gio` is installed), and a file asks each time. The Linux adapter has run
+  only with stand-in apps. Pressing a shortcut works on macOS and Windows and, on X11, through xdotool. It brings the app
+  forward and sends nothing unless the app is in front. Wayland blocks it. The macOS and Windows adapters ran on
+  GitHub-hosted macOS 26 and Windows Server 2025 machines, where focus, key presses and file open worked. Permission
+  prompts and a non-elevated Windows user are not verified. See
+  [`docs/research/adapter-smoke-results.md`](docs/research/adapter-smoke-results.md). An optional agent-desktop "hands"
+  executor can run focus steps everywhere and key steps on macOS and Windows. It is off by default, it needs a program
+  path set in Settings, and the program is not bundled.
+  Typing, clicking and sending are not built. A design is in
+  [`docs/research/input-steps-proposal.md`](docs/research/input-steps-proposal.md). Level 5 is not built.
+- **Platforms.** Wayland has no app capture. Windows has no browser capture.
   Intel Macs are not supported by the current builds, which are for Apple silicon.
 - **Signing.** Release builds are checked for a Developer ID signature and notarisation, but no certificate has been
   used yet. Windows installers are unsigned, so SmartScreen warns about them.
-- **Updates.** Auto-update checks run only when `COMPANYOS_UPDATE_URL` is set to an HTTPS feed. No feed exists yet.
+- **Updates.** Auto-update checks run only when `COMPANYOS_UPDATE_URL` is set to an HTTPS feed. No feed exists yet. After
+  the first release it can be `https://github.com/katesaikishore/companyOS/releases/latest/download`.
 - **Company mode** is not built. `packages/core/src/company` holds only the aggregate release arithmetic.
-- **Releases** are built by CI and uploaded as artifacts. Creating the GitHub Release from them is not automated yet.
+- **Releases.** Pushing a version tag builds the installers on macOS, Windows and Linux and creates a draft GitHub
+  Release from them. A person reviews the draft and publishes it by hand. No tag has been pushed yet, so no release
+  exists. The macOS job fails until the signing and notarisation secrets are added, and then no draft is created.
 
 ## Install
 
@@ -100,17 +116,19 @@ NODE_PATH=$(npm root)/node_modules node apps/desktop/test/e2e.cjs
 
 ## Privacy in short
 
-Activity stays on this device. The only calls the app makes are the ones listed in the network ledger: approved
-OpenMausBot handoffs, model downloads from Hugging Face hosts, and update checks when an update feed is set. The
-[privacy page](docs-site/privacy.mdx) lists them in full.
+Activity stays on this device. The only calls the app makes are the ones listed in the network ledger: model downloads
+from Hugging Face hosts, and update checks when an update feed is set. The [privacy page](docs-site/privacy.mdx) lists
+them in full.
 
 ## Releases
 
 A release is a version tag that matches `apps/desktop/package.json`, for example `v0.1.0`. Pushing it starts
-`.github/workflows/release.yml`, which builds on Ubuntu, macOS and Windows. A macOS release needs these repository
-secrets, and it fails without them: `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_API_KEY_P8`, `APPLE_API_KEY_ID` and
-`APPLE_API_ISSUER`. Windows signing, `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD`, is optional. The
-[releasing page](docs-site/releasing.mdx) explains each step.
+`.github/workflows/release.yml`, which builds the installers on Ubuntu, macOS and Windows and then creates a draft
+GitHub Release from them. Nothing is published automatically: review the draft and publish it by hand. A macOS release
+needs these repository secrets, and its job fails without them, so no draft is created: `CSC_LINK`, `CSC_KEY_PASSWORD`,
+`APPLE_API_KEY_P8`, `APPLE_API_KEY_ID` and `APPLE_API_ISSUER`. Windows signing, `WIN_CSC_LINK` and
+`WIN_CSC_KEY_PASSWORD`, is optional. The [releasing page](docs-site/releasing.mdx) has the checklist for the first
+release and the update feed recipe.
 
 ## More
 
@@ -119,3 +137,7 @@ secrets, and it fails without them: `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_API_K
   MVP, so check this README for the current status first.
 - [`docs/research/`](docs/research/): research notes on automation and autonomy, OS capture, prior art, privacy and
   law, and understanding and ML.
+
+## License
+
+companyOS is licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).

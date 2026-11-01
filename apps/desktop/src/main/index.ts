@@ -30,14 +30,8 @@ import {
 } from '@companyos/twin-core';
 import { APP_ORIGIN, IPC } from '../shared/ipc';
 import { SecureStorageUnavailableError } from './keys';
+import { readLayaFixture } from './laya';
 import { nativeHostScript } from './native-host-install';
-import {
-  buildOpenMausBotPrompt,
-  checkOpenMausBotSettings,
-  MAX_TASK_BRIEF,
-  openMausBotCommandProblem,
-  openMausBotTargetProblem,
-} from './openmausbot';
 import { TwinRuntime } from './runtime';
 import { startAutoUpdates } from './updater';
 
@@ -100,6 +94,9 @@ function registerIpc(): void {
   handle(IPC.installModel, id => requireRuntime().installModel(modelId(id)));
   handle(IPC.cancelDownload, id => requireRuntime().cancelDownload(modelId(id)));
   handle(IPC.removeModel, id => requireRuntime().removeModel(modelId(id)));
+  handle(IPC.installLaya, () => requireRuntime().installLaya());
+  handle(IPC.cancelLaya, () => requireRuntime().cancelLaya());
+  handle(IPC.removeLaya, () => requireRuntime().removeLaya());
   handle(IPC.completeSetup, () => requireRuntime().completeSetup());
 
   handle(IPC.setPaused, value => {
@@ -109,10 +106,7 @@ function registerIpc(): void {
     rebuildTrayMenu();
   });
 
-  handle(IPC.updateConfig, patch => {
-    checkOpenMausBotSettings(patch);
-    return requireRuntime().updateConfig(TwinConfigSchema.partial().parse(patch));
-  });
+  handle(IPC.updateConfig, patch => requireRuntime().updateConfig(TwinConfigSchema.partial().parse(patch)));
   handle(IPC.stopAllAutomations, () => stopAllAutomations());
 
   handle(IPC.acceptRoutine, (id, name) =>
@@ -130,38 +124,6 @@ function registerIpc(): void {
     await requireRuntime().answerPendingRun(offer, run);
     if (!requireRuntime().hasPendingOffers()) hideTray();
   });
-  handle(IPC.delegateRoutine, async (id, brief) => {
-    const automation = automationId(id);
-    const briefError = `Describe the task in 1–${MAX_TASK_BRIEF} characters.`;
-    if (typeof brief !== 'string' || brief.length > MAX_TASK_BRIEF || /[\u0000-\u0008\u000b-\u001f\u007f]/.test(brief)) {
-      throw new Error(briefError);
-    }
-    const taskBrief = brief.trim();
-    if (!taskBrief) throw new Error(briefError);
-
-    const status = requireRuntime().status();
-    const selected = status.automations.find(view => view.automation.id === automation)?.automation;
-    if (!selected) throw new Error('Unknown automation.');
-    // The same checks the send applies, made before the person is asked, so a confirmation never leads to an error.
-    const problem = openMausBotCommandProblem(status.config.openMausBotCommand) ?? openMausBotTargetProblem(status.config.openMausBotTarget);
-    if (problem) throw new Error(problem);
-    const command = status.config.openMausBotCommand.trim();
-    const target = status.config.openMausBotTarget.trim();
-    const prompt = buildOpenMausBotPrompt(selected, taskBrief);
-    const confirmation: MessageBoxOptions = {
-      type: 'warning',
-      buttons: ['Send task', 'Cancel'],
-      defaultId: 1,
-      cancelId: 1,
-      message: `Send this task to OpenMausBot (${target})?`,
-      detail: `Runs: ${command} run ${target}\n\n${prompt}\n\nOpenMausBot uses its own configured models, connected apps and account credentials. companyOS autonomy settings do not control its agents. The prompt does not include activity history, screenshots, window contents or companyOS credentials.`,
-    };
-    const parent = parentWindow();
-    const confirmed = parent ? await dialog.showMessageBox(parent, confirmation) : await dialog.showMessageBox(confirmation);
-    if (confirmed.response !== 0) return { state: 'cancelled', summary: 'The handoff was cancelled.', cancelledByPerson: true };
-    return requireRuntime().delegateRoutine(automation, taskBrief);
-  });
-
   handle(IPC.openMainWindow, route => {
     if (route !== undefined && (typeof route !== 'string' || !/^#\/[a-z0-9/-]{0,80}$/.test(route))) {
       throw new Error('Invalid route.');
@@ -178,7 +140,7 @@ function registerIpc(): void {
       defaultId: 1,
       cancelId: 1,
       message: 'The export is not encrypted',
-      detail: 'It includes every recorded app switch with timestamps, URL shapes, your settings, your OpenMausBot handoffs (briefs, replies, job trees, thread ids), and any configured OpenMausBot executable and target. Keep it somewhere private, and do not put it in a synced folder.',
+      detail: 'It includes every recorded app switch with timestamps, URL shapes, your settings, any agent-desktop program path, and any handoff records saved by an earlier version, with their replies. Keep it somewhere private, and do not put it in a synced folder.',
     };
     const parent = parentWindow();
     const warned = parent ? await dialog.showMessageBox(parent, warning) : await dialog.showMessageBox(warning);
@@ -202,7 +164,7 @@ function registerIpc(): void {
       defaultId: 1,
       cancelId: 1,
       message: 'Delete everything the twin knows about you?',
-      detail: 'This removes all events, automations, the network ledger, OpenMausBot handoffs (briefs, replies, job trees, thread ids) and the installed models on this device. It cannot be undone.',
+      detail: 'This removes all events, automations, the network ledger, any handoff records saved by an earlier version, and the installed models on this device, including the optional decision model and any partial download of it. It cannot be undone.',
     };
     const parent = parentWindow();
     const choice = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
@@ -419,6 +381,8 @@ async function boot(): Promise<void> {
     runtime = await TwinRuntime.create({
       userData,
       browserHostScript: nativeHostScript({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, mainDir: __dirname }),
+      // Test-only, and ignored in a packaged build: a local server stands in for Hugging Face in the end-to-end test.
+      laya: !app.isPackaged && process.env.COMPANYOS_TEST_LAYA_FIXTURE ? readLayaFixture(process.env.COMPANYOS_TEST_LAYA_FIXTURE) : undefined,
       approve: approveStep,
       // The test platform has no real input device, so idle time is pinned to zero for it.
       idleSeconds: () => (process.env.COMPANYOS_TEST_FAKE_PLATFORM ? 0 : powerMonitor.getSystemIdleTime()),

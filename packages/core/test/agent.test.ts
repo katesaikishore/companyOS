@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { RETENTION_DAYS, TwinAgent, mineRoutines, normalizeSignal, segment, type Executor, type HandoffView, type TwinEvent } from '../src';
+import { DEFAULT_CONFIG, EncryptedStore, RETENTION_DAYS, TwinAgent, mineRoutines, normalizeSignal, segment, type Executor, type TwinEvent } from '../src';
 import { SECRET_QUERY, at, workdays } from './fixtures';
 
 const DAY = 86_400_000;
@@ -124,34 +124,70 @@ describe('persistence and retention', () => {
     expect(kept.every(event => event.ts >= at(9, 0))).toBe(true);
   });
 
-  it('prunes handoffs past the same window by send time, and a read still returns at most 100', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'twin-handoff-prune-'));
+  it('prunes handoff records from earlier versions past 90 days, and keeps the newer one as stored in the export', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'twin-handoff-retention-'));
     const key = randomBytes(32);
-    const sentAt = at(0, 9);
-    const agent = openAgent(dir, key, sentAt);
-    const handoffSentAt = (id: string, time: number): HandoffView => ({
+    const now = at(0, 9);
+    const handoff = (id: string, sentAt: number) => ({
       id,
       automationId: 'auto_0123456789ab',
       routineName: 'Invoice follow-up',
       target: 'Lead Bot',
       brief: 'Summarise the follow-ups',
       apps: ['Slack'],
-      sentAt: time,
+      sentAt,
       state: 'completed',
       summary: 'Done.',
       localFailure: false,
     });
-    for (let index = 0; index < 3; index++) agent.recordHandoff(handoffSentAt(`old-${index}`, sentAt - (RETENTION_DAYS + 10) * DAY + index));
-    for (let index = 0; index < 101; index++) agent.recordHandoff(handoffSentAt(`new-${index}`, sentAt - DAY + index));
+    const old = handoff('old', now - (RETENTION_DAYS + 1) * DAY);
+    const recent = handoff('recent', now - 2 * DAY);
+    const store = new EncryptedStore(dir, key);
+    store.append('handoffs', old);
+    store.append('handoffs', recent);
+    store.close();
+
+    const later = openAgent(dir, key, now);
+    expect(later.prune()).toBe(1);
+    expect((later.exportAll() as { handoffs: unknown[] }).handoffs).toEqual([recent]);
+    later.close();
+  });
+
+  it('removes a handoff row with no readable send time, since it cannot be aged past the window', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'twin-handoff-undated-'));
+    const key = randomBytes(32);
+    const now = at(0, 9);
+    const undated = { id: 'undated', summary: 'Done.' };
+    const store = new EncryptedStore(dir, key);
+    store.append('handoffs', undated);
+    store.close();
+
+    const later = openAgent(dir, key, now + (RETENTION_DAYS + 10) * DAY);
+    expect(later.prune()).toBe(1);
+    expect((later.exportAll() as { handoffs: unknown[] }).handoffs).toEqual([]);
+    later.close();
+  });
+
+  it('drops the retired OpenMausBot keys from a saved config on the next save', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'twin-config-retired-'));
+    const key = randomBytes(32);
+    const store = new EncryptedStore(dir, key);
+    store.replaceAll('settings', [{ ...DEFAULT_CONFIG, openMausBotCommand: 'openmausbot', openMausBotTarget: 'Lead Bot' }]);
+    store.close();
+
+    // The saved config still holds the retired keys, so it must open and still be usable.
+    const agent = openAgent(dir, key, at(0, 9));
+    expect(agent.configuration).not.toHaveProperty('openMausBotTarget');
+    agent.updateConfig({ theme: 'dark' });
     agent.close();
 
-    const later = openAgent(dir, key, sentAt + 5 * DAY);
-    expect(later.prune()).toBe(3);
-    const read = later.handoffs();
-    expect(read).toHaveLength(100);
-    expect(read.every(item => item.id.startsWith('new-'))).toBe(true);
-    expect((later.exportAll() as { handoffs: HandoffView[] }).handoffs).toHaveLength(101);
-    later.close();
+    const reread = new EncryptedStore(dir, key);
+    const saved = reread.readAll<Record<string, unknown>>('settings');
+    reread.close();
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({ theme: 'dark' });
+    expect(saved[0]).not.toHaveProperty('openMausBotCommand');
+    expect(saved[0]).not.toHaveProperty('openMausBotTarget');
   });
 });
 

@@ -14,7 +14,7 @@ import {
   summaryLine,
 } from '../overview-model.js';
 import { call, pending } from '../store.js';
-import { appTone, type Tone } from '../tones.js';
+import { appColour, type Tone } from '../tones.js';
 
 /** Apps shown as overlapping marks before the rest collapse into a count. */
 const MARKS_SHOWN = 3;
@@ -261,7 +261,7 @@ function waitingRow(item: SuggestionView): HTMLElement {
     h(
       'span',
       { class: 'ov-app-marks', 'aria-hidden': 'true' },
-      ...apps.slice(0, MARKS_SHOWN).map(app => h('span', { class: `ov-app-mark tone-${appTone(app)}` }, app.charAt(0))),
+      ...apps.slice(0, MARKS_SHOWN).map(app => h('span', { class: `ov-app-mark app-${appColour(app)}` }, app.charAt(0))),
       hidden > 0 ? h('span', { class: 'ov-app-more mono' }, `+${hidden}`) : undefined,
     ),
     h(
@@ -407,7 +407,6 @@ function heatmapPanel(activity: number[][]): HTMLElement {
 }
 
 function devicePanel(status: TwinStatus, callsThisWeek: number): HTMLElement {
-  const handoffs = status.handoffs.length;
   return h(
     'section',
     { class: 'ov-card ov-device', 'data-testid': 'overview-device', 'aria-labelledby': 'device-title' },
@@ -427,9 +426,7 @@ function devicePanel(status: TwinStatus, callsThisWeek: number): HTMLElement {
       deviceFact('Network calls this week', h('a', { href: '#/ledger' }, String(callsThisWeek))),
       deviceFact(
         'Sent outside this device',
-        handoffs === 0
-          ? 'Only model and update requests, which carry no activity.'
-          : `${plural(handoffs, 'approved handoff', 'approved handoffs')} to OpenMausBot. Model and update requests carry no activity.`,
+        'Only model and update requests, which carry no activity.',
         true,
       ),
     ),

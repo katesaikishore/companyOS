@@ -286,7 +286,7 @@
   width: 28px;
   height: 28px;
   border-radius: 8px;
-  background: linear-gradient(135deg, var(--tone-hi), var(--tone));
+  background: var(--app);
   color: var(--on-tone);
   font-size: 12px;
   font-weight: 600;

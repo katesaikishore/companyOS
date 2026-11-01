@@ -1,15 +1,17 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import {
   isShellApp,
   macKeyStroke,
   openableFilePath,
   parseWebAddress,
+  StepRefusedError,
   windowsSendKeys,
   xdotoolChord,
   type Executor,
   type FileStat,
 } from '@companyos/twin-core';
+import { loadDesktopEntries, resolveDesktopEntry, type OpenNeed } from './linux-open';
 
 /**
  * Per-OS access to the frontmost application and to focusing one. This is the only place that
@@ -151,10 +153,23 @@ $processId = [uint32]0
 (Get-Process -Id $processId -ErrorAction SilentlyContinue).ProcessName
 `;
 
-const WIN_FOCUS = `
+/**
+ * Brings the app forward. AppActivate does not restore a minimized window: on a hosted Windows runner it returned false
+ * every time for a minimized Notepad. So when the first AppActivate fails, a minimized window is restored and AppActivate
+ * is tried once more. A window that is not minimized is never touched. Exit codes: 2 not running, 3 not activated.
+ */
+export const WIN_FOCUS = `
 $process = Get-Process -Name $env:TWIN_APP -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
 if (-not $process) { exit 2 }
 $shell = New-Object -ComObject WScript.Shell
+if ($shell.AppActivate($process.Id)) { 'ok'; exit 0 }
+Add-Type -Namespace Twin -Name Restore -MemberDefinition @'
+[DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
+[DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+'@
+if (-not [Twin.Restore]::IsIconic($process.MainWindowHandle)) { exit 3 }
+[void][Twin.Restore]::ShowWindowAsync($process.MainWindowHandle, 9)
+Start-Sleep -Milliseconds 300
 if ($shell.AppActivate($process.Id)) { 'ok' } else { exit 3 }
 `;
 
@@ -167,20 +182,27 @@ Start-Process -FilePath $env:TWIN_APP -ArgumentList ('"' + $env:TWIN_TARGET + '"
 
 /**
  * Activates the app, waits until its window is the foreground window, and only then sends the keys. The keys come from
- * the environment as a SendKeys string built from the checked chord. Exit codes: 2 not running, 3 not activated,
- * 4 never in front.
+ * the environment as a SendKeys string built from the checked chord. A minimized window is restored when the first
+ * activation fails, as in WIN_FOCUS. Exit codes: 2 not running, 3 not activated, 4 never in front.
  */
-const WIN_PRESS = `
+export const WIN_PRESS = `
 $ErrorActionPreference = 'Stop'
 $process = Get-Process -Name $env:TWIN_APP -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
 if (-not $process) { exit 2 }
 Add-Type -Namespace Twin -Name Keys -MemberDefinition @'
 [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
 [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+[DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
+[DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
 '@
 Add-Type -AssemblyName System.Windows.Forms
 $shell = New-Object -ComObject WScript.Shell
-if (-not $shell.AppActivate($process.Id)) { exit 3 }
+if (-not $shell.AppActivate($process.Id)) {
+  if (-not [Twin.Keys]::IsIconic($process.MainWindowHandle)) { exit 3 }
+  [void][Twin.Keys]::ShowWindowAsync($process.MainWindowHandle, 9)
+  Start-Sleep -Milliseconds 300
+  if (-not $shell.AppActivate($process.Id)) { exit 3 }
+}
 $inFront = $false
 for ($attempt = 0; $attempt -lt 10; $attempt++) {
   $foreground = [uint32]0
@@ -199,9 +221,19 @@ function encode(script: string): string {
 
 const POWERSHELL = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand'];
 
+/**
+ * The program name that Start-Process is given. The shell looks a bare name up on PATH and accepts a file with no
+ * extension. Git for Windows puts a file named "notepad" with no extension in its usr\bin folder, and on a hosted runner
+ * the shell picked it instead of notepad.exe: it showed its "Select an app to open" picker and opened nothing. Adding
+ * ".exe" makes the shell look for the program only. A name that already has an extension, or that has a path, is not changed.
+ */
+export function windowsProgram(app: string): string {
+  return /[\\/:]/.test(app) || /\.[A-Za-z0-9]{1,5}$/.test(app) ? app : `${app}.exe`;
+}
+
 /** The target goes through the environment, never the script text, so a name or path cannot change the command. */
 async function openWindows(app: string, target: string): Promise<boolean> {
-  const env = { ...process.env, TWIN_APP: app, TWIN_TARGET: target };
+  const env = { ...process.env, TWIN_APP: windowsProgram(app), TWIN_TARGET: target };
   try {
     return (await run('powershell.exe', [...POWERSHELL, encode(WIN_OPEN)], env)) === 'ok';
   } catch {
@@ -277,6 +309,16 @@ export function wmClassName(line: string): string | undefined {
   return Buffer.from(bytes).toString('utf8') || undefined;
 }
 
+/** Asks the window manager to bring the app's visible windows forward. False when it has none or the call fails. */
+async function activateX11(app: string, timeoutMs = 4000): Promise<boolean> {
+  try {
+    await run('xdotool', ['search', '--onlyvisible', '--class', `^${escapeRegex(app)}$`, 'windowactivate', '--sync'], undefined, timeoutMs);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const linuxX11: Platform = {
   name: 'linux-x11',
   pollMs: 3000,
@@ -292,12 +334,7 @@ const linuxX11: Platform = {
     }
   },
   async focus(app) {
-    try {
-      await run('xdotool', ['search', '--onlyvisible', '--class', `^${escapeRegex(app)}$`, 'windowactivate', '--sync']);
-      return true;
-    } catch {
-      return false;
-    }
+    return activateX11(app);
   },
   /**
    * Brings the app forward, then checks that the active window is one of that app's windows before it sends the keys. If
@@ -321,6 +358,96 @@ const linuxX11: Platform = {
   },
 };
 
+/** How long `gio launch` may run before it is stopped. It hands the app over and exits, so a normal call takes milliseconds. */
+const LAUNCH_TIMEOUT_MS = 8000;
+/**
+ * After a launch, the app is asked to come forward up to this many times, so a window that opens late is still caught. The
+ * whole effort stops at the budget, because a window manager that refuses can leave one request waiting until it times out.
+ */
+const FORWARD_ATTEMPTS = 6;
+const FORWARD_DELAY_MS = 250;
+const FORWARD_BUDGET_MS = 4000;
+const FORWARD_CALL_MS = 2000;
+
+/**
+ * Starts a program with an argument array, no shell and none of its standard streams, and reports whether it exited with
+ * status 0 within the time limit. A program that is still running at the limit is killed by its process ID. The streams are
+ * closed on purpose. The program hands the target to an app and exits, and an app that inherited a pipe would hold it open
+ * for as long as it runs. A call that waits for its pipes, such as execFile, would then not return until the app quit. Its
+ * output and any error text are not kept.
+ */
+export function launchDetached(file: string, args: readonly string[], timeoutMs = LAUNCH_TIMEOUT_MS): Promise<boolean> {
+  return new Promise(resolve => {
+    let timer: NodeJS.Timeout | undefined;
+    let settled = false;
+    const finish = (ok: boolean): void => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve(ok);
+    };
+    try {
+      const child = spawn(file, [...args], { stdio: 'ignore', windowsHide: true, env: process.env });
+      timer = setTimeout(() => {
+        child.kill('SIGKILL');
+        finish(false);
+      }, timeoutMs);
+      child.once('error', () => finish(false));
+      child.once('exit', code => finish(code === 0));
+    } catch {
+      finish(false);
+    }
+  });
+}
+
+/** Asks for the app to come forward a few times, because its window may not exist yet. It never fails: the runner checks the result. */
+async function bringForward(app: string): Promise<void> {
+  const deadline = Date.now() + FORWARD_BUDGET_MS;
+  for (let attempt = 0; attempt < FORWARD_ATTEMPTS && Date.now() < deadline; attempt++) {
+    if (await activateX11(app, Math.min(FORWARD_CALL_MS, deadline - Date.now()))) return;
+    await new Promise(resolve => setTimeout(resolve, FORWARD_DELAY_MS));
+  }
+}
+
+/** Why a link or file was not opened, in words safe to show. None of them carries the app name, a path or an address. */
+const OPEN_REFUSALS = {
+  not_found: 'No installed application matches that name. Use the name its window has, or its name in the application menu.',
+  ambiguous: 'More than one installed application matches that name, so nothing was opened.',
+  cannot_open_url: 'That application does not take a web address.',
+  cannot_open_file: 'That application does not take a file.',
+} as const;
+
+/**
+ * Opens one checked target in the named app on Linux. The name is resolved to one desktop entry that can take the
+ * target, and that entry's file is launched with the target as its only argument. An app that cannot be resolved is
+ * refused and nothing is launched. After the launch the app is asked to come forward, since the window manager may not do it
+ * for a window it did not see a user ask for. The runner then checks that the app is in front.
+ */
+async function openOnLinux(app: string, need: OpenNeed, target: string): Promise<boolean> {
+  const resolved = resolveDesktopEntry(app, loadDesktopEntries(), need);
+  if (!resolved.ok) {
+    throw new StepRefusedError(
+      resolved.reason === 'cannot_open' ? OPEN_REFUSALS[need.kind === 'url' ? 'cannot_open_url' : 'cannot_open_file'] : OPEN_REFUSALS[resolved.reason],
+    );
+  }
+  if (!(await launchDetached('gio', ['launch', resolved.entry.file, target]))) return false;
+  await bringForward(app);
+  return true;
+}
+
+const linuxOpenSteps: Required<Pick<Platform, 'openUrl' | 'openFile'>> = {
+  async openUrl(app, url) {
+    const address = parseWebAddress(url);
+    if (!address) return false;
+    return openOnLinux(app, { kind: 'url', scheme: address.protocol === 'https:' ? 'https' : 'http' }, address.href);
+  },
+  async openFile(app, path) {
+    const file = openableFilePath(path, statFile);
+    if (!file || isShellApp(app)) return false;
+    return openOnLinux(app, { kind: 'file' }, file);
+  },
+};
+
 /** True when both X11 tools are installed: xdotool for windows and keys, and xprop (from x11-utils) for the class name. */
 async function hasX11Tools(): Promise<boolean> {
   try {
@@ -332,10 +459,21 @@ async function hasX11Tools(): Promise<boolean> {
   }
 }
 
+/** True when `gio launch` exists. It was added in GLib 2.50. The help call fails on a gio that does not have the command. */
+async function hasGioLaunch(): Promise<boolean> {
+  try {
+    await run('gio', ['help', 'launch']);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The runner's executor for one platform. An optional step is offered only where the adapter has it, so the runner
  * blocks the rest before anyone is asked. Pressing a shortcut is offered on macOS, on Windows and on X11 through xdotool.
- * Elsewhere, such as Wayland, the runner blocks that step before anyone is asked.
+ * Opening a link or a file is offered on macOS, on Windows and on X11 when gio is installed. Elsewhere, such as Wayland,
+ * the runner blocks those steps before anyone is asked.
  */
 export function executorFor(platform: Platform): Executor {
   return {
@@ -390,7 +528,12 @@ export async function choosePlatform(): Promise<PlatformChoice> {
       return { detail: 'Wayland: app capture needs a compositor extension and is not available yet.' };
     }
     if (!process.env.DISPLAY) return { detail: 'No display found.' };
-    if (await hasX11Tools()) return { platform: linuxX11, detail: 'X11 through xdotool and xprop' };
+    if (await hasX11Tools()) {
+      if (await hasGioLaunch()) {
+        return { platform: { ...linuxX11, ...linuxOpenSteps }, detail: 'X11 through xdotool and xprop. Links and files open through gio.' };
+      }
+      return { platform: linuxX11, detail: 'X11 through xdotool and xprop. Install gio (libglib2.0-bin) to open links and files.' };
+    }
     return { detail: 'Install xdotool and x11-utils (xprop) to enable app capture on X11.' };
   }
   return { detail: `Unsupported platform: ${process.platform}` };

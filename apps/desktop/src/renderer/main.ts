@@ -2,9 +2,8 @@ import type { TwinStatus } from '@companyos/twin-core';
 import { h, mount } from './dom.js';
 import { shell } from './components/shell.js';
 import { openCommandPalette } from './commands.js';
-import { modelFraction, modelStateLabel } from './labels.js';
+import { layaFraction, layaStateLabel, modelFraction, modelStateLabel } from './labels.js';
 import { automationDetailView, automationsView } from './views/automations.js';
-import { harnessView } from './views/harness.js';
 import { ledgerView } from './views/ledger.js';
 import { readinessView } from './views/readiness.js';
 import { overviewView } from './views/overview.js';
@@ -86,12 +85,14 @@ function signature(status: TwinStatus | undefined): string {
         status: download.status,
         message: download.message,
       })),
+      // Like the model downloads, the byte count is patched in place every poll.
+      laya: { ...status.laya, receivedBytes: 0, file: undefined },
     },
     loadError: state.loadError,
     pending: [...state.pending].sort(),
     wizard: [state.wizardForced, state.wizardStep, state.altOpen],
     setup: state.setup,
-    selection: [state.selectedSuggestion, state.selectedLedger, state.selectedHandoff, state.automationTab],
+    selection: [state.selectedSuggestion, state.selectedLedger, state.automationTab],
     runs: [...state.runResults.entries()],
   });
 }
@@ -105,6 +106,15 @@ function patchLive(status: TwinStatus): void {
     const id = el.dataset.progressModel;
     if (!id) return;
     const pct = Math.round(modelFraction(status, id) * 100);
+    el.setAttribute('aria-valuenow', String(pct));
+    const fill = el.firstElementChild;
+    if (fill instanceof HTMLElement) fill.style.width = `${pct}%`;
+  });
+  document.querySelectorAll<HTMLElement>('[data-label-laya]').forEach(el => {
+    el.textContent = layaStateLabel(status.laya);
+  });
+  document.querySelectorAll<HTMLElement>('[data-progress-laya]').forEach(el => {
+    const pct = Math.round(layaFraction(status.laya) * 100);
     el.setAttribute('aria-valuenow', String(pct));
     const fill = el.firstElementChild;
     if (fill instanceof HTMLElement) fill.style.width = `${pct}%`;
@@ -123,8 +133,6 @@ function viewFor(status: TwinStatus, route: Route): HTMLElement {
       return ledgerView(status);
     case 'readiness':
       return readinessView(status, route.app);
-    case 'harness':
-      return harnessView(status);
     case 'settings':
       return settingsView(status);
     default:
