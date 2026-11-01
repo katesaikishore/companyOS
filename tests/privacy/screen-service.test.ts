@@ -51,6 +51,8 @@ const CANARY_SERVICE = {
   ocrError: 'CANARY_SERVICE_OCR_D17A4F',
   allowed: 'CANARY_SERVICE_ALLOWED_B95C3D',
   behindBrowser: 'CANARY_SERVICE_BEHIND_0F6E82',
+  probeError: 'CANARY_SERVICE_PROBE_6E0B1A',
+  stopWait: 'CANARY_SERVICE_STOP_A39C52',
 } as const;
 
 const OPEN: ScreenContext = {
@@ -64,11 +66,15 @@ const OPEN: ScreenContext = {
   app: 'Notes',
 };
 
-/** A frame where every pixel has one value, so two frames with different values never look alike to the dedupe. */
-function frameOf(label: string, shade: number): Frame {
+/**
+ * A frame where every pixel has one value, so two frames with different values never look alike to the dedupe. The PNG
+ * carries the planted text too, as a real frame carries the screen it shows. A path that wrote the raw frame to disk would
+ * then leave the text in the image, and the image scan would see it.
+ */
+function frameOf(label: string, shade: number, text: string): Frame {
   const width = 16;
   const height = 9;
-  return { width, height, bgra: Buffer.alloc(width * height * 4, shade), png: Buffer.from(label) };
+  return { width, height, bgra: Buffer.alloc(width * height * 4, shade), png: Buffer.from(`${label}\n${text}`) };
 }
 
 class FakeSource implements FrameSource {
@@ -91,7 +97,8 @@ class FakeOcr implements OcrEngine {
   failWith: string | undefined;
 
   async recognise(png: Buffer): Promise<string> {
-    const label = png.toString();
+    // The label is the first line of the frame. The rest of the frame is the screen the text was read from.
+    const label = png.toString().split('\n')[0];
     this.calls.push(label);
     if (this.gate) await this.gate;
     if (this.failWith !== undefined) throw new Error(this.failWith);
@@ -109,6 +116,8 @@ interface Fixture {
   /** Changes the policy inputs the service reads. */
   set(patch: Partial<ScreenContext>): void;
   setSecure(value: boolean | 'unknown'): void;
+  /** Makes the secure input probe reject from now on, as a failed native check would. */
+  failSecureProbe(): void;
   /** Holds OCR until the returned release is called. The read in progress is the one held. */
   holdOcr(): () => void;
   /** Holds every image write until the returned release is called. */
@@ -132,14 +141,21 @@ function open(): Fixture {
   const outbound: string[] = [];
   const logs = new ConsoleCapture();
   const restoreOutbound = refuseOutbound(outbound);
-  const agent = new TwinAgent({ dataDir: storeDir, dataKey: key, now: () => Date.now() });
-  agent.updateConfig({ screenCaptureEnabled: true });
   const media = new MediaStore(mediaDir, deriveMediaKey(key));
+  // Production wires the same callback, so an excluded app's images are removed with its text.
+  const agent = new TwinAgent({
+    dataDir: storeDir,
+    dataKey: key,
+    now: () => Date.now(),
+    deleteMedia: mediaIds => void media.remove(mediaIds).catch(() => undefined),
+  });
+  agent.updateConfig({ screenCaptureEnabled: true });
   const source = new FakeSource();
   const ocr = new FakeOcr();
 
   let context: ScreenContext = { ...OPEN };
   let secure: boolean | 'unknown' = false;
+  let secureFails = false;
   let writeGate: Promise<void> | undefined;
   let writeStarts = 0;
   let frames = 0;
@@ -158,7 +174,10 @@ function open(): Fixture {
     // The real sink: the engine decides the browser, excluded-app and capture-setting rules itself.
     sink: { ingestScreen: read => agent.ingestScreen(read) },
     now: () => Date.now(),
-    secureInput: async () => secure,
+    secureInput: async () => {
+      if (secureFails) throw new Error('The probe failed.');
+      return secure;
+    },
   });
   service.setContext(context);
   service.start(60_000);
@@ -177,6 +196,9 @@ function open(): Fixture {
     },
     setSecure(value) {
       secure = value;
+    },
+    failSecureProbe() {
+      secureFails = true;
     },
     holdOcr() {
       let release: () => void = () => undefined;
@@ -202,7 +224,7 @@ function open(): Fixture {
       frames += 1;
       const label = `frame ${frames}`;
       ocr.reads.set(label, text);
-      source.next = frameOf(label, frames * 20);
+      source.next = frameOf(label, frames * 20, text);
       await service.requestFrame('interval');
     },
     async idle() {
@@ -350,6 +372,37 @@ describe('ScreenCaptureService, against planted canaries', () => {
     ).toEqual([]);
   });
 
+  it('stores nothing when the secure input probe fails while the frame is read', async () => {
+    const release = fx.holdOcr();
+    await fx.shot(`Visible ${CANARY_SERVICE.probeError}`);
+    expect(fx.ocr.calls).toHaveLength(1);
+    fx.failSecureProbe();
+    release();
+    await fx.idle();
+    // A probe that cannot answer counts as unknown, which keeps the frame out before any image is written.
+    expect(fx.writeStarts).toBe(0);
+    expect(fx.agent.captureSummary().screenCount).toBe(0);
+    expect(fx.mediaFiles()).toBe(0);
+    expect(findLeaks(fx.surfaces(), { probeError: CANARY_SERVICE.probeError })).toEqual([]);
+  });
+
+  it('stop waits for a read that is still running to end', async () => {
+    const release = fx.holdOcr();
+    await fx.shot(`Visible ${CANARY_SERVICE.stopWait}`);
+    expect(fx.ocr.calls).toHaveLength(1);
+    let stopped = false;
+    const stopping = fx.service.stop().then(() => {
+      stopped = true;
+    });
+    await new Promise(resolve => setImmediate(resolve));
+    // The delete paths wait on this, so a delete never runs while a read could still store its text.
+    expect(stopped).toBe(false);
+    release();
+    await stopping;
+    expect(stopped).toBe(true);
+    expect(fx.agent.captureSummary().screenCount).toBe(0);
+  });
+
   it('pinned: text of a browser window visible behind an allowed app is stored under that app', async () => {
     // The browser is not in front, so the frame is read, and the text goes in under the app in front. Recall documents this.
     await fx.shot(`Quarterly notes next to a tab ${CANARY_SERVICE.behindBrowser}`);
@@ -367,5 +420,8 @@ describe('ScreenCaptureService, against planted canaries', () => {
     // Excluding the app in front does remove it.
     fx.agent.updateConfig({ excludedApps: ['Google Chrome', 'Notes'] });
     expect(fx.agent.captureSummary().screenCount).toBe(0);
+    // The count alone would pass with the index rows or the image left behind. The scan and the file count cover both.
+    await vi.waitFor(() => expect(fx.mediaFiles()).toBe(0));
+    expect(findLeaks(fx.surfaces(), { behindBrowser: CANARY_SERVICE.behindBrowser })).toEqual([]);
   });
 });

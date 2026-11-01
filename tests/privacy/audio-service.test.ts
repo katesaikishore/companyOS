@@ -18,7 +18,7 @@ import { ConsoleCapture, diskSurfaces, refuseOutbound } from './surfaces';
 // below. The transcriber under test is the real WhisperTranscriber, which talks to the fake speech process.
 const shared = vi.hoisted(() => ({
   listeners: new Map<string, (event: { sender: { id: number } }, payload: unknown) => void>(),
-  windows: [] as Array<{ id: number; destroyed: boolean }>,
+  windows: [] as Array<{ id: number; destroyed: boolean; sent: unknown[] }>,
   fork: (...args: unknown[]): unknown => {
     throw new Error(`No speech process was expected: ${args.length}`);
   },
@@ -26,17 +26,27 @@ const shared = vi.hoisted(() => ({
 
 vi.mock('electron', () => ({
   BrowserWindow: class {
-    readonly record: { id: number; destroyed: boolean };
-    readonly webContents: { id: number; setWindowOpenHandler: () => void; on: () => void; send: () => void };
+    readonly record: { id: number; destroyed: boolean; sent: unknown[] };
+    readonly webContents: {
+      id: number;
+      setWindowOpenHandler: () => void;
+      on: (event: string, handler: () => void) => void;
+      send: (channel: string, message: unknown) => void;
+    };
+    private readonly handlers = new Map<string, () => void>();
 
     constructor() {
-      this.record = { id: shared.windows.length + 1, destroyed: false };
+      this.record = { id: shared.windows.length + 1, destroyed: false, sent: [] };
       shared.windows.push(this.record);
       this.webContents = {
         id: this.record.id,
         setWindowOpenHandler: () => undefined,
-        on: () => undefined,
-        send: () => undefined,
+        on: (event, handler) => {
+          this.handlers.set(event, handler);
+        },
+        send: (_channel, message) => {
+          this.record.sent.push(message);
+        },
       };
     }
 
@@ -53,6 +63,8 @@ vi.mock('electron', () => ({
     }
 
     loadURL(): Promise<void> {
+      // The page finishes loading a moment after the window is created, as the real window does.
+      queueMicrotask(() => this.handlers.get('did-finish-load')?.());
       return Promise.resolve();
     }
   },
@@ -134,11 +146,15 @@ interface Fixture {
   /** Holds every transcribe reply until releaseHeld is called. */
   holdReplies(value: boolean): void;
   releaseHeld(): void;
+  /** Sends one segment of the given samples from the open capture window, or from the given page. */
+  sendSamples(samples: Float32Array, from?: number): void;
+  /** The commands the capture page has been sent, in order. */
+  sentToPage(): unknown[];
   surfaces(): Surface[];
   close(): Promise<void>;
 }
 
-function open(): Fixture {
+function open(initial: Partial<AudioRuntimeState> = {}): Fixture {
   const root = mkdtempSync(join(tmpdir(), 'audio-service-privacy-'));
   const storeDir = join(root, 'twin');
   const key = randomBytes(32);
@@ -156,7 +172,7 @@ function open(): Fixture {
     return child;
   };
 
-  let context: AudioRuntimeState = { enabled: true, locked: false, paused: false, idle: false };
+  let context: AudioRuntimeState = { enabled: true, locked: false, paused: false, idle: false, ...initial };
   let granted = true;
   const transcriber = new WhisperTranscriber({
     workerPath: join(root, 'transcribe-worker.js'),
@@ -177,9 +193,20 @@ function open(): Fixture {
     return live[live.length - 1]?.id;
   };
 
+  const sendSamples = (samples: Float32Array, from: number = windowId() ?? -1): void => {
+    shared.listeners.get(CAPTURE_CHANNEL.segment)?.(
+      { sender: { id: from } },
+      { samples: samples.buffer, durationMs: 30_000 },
+    );
+  };
+
   return {
     agent,
     service,
+    sendSamples,
+    sentToPage() {
+      return shared.windows[shared.windows.length - 1]?.sent ?? [];
+    },
     set(patch) {
       context = { ...context, ...patch };
       service.setContext(context);
@@ -189,10 +216,7 @@ function open(): Fixture {
     },
     send(text, from = windowId() ?? -1) {
       speech.text = text;
-      shared.listeners.get(CAPTURE_CHANNEL.segment)?.(
-        { sender: { id: from } },
-        { samples: new Float32Array(16_000).buffer, durationMs: 30_000 },
-      );
+      sendSamples(new Float32Array(16_000), from);
     },
     windowId,
     transcribes() {
@@ -308,6 +332,46 @@ describe('AudioCaptureService with the real speech transcriber, against planted 
     expect(fx.lastChild()?.killed).toBe(true);
     expect(fx.agent.captureSummary().audioCount).toBe(0);
     expect(findLeaks(fx.surfaces(), { stopped: 'CANARY_AUDIO_STOPPED_1C9E4B' })).toEqual([]);
+  });
+
+  it('tells the capture page to stop when capture is paused', async () => {
+    await settle();
+    expect(fx.sentToPage()).toEqual(['start']);
+    // Without this command the page keeps the microphone open while the person has paused capture.
+    fx.set({ paused: true });
+    expect(fx.sentToPage()).toEqual(['start', 'stop']);
+  });
+
+  it('drops a segment that arrives while another is being transcribed', async () => {
+    fx.holdReplies(true);
+    fx.send('First part');
+    fx.send('Second part');
+    await settle();
+    expect(fx.transcribes()).toBe(1);
+    fx.releaseHeld();
+    await settle();
+    // A request queued behind the first would be sent now, and held like it. Release that one too, and count again.
+    fx.releaseHeld();
+    await settle();
+    expect(fx.transcribes()).toBe(1);
+    expect(fx.agent.captureSummary().audioCount).toBe(1);
+  });
+
+  it('drops a segment that holds a non-finite sample', async () => {
+    const samples = new Float32Array(16_000);
+    samples[3] = Number.NaN;
+    fx.sendSamples(samples);
+    await settle();
+    expect(fx.transcribes()).toBe(0);
+    expect(fx.agent.captureSummary().audioCount).toBe(0);
+  });
+
+  it('opens no capture page while capture is paused', async () => {
+    await fx.close();
+    shared.windows.length = 0;
+    fx = open({ paused: true });
+    await settle();
+    expect(shared.windows).toHaveLength(0);
   });
 
   it('stores segments again once capture restarts', async () => {
