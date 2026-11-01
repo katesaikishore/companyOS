@@ -4,8 +4,8 @@ Recorded 2026-11-01. Follows `docs/research/agent-desktop-performance.md`, which
 
 **Status: tracked upstream. Our draft issue was not posted.** The same crash is reported in
 [vercel-labs/agent-desktop#384](https://github.com/vercel-labs/agent-desktop/pull/384), an open pull request with a
-proposed fix. Posting our draft as a new issue would duplicate it. Our evidence is kept below because it matches the
-cause given there.
+proposed fix. Posting our draft as a new issue would duplicate it. Our evidence is kept below. Most of it fits the
+cause given there. Two items do not: the effect of stopping an earlier window, and a Python replay that did not crash.
 
 We opened [vercel-labs/agent-desktop#408](https://github.com/vercel-labs/agent-desktop/pull/408) as an alternative to
 #384. #384 waits 200 ms after every key. #408 waits once at process exit, until the last key is 200 ms old, so a batch
@@ -14,7 +14,8 @@ of presses pays the wait once. It has not been run against a live X11 session.
 ## The crash
 
 On Linux/X11, repeated `agent-desktop press <chord> --app <name>` calls made our GTK 3 test window die with a
-segmentation fault inside `gtk_main`, in 26 of 30 trials of the re-recorded final pair and in 36 of 40 earlier ones.
+segmentation fault (SIGSEGV), in 26 of 30 trials of the re-recorded final pair and in 36 of 40 earlier ones. No stack was
+captured in those runs. The first investigation's `gdb` run put the fault in `gtk_main_do_event` in libgtk-3.
 Focus, `status`, `snapshot` and `list-apps` do not reproduce it. Key injection with `xdotool key` does not reproduce it
 either.
 
@@ -47,7 +48,7 @@ From #384 and its follow-up comment:
   above does not explain this, and the sample was small.
 
 Stress results from the first record (2026-10-31), 60 calls per trial, fresh window each trial (Ubuntu 24.04, Xvfb, openbox,
-at-spi2-core 2.52.0, GTK 3.24.41, agent-desktop 1.0.2). They came from a stress script that has since been replaced by
+at-spi2-core 2.52.0, GTK 3.24, agent-desktop 1.0.2). They came from a stress script that has since been replaced by
 `scripts/agent-desktop-bench/bench.mjs`. The re-recorded results are in the performance record: the program's own `press` killed the
 test window in 26 of 30 trials of the final pair and in 36 of 40 earlier ones. The first record's table follows:
 

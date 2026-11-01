@@ -260,9 +260,10 @@ These need a real machine, or a different setup. None of them can be tested on a
 - **Real apps.** Only TextEdit, Notepad and Paint. Browsers, Electron apps, apps with several windows, full-screen apps,
   Stage Manager, virtual desktops, a locked screen and several monitors are untested.
 - **`openUrl` on both systems**, and `openFile` for a file that was not already open on macOS.
-- **Binary provenance of `agent-desktop`.** The SHA-256 values above are for the npm package. They were not compared with
-  the upstream release files or signatures. That was checked later for the Linux x64 package: see
-  [`agent-desktop-performance.md`](agent-desktop-performance.md), "Provenance".
+- **Binary provenance of `agent-desktop`.** The SHA-256 values above are for the npm package. When the smoke run was made
+  they were not compared with the upstream release files or signatures. The package's binaries for all platforms were
+  compared with the release archives later (see [`agent-desktop-performance.md`](agent-desktop-performance.md),
+  "Provenance"). The hashes above were not re-checked against that comparison.
 - **Behavior over time.** One run of each job per code version, a few calls per row. Times varied by up to a factor of two
   between runs of the same code. Treat them as a rough scale.
 
