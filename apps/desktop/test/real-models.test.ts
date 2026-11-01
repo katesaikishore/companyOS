@@ -112,24 +112,32 @@ describe.skipIf(!enabled)('real models (COMPANYOS_REAL_MODELS=1)', () => {
 
     it('refuses a model file that is a link out of the models folder', async () => {
       const { lib, path } = await open();
-      const { mkdirSync, mkdtempSync, symlinkSync } = await import('node:fs');
+      const { mkdirSync, mkdtempSync, rmSync, symlinkSync } = await import('node:fs');
       const { tmpdir } = await import('node:os');
       const { join } = await import('node:path');
       const outside = mkdtempSync(join(tmpdir(), 'model-smoke-outside-'));
-      const inside = join(outside, 'models');
-      mkdirSync(inside);
-      symlinkSync(path, join(outside, 'outside.gguf'));
-      symlinkSync(join(outside, 'outside.gguf'), join(inside, 'linked.gguf'));
-      const client = new lib.core.LocalModelClient({
-        modelPath: join(inside, 'linked.gguf'),
-        modelsDir: inside,
-        start: () => lib.startRealWorker().channel,
-      });
       try {
-        const { routines } = lib.seededRoutines();
-        expect(await lib.core.nameRoutine(routines[0], { completer: client, ...PATIENT })).toEqual({ source: 'rule', reason: 'model_error' });
+        const inside = join(outside, 'models');
+        mkdirSync(inside);
+        symlinkSync(path, join(outside, 'outside.gguf'));
+        symlinkSync(join(outside, 'outside.gguf'), join(inside, 'linked.gguf'));
+        const client = new lib.core.LocalModelClient({
+          modelPath: join(inside, 'linked.gguf'),
+          modelsDir: inside,
+          start: () => lib.startRealWorker().channel,
+        });
+        try {
+          const { routines } = lib.seededRoutines();
+          expect(await lib.core.nameRoutine(routines[0], { completer: client, ...PATIENT })).toEqual({ source: 'rule', reason: 'model_error' });
+        } finally {
+          client.stop();
+        }
       } finally {
-        client.stop();
+        try {
+          rmSync(outside, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+        } catch (error) {
+          console.warn('could not remove', outside, error);
+        }
       }
     }, 300_000);
   });

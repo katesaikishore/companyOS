@@ -1,7 +1,4 @@
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   TwinAgent,
@@ -19,6 +16,9 @@ import {
   type WindowClass,
 } from '../src';
 import { SECRET_QUERY, at, workdays } from './fixtures';
+import { tempFolders } from './temp-folders';
+
+const temps = tempFolders();
 
 const GAP = 60 * 60_000;
 /** Midnight at the start of day 10. The seven-day window covers days 3 to 9. */
@@ -227,8 +227,8 @@ describe('wholePercentages', () => {
 
 describe('readiness from the agent', () => {
   it('reads the routines Suggestions uses, and holds nothing but app names and timing', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'twin-readiness-'));
-    const agent = new TwinAgent({ dataDir: dir, dataKey: randomBytes(32), now: () => at(10, 0) });
+    const dir = temps.folder('twin-readiness-');
+    const agent = temps.track(new TwinAgent({ dataDir: dir, dataKey: randomBytes(32), now: () => at(10, 0) }));
     agent.updateConfig({ watchBrowsers: true });
     for (const signal of workdays(10)) agent.ingest(signal);
 

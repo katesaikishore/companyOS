@@ -1,10 +1,10 @@
-import { mkdtempSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { TwinAgent, polledFocusApp, urlTemplate, type TwinEvent } from '../src';
 import { at } from './fixtures';
+import { tempFolders } from './temp-folders';
+
+const temps = tempFolders();
 
 const SECRET = 'SECRET123456';
 
@@ -20,7 +20,7 @@ function switchToChrome(agent: TwinAgent, ts: number, rawUrl: string, polledName
 }
 
 function openAgent(watchBrowsers?: boolean): TwinAgent {
-  const agent = new TwinAgent({ dataDir: mkdtempSync(join(tmpdir(), 'twin-browser-')), dataKey: randomBytes(32), now: () => at(0, 13) });
+  const agent = temps.track(new TwinAgent({ dataDir: temps.folder('twin-browser-'), dataKey: randomBytes(32), now: () => at(0, 13) }));
   if (watchBrowsers !== undefined) agent.updateConfig({ watchBrowsers });
   return agent;
 }

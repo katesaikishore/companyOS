@@ -1,7 +1,4 @@
-import { mkdtempSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
   AutomationSchema,
@@ -15,6 +12,9 @@ import {
   type PolicyContext,
   type Step,
 } from '../src';
+import { tempFolders } from './temp-folders';
+
+const temps = tempFolders();
 
 const ctx = (overrides: Partial<PolicyContext> = {}): PolicyContext => ({
   level: 3,
@@ -485,12 +485,12 @@ describe('shared run behaviour', () => {
 
 describe('demotion through the agent', () => {
   function storedAgent(auto: Automation, level: 3 | 4): { agent: TwinAgent } {
-    const dir = mkdtempSync(join(tmpdir(), 'twin-run-'));
+    const dir = temps.folder('twin-run-');
     const key = randomBytes(32);
-    const store = new EncryptedStore(dir, key);
+    const store = temps.track(new EncryptedStore(dir, key));
     store.replaceAll('automations', [auto]);
     store.replaceAll('autonomy', [{ automationId: auto.id, level, effects: ['external_effect'], runs: [] }]);
-    const agent = new TwinAgent({ dataDir: dir, dataKey: key });
+    const agent = temps.track(new TwinAgent({ dataDir: dir, dataKey: key }));
     agent.updateConfig({ maxAutonomyLevel: 4 });
     return { agent };
   }

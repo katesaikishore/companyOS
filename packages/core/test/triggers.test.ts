@@ -1,10 +1,10 @@
-import { mkdtempSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { TRIGGER_RULES, TriggerGate, TwinAgent, openingApps, type Automation, type Executor } from '../src';
 import { at, workdays } from './fixtures';
+import { tempFolders } from './temp-folders';
+
+const temps = tempFolders();
 
 const HOUR = 60 * 60_000;
 
@@ -75,10 +75,10 @@ describe('TriggerGate', () => {
 
 describe('TwinAgent.triggerCandidates', () => {
   function seeded() {
-    const dir = mkdtempSync(join(tmpdir(), 'twin-trigger-'));
+    const dir = temps.folder('twin-trigger-');
     const key = randomBytes(32);
     const now = at(10, 0);
-    const agent = new TwinAgent({ dataDir: dir, dataKey: key, now: () => now });
+    const agent = temps.track(new TwinAgent({ dataDir: dir, dataKey: key, now: () => now }));
     agent.updateConfig({ watchBrowsers: true });
     for (const signal of workdays(10)) agent.ingest(signal);
     return agent;
@@ -152,10 +152,10 @@ describe('TriggerGate declines', () => {
 describe('TwinAgent declines', () => {
   /** An agent on a clock the test moves. Ten working days are ingested, as the trigger tests above have them. */
   function withClock() {
-    const dir = mkdtempSync(join(tmpdir(), 'twin-declines-'));
+    const dir = temps.folder('twin-declines-');
     const key = randomBytes(32);
     const clock = { now: at(10, 9) };
-    const agent = new TwinAgent({ dataDir: dir, dataKey: key, now: () => clock.now });
+    const agent = temps.track(new TwinAgent({ dataDir: dir, dataKey: key, now: () => clock.now }));
     agent.updateConfig({ watchBrowsers: true });
     for (const signal of workdays(10)) agent.ingest(signal);
     return { agent, clock, dir, key };
@@ -165,7 +165,7 @@ describe('TwinAgent declines', () => {
   /** Closes the agent and opens the same store again, as a restart does. The clock carries on. */
   function restart(context: Context): Context {
     context.agent.close();
-    const agent = new TwinAgent({ dataDir: context.dir, dataKey: context.key, now: () => context.clock.now });
+    const agent = temps.track(new TwinAgent({ dataDir: context.dir, dataKey: context.key, now: () => context.clock.now }));
     return { ...context, agent };
   }
 

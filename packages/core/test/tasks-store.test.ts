@@ -1,20 +1,22 @@
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { EncryptedStore, RETENTION_DAYS, TwinAgent, dayKeyOf, type DayTasksView, type TaskDecision } from '../src';
 import { at } from './fixtures';
+import { tempFolders } from './temp-folders';
+
+const temps = tempFolders();
 
 const DAY_MS = 86_400_000;
 const DAY = dayKeyOf(at(0, 12));
 
 function freshDir(): string {
-  return mkdtempSync(join(tmpdir(), 'twin-tasks-'));
+  return temps.folder('twin-tasks-');
 }
 
 function openAgent(dir: string, key: Buffer, now = at(0, 12)): TwinAgent {
-  return new TwinAgent({ dataDir: dir, dataKey: key, now: () => now });
+  return temps.track(new TwinAgent({ dataDir: dir, dataKey: key, now: () => now }));
 }
 
 /** A morning in Excel, a break, then Slack, then Outlook after an hour away: three tasks, none sharing an app. */
@@ -150,7 +152,7 @@ describe('task decisions in the encrypted store', () => {
     seedMorning(agent);
     agent.close();
 
-    const raw = new EncryptedStore(dir, key);
+    const raw = temps.track(new EncryptedStore(dir, key));
     raw.append('taskDecisions', { day: DAY, kind: 'confirm', taskId: 'nothere-9', title: 'not a field the twin keeps' });
     raw.close();
 

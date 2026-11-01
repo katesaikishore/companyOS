@@ -1,14 +1,16 @@
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { createCipheriv, randomBytes } from 'node:crypto';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { EncryptedStore } from '../src';
+import { tempFolders } from './temp-folders';
+
+const temps = tempFolders();
 
 const CANARY = 'legacy-canary-5519';
 
 function freshDir(): string {
-  return mkdtempSync(join(tmpdir(), 'twin-migrate-'));
+  return temps.folder('twin-migrate-');
 }
 
 /** Seals one record the way the MVP's record log did: AES-256-GCM, collection name as associated data. */
@@ -33,7 +35,7 @@ describe('import of the MVP record logs', () => {
     writeLegacyLog(dir, 'settings', key, [{ v: 1 }, { v: 2 }]);
     writeLegacyLog(dir, 'ledger', key, [{ host: 'huggingface.co' }]);
 
-    const store = new EncryptedStore(dir, key);
+    const store = temps.track(new EncryptedStore(dir, key));
     expect(store.readAll('events')).toEqual([{ kind: 'focus', app: CANARY }, { kind: 'focus', app: 'Slack' }]);
     expect(store.readAll('settings')).toEqual([{ v: 1 }, { v: 2 }]);
     expect(store.readAll('ledger')).toEqual([{ host: 'huggingface.co' }]);
@@ -45,7 +47,7 @@ describe('import of the MVP record logs', () => {
       expect(readFileSync(join(dir, name)).includes(CANARY)).toBe(false);
     }
 
-    const reopened = new EncryptedStore(dir, key);
+    const reopened = temps.track(new EncryptedStore(dir, key));
     expect(reopened.readAll('events')).toHaveLength(2);
     reopened.close();
   });
@@ -58,7 +60,7 @@ describe('import of the MVP record logs', () => {
     expect(existsSync(join(dir, 'events.log'))).toBe(true);
     expect(existsSync(join(dir, 'twin.db'))).toBe(false);
 
-    const store = new EncryptedStore(dir, key);
+    const store = temps.track(new EncryptedStore(dir, key));
     expect(store.readAll('events')).toEqual([{ a: 1 }]);
     store.close();
   });
@@ -71,7 +73,7 @@ describe('import of the MVP record logs', () => {
     expect(() => new EncryptedStore(dir, randomBytes(32))).toThrow(/Corrupt record in events/);
     expect(readdirSync(dir)).toEqual(['events.log']);
 
-    const store = new EncryptedStore(dir, key);
+    const store = temps.track(new EncryptedStore(dir, key));
     expect(store.readAll('events')).toEqual([{ a: 1 }]);
     store.close();
     expect(existsSync(join(dir, 'events.log'))).toBe(false);
@@ -82,7 +84,7 @@ describe('import of the MVP record logs', () => {
     const key = randomBytes(32);
     writeLegacyLog(dir, 'events', key, [{ a: 1 }]);
     appendFileSync(join(dir, 'events.log'), 'AAAA');
-    const store = new EncryptedStore(dir, key);
+    const store = temps.track(new EncryptedStore(dir, key));
     expect(store.readAll('events')).toEqual([{ a: 1 }]);
     store.close();
   });
@@ -94,7 +96,7 @@ describe('import of the MVP record logs', () => {
     writeLegacyLog(dir, 'events', key, [{ a: 1 }]);
     // Half of the next record reached the disk before the crash, and nothing follows it.
     appendFileSync(join(dir, 'events.log'), next.slice(0, Math.floor(next.length / 2)));
-    const store = new EncryptedStore(dir, key);
+    const store = temps.track(new EncryptedStore(dir, key));
     expect(store.readAll('events')).toEqual([{ a: 1 }]);
     store.close();
     expect(existsSync(join(dir, 'events.log'))).toBe(false);
@@ -105,7 +107,7 @@ describe('import of the MVP record logs', () => {
     const key = randomBytes(32);
     writeLegacyLog(dir, 'events', key, [{ a: 1 }]);
     writeFileSync(join(dir, 'twin.db.migrating'), 'partial import');
-    const store = new EncryptedStore(dir, key);
+    const store = temps.track(new EncryptedStore(dir, key));
     expect(store.readAll('events')).toEqual([{ a: 1 }]);
     store.close();
     expect(existsSync(join(dir, 'twin.db.migrating'))).toBe(false);
@@ -115,9 +117,9 @@ describe('import of the MVP record logs', () => {
     const dir = freshDir();
     const key = randomBytes(32);
     writeLegacyLog(dir, 'events', key, [{ a: 1 }]);
-    new EncryptedStore(dir, key).close();
+    temps.track(new EncryptedStore(dir, key)).close();
     writeLegacyLog(dir, 'events', key, [{ a: 1 }]);
-    const store = new EncryptedStore(dir, key);
+    const store = temps.track(new EncryptedStore(dir, key));
     expect(store.readAll('events')).toEqual([{ a: 1 }]);
     store.close();
     expect(existsSync(join(dir, 'events.log'))).toBe(false);
@@ -128,7 +130,7 @@ describe('wipe of the legacy logs', () => {
   it('removes legacy logs and their leftovers as well as the database', () => {
     const dir = freshDir();
     const key = randomBytes(32);
-    const store = new EncryptedStore(dir, key);
+    const store = temps.track(new EncryptedStore(dir, key));
     store.append('events', { a: 1 });
     // Legacy files that exist next to a live database, such as logs left by an interrupted cleanup.
     writeLegacyLog(dir, 'events', key, [{ a: 2 }]);
