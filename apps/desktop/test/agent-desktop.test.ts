@@ -24,10 +24,11 @@ const STARTS_FAKE_PROGRAM = process.platform !== 'win32';
  * A stand-in for the agent-desktop program. Each start appends its argument list, as one JSON line, to the file named by
  * FAKE_AD_LOG, so a test can tell whether anything started. FAKE_AD_MODE "hang" never exits, and "flood" writes far more
  * than the output cap. "ambiguous" prints the AMBIGUOUS_TARGET envelope and exits 1. "ambiguous-split" sends the same
- * envelope in two pieces. "other-error" exits 1 with a different code whose message mentions the code. "windows" answers
- * list-windows with a JSON envelope whose data holds FAKE_AD_WINDOWS windows, or fails with status 2 when that is "fail",
- * or prints text that is not JSON when that is "garbage". Other calls in that mode exit 0. Otherwise it exits with the
- * status in FAKE_AD_EXIT, which defaults to 0.
+ * envelope in two pieces. "other-error" exits 1 with a different code whose message mentions the code. "app-not-found"
+ * exits 1 with APP_NOT_FOUND and a message that names the app. "bad-code" exits 1 with a code that is not an upper-case
+ * word. "windows" answers list-windows with a JSON envelope whose data holds FAKE_AD_WINDOWS windows,
+ * or fails with status 2 when that is "fail", or prints text that is not JSON when that is "garbage".
+ * Other calls in that mode exit 0. Otherwise it exits with the status in FAKE_AD_EXIT, which defaults to 0.
  */
 const FAKE_PROGRAM = [
   `#!${process.execPath}`,
@@ -44,6 +45,8 @@ const FAKE_PROGRAM = [
   "else if (mode === 'ambiguous') { process.stdout.write(JSON.stringify({ ok: false, error: { code: 'AMBIGUOUS_TARGET', message: 'two windows match' } })); process.exitCode = 1; }",
   "else if (mode === 'ambiguous-split') { process.stdout.write('{\"ok\":false,\"error\":{\"code\":\"AMBIGUOUS_'); setTimeout(() => { process.stdout.write('TARGET\",\"message\":\"two windows match\"}}'); process.exitCode = 1; }, 100); }",
   "else if (mode === 'other-error') { process.stdout.write(JSON.stringify({ ok: false, error: { code: 'ACTION_FAILED', message: 'not AMBIGUOUS_TARGET here' } })); process.exitCode = 1; }",
+  "else if (mode === 'app-not-found') { process.stdout.write(JSON.stringify({ ok: false, error: { code: 'APP_NOT_FOUND', message: 'No running application matches Microsoft Excel' } })); process.exitCode = 1; }",
+  "else if (mode === 'bad-code') { process.stdout.write(JSON.stringify({ ok: false, error: { code: 'Microsoft Excel', message: 'not a code' } })); process.exitCode = 1; }",
   "else process.exitCode = Number(process.env.FAKE_AD_EXIT || '0');",
   '',
 ].join('\n');
@@ -72,7 +75,7 @@ afterEach(() => {
 /** Points the fake at a new start log and sets how it behaves. Each option not given is cleared. Returns the log's path. */
 function useFake(
   options: {
-    mode?: 'hang' | 'flood' | 'ambiguous' | 'ambiguous-split' | 'other-error' | 'windows';
+    mode?: 'hang' | 'flood' | 'ambiguous' | 'ambiguous-split' | 'other-error' | 'app-not-found' | 'bad-code' | 'windows';
     exit?: number;
     windows?: string;
   } = {},
@@ -191,7 +194,7 @@ describe.skipIf(!STARTS_FAKE_PROGRAM)('a good call', () => {
       ['focus-window', '--app', 'Microsoft Excel'],
       ['list-windows', '--app', 'Microsoft Excel'],
       ['focus-window', '--app', 'Microsoft Excel'],
-      ['press', 'cmd+shift+k', '--app', 'Microsoft Excel'],
+      ['press', 'cmd+shift+k', '--headed', '--app', 'Microsoft Excel'],
     ]);
     expect(record.mock.calls.map(([entry]) => [entry.step, entry.exit])).toEqual([
       ['focus_app', 0],
@@ -212,7 +215,7 @@ describe.skipIf(!STARTS_FAKE_PROGRAM)('a window target', () => {
     expect(starts(log)).toEqual([
       ['focus-window', '--window-id', WINDOW],
       ['focus-window', '--window-id', WINDOW],
-      ['press', 'cmd+shift+k', '--window-id', WINDOW],
+      ['press', 'cmd+shift+k', '--headed', '--window-id', WINDOW],
     ]);
     expect(starts(log).flat()).not.toContain('--app');
   });
@@ -243,7 +246,7 @@ describe.skipIf(!STARTS_FAKE_PROGRAM)('a window target', () => {
     expect(record).not.toHaveBeenCalled();
   });
 
-  it('reports AMBIGUOUS_TARGET in the envelope as ambiguous, with the reason, and records only the step, the status and the duration', async () => {
+  it('reports AMBIGUOUS_TARGET in the envelope as ambiguous, with the reason, and records the step, the status, the code and the duration', async () => {
     const log = useFake({ mode: 'ambiguous' });
     const record = vi.fn<(entry: HandsRecord) => void>();
     expect(await focusWithAgentDesktop({ binary: program, record }, 'Microsoft Excel')).toEqual({
@@ -258,9 +261,9 @@ describe.skipIf(!STARTS_FAKE_PROGRAM)('a window target', () => {
     ]);
     expect(record).toHaveBeenCalledTimes(1);
     const entry = record.mock.calls[0][0];
-    expect(entry).toEqual({ step: 'focus_app', exit: 'ambiguous', durationMs: expect.any(Number) });
-    expect(Object.keys(entry).sort()).toEqual(['durationMs', 'exit', 'step']);
-    expect(JSON.stringify(entry)).not.toMatch(/AMBIGUOUS|two windows|Microsoft/);
+    expect(entry).toEqual({ step: 'focus_app', exit: 'ambiguous', code: 'AMBIGUOUS_TARGET', durationMs: expect.any(Number) });
+    expect(Object.keys(entry).sort()).toEqual(['code', 'durationMs', 'exit', 'step']);
+    expect(JSON.stringify(entry)).not.toMatch(/two windows|Microsoft/);
   });
 
   it('finds the code when the envelope arrives in two pieces', async () => {
@@ -293,11 +296,12 @@ describe.skipIf(!STARTS_FAKE_PROGRAM)('a failed call', () => {
     expect(JSON.stringify(entry)).not.toMatch(/Excel/);
   });
 
-  it('makes the executor step report false on a non-zero exit', async () => {
+  it('makes the executor press report false on a non-zero exit, and leaves the focus to the built-in adapter', async () => {
     useFake({ exit: 1 });
     const executor = handsExecutor({ focusApp: async () => true, frontmostApp: async () => undefined }, { binary: program }, 'darwin');
     expect(await executor.pressShortcut?.('Microsoft Excel', 'cmd+shift+k')).toBe(false);
-    expect(await executor.focusApp('Microsoft Excel')).toBe(false);
+    // The window count fails here, so the focus runs, and the built-in adapter reports its own result.
+    expect(await executor.focusApp('Microsoft Excel')).toBe(true);
   });
 
   it('reports a program that cannot be started as a spawn failure', async () => {
@@ -336,12 +340,14 @@ describe.skipIf(!STARTS_FAKE_PROGRAM)('a failed call', () => {
 });
 
 describe.skipIf(!STARTS_FAKE_PROGRAM)('an executor with a usable path', () => {
-  it('sends focus and key steps through the program and leaves the rest to the built-in executor', async () => {
+  it('counts the windows for a focus, has the built-in adapter focus, and presses through the program', async () => {
     const log = useFake();
-    // The built-in focus and press throw, so any call that reaches them fails the test.
+    let builtInFocuses = 0;
+    // The built-in press throws, so a press that reaches it fails the test. The built-in focus counts its calls.
     const base: Executor = {
       focusApp: async () => {
-        throw new Error('the built-in focus must not run');
+        builtInFocuses++;
+        return true;
       },
       frontmostApp: async () => 'microsoft excel',
       pressShortcut: async () => {
@@ -351,17 +357,21 @@ describe.skipIf(!STARTS_FAKE_PROGRAM)('an executor with a usable path', () => {
     const executor = handsExecutor(base, { binary: program }, 'darwin');
     expect(executor.blockedReason?.('focus_app')).toBeUndefined();
     expect(await executor.focusApp('Microsoft Excel')).toBe(true);
+    expect(builtInFocuses).toBe(1);
     expect(await executor.pressShortcut?.('Microsoft Excel', 'cmd+shift+k')).toBe(true);
     expect(await executor.frontmostApp()).toBe('microsoft excel');
-    expect(starts(log).map(args => args[0])).toEqual(['list-windows', 'focus-window', 'list-windows', 'focus-window', 'press']);
+    // The focus only counts the windows, so no focus-window call is made for it. The press counts, focuses, then presses.
+    expect(starts(log).map(args => args[0])).toEqual(['list-windows', 'list-windows', 'focus-window', 'press']);
   });
 
-  it('keeps key presses on Linux with the built-in adapter, even when the path is set, and still focuses through the program', async () => {
+  it('keeps key presses on Linux with the built-in adapter, even when the path is set, and focuses with the built-in adapter after the window count', async () => {
     const log = useFake();
     let builtInPresses = 0;
+    let builtInFocuses = 0;
     const base: Executor = {
       focusApp: async () => {
-        throw new Error('the built-in focus must not run on this path');
+        builtInFocuses++;
+        return true;
       },
       frontmostApp: async () => undefined,
       pressShortcut: async () => {
@@ -375,7 +385,50 @@ describe.skipIf(!STARTS_FAKE_PROGRAM)('an executor with a usable path', () => {
     expect(builtInPresses).toBe(1);
     expect(starts(log)).toEqual([]);
     expect(await executor.focusApp('Microsoft Excel')).toBe(true);
-    expect(starts(log).map(args => args[0])).toEqual(['list-windows', 'focus-window']);
+    expect(builtInFocuses).toBe(1);
+    expect(starts(log).map(args => args[0])).toEqual(['list-windows']);
+  });
+
+  it('refuses a focus by a name the program does not accept before the built-in focus runs', async () => {
+    const log = useFake();
+    const base: Executor = {
+      focusApp: async () => {
+        throw new Error('the built-in focus must not run for a name the program refuses');
+      },
+      frontmostApp: async () => undefined,
+    };
+    const executor = handsExecutor(base, { binary: program }, 'darwin');
+    expect(await executor.focusApp('-x')).toBe(false);
+    expect(starts(log)).toEqual([]);
+  });
+});
+
+describe.skipIf(!STARTS_FAKE_PROGRAM)('the error code in the record', () => {
+  it('keeps the CLI error code, and never its message, which can name the app', async () => {
+    useFake({ mode: 'app-not-found' });
+    const record = vi.fn<(entry: HandsRecord) => void>();
+    expect(await focusWithAgentDesktop({ binary: program, record }, 'Microsoft Excel')).toMatchObject({ ok: false, failure: 'exit' });
+    expect(record).toHaveBeenCalledTimes(1);
+    const entry = record.mock.calls[0][0];
+    expect(entry).toEqual({ step: 'focus_app', exit: 1, code: 'APP_NOT_FOUND', durationMs: expect.any(Number) });
+    expect(JSON.stringify(entry)).not.toMatch(/Microsoft|No running/);
+  });
+
+  it('records a press error code under the press step, since the press focuses first', async () => {
+    useFake({ mode: 'app-not-found' });
+    const record = vi.fn<(entry: HandsRecord) => void>();
+    expect(await pressWithAgentDesktop({ binary: program, record }, 'Microsoft Excel', 'cmd+shift+k')).toMatchObject({
+      ok: false,
+      failure: 'exit',
+    });
+    expect(record).toHaveBeenCalledWith({ step: 'press_shortcut', exit: 1, code: 'APP_NOT_FOUND', durationMs: expect.any(Number) });
+  });
+
+  it('drops a code that is not an upper-case word', async () => {
+    useFake({ mode: 'bad-code' });
+    const record = vi.fn<(entry: HandsRecord) => void>();
+    expect(await focusWithAgentDesktop({ binary: program, record }, 'Microsoft Excel')).toMatchObject({ ok: false, failure: 'exit' });
+    expect(Object.keys(record.mock.calls[0][0]).sort()).toEqual(['durationMs', 'exit', 'step']);
   });
 });
 
@@ -482,7 +535,9 @@ describe.skipIf(!STARTS_FAKE_PROGRAM)('the executor carries the refusal to the r
 
   it('returns false, and does not throw, for every other failure', async () => {
     useFake({ mode: 'windows', windows: '1', exit: 3 });
-    const executor = handsExecutor(base, { binary: program }, 'darwin');
+    // The built-in focus reports its own result, and that is what the focus step sees. The program's exit only reaches the press.
+    const builtInFocusFails: Executor = { ...base, focusApp: async () => false };
+    const executor = handsExecutor(builtInFocusFails, { binary: program }, 'darwin');
     expect(await executor.focusApp('Microsoft Excel')).toBe(false);
     expect(await executor.pressShortcut?.('Microsoft Excel', 'cmd+shift+k')).toBe(false);
     const missing = handsExecutor(base, { binary: join(folder, 'missing') }, 'darwin');

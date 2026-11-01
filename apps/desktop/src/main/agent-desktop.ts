@@ -4,24 +4,27 @@ import { isAbsolute } from 'node:path';
 import { StepRefusedError, parseKeyChord, type Executor } from '@companyos/twin-core';
 
 /**
- * The optional "hands" executor. An external agent-desktop program can take over the two steps that focus an app and
- * press a key chord. The program is not bundled. Its path is a setting that defaults to empty, and an empty path keeps
- * the built-in adapters, so nothing in this file runs unless a person sets the path.
+ * The optional "hands" executor. An external agent-desktop program takes over the key-press step, and it counts an app's
+ * windows before a focus by name. The focus itself is the built-in adapter's. The program is not bundled. Its path is a
+ * setting that defaults to empty, and an empty path keeps the built-in adapters, so nothing in this file runs unless a
+ * person sets the path.
  *
  * The program is the agent-desktop CLI (vercel-labs/agent-desktop). It is called with a fixed argument array and never
  * through a shell. A call names either the app or one of its windows:
  *   <program> list-windows --app <name>          lists the app's windows as a JSON envelope, read only to count them
  *   <program> focus-window --app <name>          brings the app's window to the front and confirms focus
- *   <program> press <chord> --app <name>         sends the chord, headless, to a window that is already in front
+ *   <program> press <chord> --headed --app <name>  brings the app's window forward, then sends the chord
  *   <program> focus-window --window-id <id>      the same, for one window from list-windows
- *   <program> press <chord> --window-id <id>     the same, for one window from list-windows
+ *   <program> press <chord> --headed --window-id <id>  the same, for one window from list-windows
  * A window ID is used when it is given, and the app name is then only for logs. Without one, the program is first asked
  * how many windows the app has. A focus by name is refused as ambiguous when the app has more than one window, because
- * focus-window would bring one of them forward. A press by name is refused the same way, since its first step is a focus.
+ * the app could come forward with a window the person did not mean. The focus itself is then the built-in adapter's, so
+ * the program does not move the pointer for it. A press by name is refused the same way, since its first step is a focus.
  * A zero count, or a list-windows call that fails, lets the focus call run and report its own error. The listing is never
  * kept. This module never picks a window for the caller. The CLI's exit status 1 is shared by every structured error, so
  * AMBIGUOUS_TARGET is read from the JSON envelope the program prints on stdout, by a match that keeps only its position
- * and never the output. A press is always preceded by a focus-window call with the same target. Exit status 0 is success.
+ * and never the output. The error code of a failed focus or press is read the same way, and only that code is kept. A press
+ * is always preceded by a focus-window call with the same target. Exit status 0 is success.
  * Any other status, a signal, a timeout or too much output is a failure.
  */
 
@@ -41,6 +44,8 @@ const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
 const WINDOW_ID = /^(?!-)[A-Za-z0-9._:-]{1,120}$/;
 /** The error code the CLI prints in its JSON envelope when a target matches more than one window. */
 const AMBIGUOUS_CODE = Buffer.from('"AMBIGUOUS_TARGET"');
+/** A CLI error code: a letter, then upper-case letters, digits and underscores. Anything else is not recorded. */
+const ERROR_CODE = /^[A-Z][A-Z0-9_]{1,39}$/;
 
 export type HandsStep = 'focus_app' | 'press_shortcut';
 export type HandsFailure =
@@ -55,13 +60,15 @@ export type HandsFailure =
 export type HandsResult = { ok: true } | { ok: false; failure: HandsFailure; reason: string };
 
 /**
- * What is kept about one call that started the program: the step, how it ended and how long it took. The application
- * name and the chord are never kept, and neither is any output.
+ * What is kept about one call that started the program: the step, how it ended, how long it took, and the CLI's error
+ * code when it printed one. The application name, the chord and the error message are never kept, since the message can
+ * name an app or a window.
  */
 export interface HandsRecord {
   step: HandsStep;
   exit: number | HandsFailure;
   durationMs: number;
+  code?: string;
 }
 
 export interface HandsOptions {
@@ -178,25 +185,42 @@ export async function pressWithAgentDesktop(
   const several = await refuseSeveralWindows(options, 'press_shortcut', app, windowId);
   if (several) return several;
   const aim = targetArgs(app, windowId);
-  // The CLI's headless press refuses to send keys to a window that is not in front. Bring the app forward first, as the
-  // built-in press does, so a press aimed at a background app works the same way on both paths.
+  // A headless press sends the keys to the app's process, and a window that is not the key window ignores them. On macOS
+  // the CLI still reports success in that case, so the press is headed: it brings the window forward and delivers the
+  // keys to it, at the cost of focus and cursor side effects. The focus before it keeps the refusal and failure point.
   const focused = await runProgram(options, 'press_shortcut', ['focus-window', ...aim]);
   if (!focused.ok) return focused;
-  return runProgram(options, 'press_shortcut', ['press', shortcut, ...aim]);
+  return runProgram(options, 'press_shortcut', ['press', shortcut, '--headed', ...aim]);
 }
 
 /**
- * The runner's executor when the program path is set. Focus goes through the program on every platform. A key press goes
- * through the program on macOS and Windows only. On Linux the program's press crashed a GTK 3 test window in most trials,
- * so the built-in press (xdotool on X11) is used there, and the path does not block it. Frontmost-app checks, links and
- * files come from the built-in executor unchanged. While the path is unusable, the focus step is blocked with the reason
- * before anyone is asked, and nothing starts.
+ * The checks a focus by name passes before the built-in adapter focuses the app: the path must be usable, the name must be
+ * one the program accepts, and an app with several windows is refused. The program is only asked for the window count, so
+ * the focus itself never goes through it. Undefined when the focus may run.
+ */
+async function checkFocusByName(options: HandsOptions, app: string): Promise<HandsResult | undefined> {
+  const problem = agentDesktopProblem(options.binary);
+  if (problem) return refused('blocked', problem);
+  const invalid = targetProblem(app, undefined);
+  if (invalid) return refused('invalid_input', invalid);
+  return refuseSeveralWindows(options, 'focus_app', app, undefined);
+}
+
+/**
+ * The runner's executor when the program path is set. A focus by name is the built-in adapter's, after the program has
+ * counted the app's windows. A key press goes through the program on macOS and Windows only. On Linux the program's press
+ * crashed a GTK 3 test window in most trials, so the built-in press (xdotool on X11) is used there, and the path does not
+ * block it. Frontmost-app checks, links and files come from the built-in executor unchanged. While the path is unusable,
+ * the focus step is blocked with the reason before anyone is asked, and nothing starts.
  */
 export function handsExecutor(base: Executor, options: HandsOptions, platform: NodeJS.Platform = process.platform): Executor {
   const pressThroughProgram = platform !== 'linux';
   return {
     ...base,
-    focusApp: async app => outcomeOf(await focusWithAgentDesktop(options, app)),
+    focusApp: async app => {
+      const refusal = await checkFocusByName(options, app);
+      return refusal ? outcomeOf(refusal) : base.focusApp(app);
+    },
     ...(pressThroughProgram
       ? { pressShortcut: async (app: string, shortcut: string) => outcomeOf(await pressWithAgentDesktop(options, app, shortcut)) }
       : {}),
@@ -226,9 +250,9 @@ interface CallResult {
 }
 
 /** Writes one call that ended to the log, if there is one. The log is best effort, so a failing log cannot stall a call. */
-function recordStep(options: HandsOptions, step: HandsStep, exit: number | HandsFailure, started: number): void {
+function recordStep(options: HandsOptions, step: HandsStep, exit: number | HandsFailure, started: number, code?: string): void {
   try {
-    options.record?.({ step, exit, durationMs: Date.now() - started });
+    options.record?.({ step, exit, durationMs: Date.now() - started, ...(code === undefined ? {} : { code }) });
   } catch {
     // The log is best effort. A failing log must not leave the call unsettled.
   }
@@ -265,6 +289,22 @@ function windowCount(output: Buffer | undefined): number {
   }
 }
 
+/**
+ * The CLI's error code from its JSON envelope, or undefined when the output has none. The message is read past and never
+ * returned, because it can name an app or a window.
+ */
+function errorCodeOf(output: Buffer | undefined): string | undefined {
+  if (output === undefined) return undefined;
+  try {
+    const envelope = JSON.parse(output.toString('utf8')) as { ok?: unknown; error?: { code?: unknown } } | null;
+    if (envelope?.ok !== false) return undefined;
+    const code = envelope.error?.code;
+    return typeof code === 'string' && ERROR_CODE.test(code) ? code : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Starts the program with no shell, so the argument array reaches it exactly as built. Undefined when the start throws. */
 function start(program: string, args: readonly string[]): ChildProcess | undefined {
   try {
@@ -274,11 +314,14 @@ function start(program: string, args: readonly string[]): ChildProcess | undefin
   }
 }
 
-/** Runs one focus-window or press call and records it as one step. Its output is never kept. */
+/**
+ * Runs one focus-window or press call and records it as one step. Its output is held only until its error code is read,
+ * and only that code is recorded.
+ */
 async function runProgram(options: HandsOptions, step: HandsStep, args: readonly string[]): Promise<HandsResult> {
   const started = Date.now();
-  const { result, exit } = await runCall(options, args, false);
-  recordStep(options, step, exit, started);
+  const { result, exit, output } = await runCall(options, args, true);
+  recordStep(options, step, exit, started, errorCodeOf(output));
   return result;
 }
 
