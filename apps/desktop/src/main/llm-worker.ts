@@ -87,8 +87,10 @@ async function load(request: LoadRequest): Promise<void> {
   loadedTemplate = undefined;
   grammars.clear();
   const lib = await moduleOnce();
+  // The CPU build only. The packaged app does not ship the CUDA or Vulkan builds, so the GPU is never asked for.
   llama ??= await lib.getLlama({
     build: 'never',
+    gpu: false,
     skipDownload: true,
     progressLogs: false,
     logLevel: lib.LlamaLogLevel.disabled,
