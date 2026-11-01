@@ -38,6 +38,8 @@ const ANALYSIS_DAYS = 30;
 export const RETENTION_DAYS = 90;
 /** Names kept in memory for detected routines. The oldest are dropped first. */
 const MAX_ROUTINE_NAMES = 200;
+/** What the data export shows in place of a name the person typed. The encrypted store and the pages keep the name itself. */
+const TYPED_NAME_NOT_EXPORTED = '[typed name not exported]';
 
 export interface AgentOptions {
   dataDir: string;
@@ -292,12 +294,13 @@ export class TwinAgent {
 
   /**
    * Changes an automation's name. A longer name is cut to fit, as an accepted routine's name is. Only the name changes:
-   * the level, the steps, the runs and the ids stay as they are.
+   * the level, the steps, the runs and the ids stay as they are. The name is typed, so the export leaves it out.
    */
   renameAutomation(automationId: string, name: string): AutomationView {
     const next = name.trim();
     if (!next) throw new Error('Give the automation a name.');
     const renamed = AutomationSchema.parse({ ...this.requireAutomation(automationId), name: fitName(next) });
+    this.markRenamed(automationId);
     this.writeAutomation(renamed);
     return this.view(renamed);
   }
@@ -573,18 +576,24 @@ export class TwinAgent {
 
   /**
    * Everything the twin holds about the person, for the person. Handoff rows from earlier versions are included as they
-   * were stored, so the export does not lose them. Nothing else reads them.
+   * were stored, so the export does not lose them. Nothing else reads them. The export is plain text, so a name the
+   * person typed, for a task or an automation, is replaced by a placeholder. A cleared task name holds no typed text.
    */
   exportAll(): object {
+    const renamed = this.renamedAutomationIds();
     return {
       exportedAt: new Date(this.now()).toISOString(),
       config: this.configuration,
       events: this.store.readAll<TwinEvent>('events'),
-      automations: this.readAutomations(),
+      automations: this.readAutomations().map(automation =>
+        renamed.has(automation.id) ? { ...automation, name: TYPED_NAME_NOT_EXPORTED } : automation,
+      ),
       autonomy: this.readStates(),
       network: this.networkLedger(),
       handoffs: this.store.readAll<unknown>('handoffs'),
-      taskDecisions: this.readTaskDecisions(),
+      taskDecisions: this.readTaskDecisions().map(decision =>
+        decision.kind === 'rename' && decision.name !== '' ? { ...decision, name: TYPED_NAME_NOT_EXPORTED } : decision,
+      ),
     };
   }
 
@@ -722,6 +731,16 @@ export class TwinAgent {
       ? current.map(candidate => (candidate.id === automation.id ? automation : candidate))
       : [...current, automation];
     this.store.replaceAll('automations', next);
+  }
+
+  /** The automations whose name the person typed. The export replaces their names. */
+  private renamedAutomationIds(): Set<string> {
+    return new Set(this.store.readAll<{ automationId: string }>('renamedAutomations').map(row => row.automationId));
+  }
+
+  /** Records, once, that the person typed an automation's name. The mark holds the id only, never the name. */
+  private markRenamed(automationId: string): void {
+    if (!this.renamedAutomationIds().has(automationId)) this.store.append('renamedAutomations', { automationId });
   }
 
   private writeState(state: AutonomyState): void {

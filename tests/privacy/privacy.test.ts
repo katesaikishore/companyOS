@@ -151,11 +151,24 @@ describe('known gaps, asserted so they stay visible', () => {
   it.fails('a lowercase identifier in the first path segment becomes :id (plan 5.4)', () => {
     expect(templateUrl('https://github.com/jsmith')).toBe('github.com/:id');
   });
+});
 
-  // Not fixed here. A task rename holds the name the person typed, and the data export carries it in plain text. Whether a
-  // typed label may be kept in the export is for the owner to decide, since the automation names already are. This
-  // assertion flips to a failure once the gap is closed, and then `it.fails` should become `it`.
-  it.fails('a typed task name stays out of the data export (owner decision pending)', () => {
+/** The working day the planted scenario uses, with no canary in it, so the same four-step routine is detected. */
+function routineDays(count: number): Record<string, unknown>[] {
+  return Array.from({ length: count }, (_, day) => [
+    { kind: 'focus', ts: at(day, 9), app: 'Microsoft Excel' },
+    { kind: 'focus', ts: at(day, 9, 20), app: 'Microsoft Outlook' },
+    { kind: 'focus', ts: at(day, 9, 30), app: 'Slack' },
+    { kind: 'focus', ts: at(day, 10), app: 'Google Chrome', url: 'https://docs.example.com/doc/1ab2cd3ef4567890/edit' },
+    { kind: 'idle_start', ts: at(day, 10, 10) },
+    { kind: 'idle_end', ts: at(day, 13) },
+  ]).flat();
+}
+
+// A typed name is the person's own label. The encrypted store keeps it and the page shows it, but the data export is plain
+// text, so the export carries a placeholder in its place.
+describe('typed names stay out of the data export', () => {
+  it('a typed task name stays out of the data export', () => {
     const root = mkdtempSync(join(tmpdir(), 'twin-privacy-rename-'));
     const agent = new TwinAgent({ dataDir: join(root, 'twin'), dataKey: randomBytes(32), now: () => at(10, 0) });
     try {
@@ -163,6 +176,26 @@ describe('known gaps, asserted so they stay visible', () => {
       agent.ingest({ kind: 'focus', ts: at(9, 9, 10), app: 'Slack' });
       const day = dayKeyOf(at(9, 12));
       agent.decideTask({ day, kind: 'rename', taskId: agent.dayTasks(day).tasks[0].id, name: CANARIES.typedText });
+      expect(agent.dayTasks(day).tasks[0].name).toBe(CANARIES.typedText);
+      expect(JSON.stringify(agent.exportAll())).not.toContain(CANARIES.typedText);
+    } finally {
+      agent.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('a typed automation name stays out of the data export', () => {
+    const root = mkdtempSync(join(tmpdir(), 'twin-privacy-automation-'));
+    const agent = new TwinAgent({ dataDir: join(root, 'twin'), dataKey: randomBytes(32), now: () => at(10, 0) });
+    try {
+      agent.updateConfig({ watchBrowsers: true });
+      for (const signal of routineDays(10)) agent.ingest(signal);
+      const suggestion = agent.suggestions().find(candidate => candidate.routine.steps.length === 4);
+      if (!suggestion) throw new Error('The scenario should detect a four-step routine.');
+      const id = agent.acceptRoutine(suggestion.routine.id).automation.id;
+      agent.renameAutomation(id, CANARIES.typedText);
+      // The rename is in place, so the export check below is not an empty pass.
+      expect(agent.automations()[0].automation.name).toBe(CANARIES.typedText);
       expect(JSON.stringify(agent.exportAll())).not.toContain(CANARIES.typedText);
     } finally {
       agent.close();

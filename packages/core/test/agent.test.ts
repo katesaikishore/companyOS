@@ -571,6 +571,28 @@ describe('renaming an automation', () => {
     expect(cut.endsWith('…')).toBe(true);
     agent.close();
   });
+
+  it('exports a renamed automation without the typed name, and keeps the name across a restart', () => {
+    const { agent, dir, key, now } = seeded(10);
+    const id = agent.acceptRoutine(agent.suggestions()[0].routine.id).automation.id;
+    agent.renameAutomation(id, 'Salary review with HR, Q3');
+    agent.renameAutomation(id, 'Payroll check');
+    expect(JSON.stringify(agent.exportAll())).not.toContain('Salary review with HR');
+    expect(JSON.stringify(agent.exportAll())).not.toContain('Payroll check');
+    agent.close();
+
+    const reopened = openAgent(dir, key, now);
+    expect(reopened.automations()[0].automation.name).toBe('Payroll check');
+    expect(JSON.stringify(reopened.exportAll())).not.toContain('Payroll check');
+    reopened.close();
+  });
+
+  it('still exports the name of an automation that was not renamed', () => {
+    const { agent } = seeded(10);
+    const view = agent.acceptRoutine(agent.suggestions()[0].routine.id);
+    expect((agent.exportAll() as { automations: Array<{ name: string }> }).automations[0].name).toBe(view.automation.name);
+    agent.close();
+  });
 });
 
 describe('settings saved by an earlier version', () => {

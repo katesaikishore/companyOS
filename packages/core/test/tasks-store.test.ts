@@ -56,6 +56,38 @@ describe('task decisions in the encrypted store', () => {
     reopened.close();
   });
 
+  it('exports a rename with a placeholder for the typed name, and keeps the name for the person', () => {
+    const dir = freshDir();
+    const key = randomBytes(32);
+    const agent = openAgent(dir, key);
+    seedMorning(agent);
+    const excel = tasksOf(agent).tasks[0];
+    agent.decideTask({ day: DAY, kind: 'rename', taskId: excel.id, name: 'Budget' });
+    expect(exported(agent).taskDecisions).toEqual([{ day: DAY, kind: 'rename', taskId: excel.id, name: expect.any(String) }]);
+    expect(JSON.stringify(agent.exportAll())).not.toContain('Budget');
+    expect(tasksOf(agent).tasks[0]).toMatchObject({ name: 'Budget', renamed: true });
+    agent.close();
+
+    const reopened = openAgent(dir, key);
+    expect(tasksOf(reopened).tasks[0]).toMatchObject({ name: 'Budget', renamed: true });
+    expect(JSON.stringify(reopened.exportAll())).not.toContain('Budget');
+    reopened.close();
+  });
+
+  it('exports a cleared rename as it is, since a cleared name holds no typed text', () => {
+    const dir = freshDir();
+    const key = randomBytes(32);
+    const agent = openAgent(dir, key);
+    seedMorning(agent);
+    const excel = tasksOf(agent).tasks[0];
+    agent.decideTask({ day: DAY, kind: 'rename', taskId: excel.id, name: 'Budget' });
+    agent.decideTask({ day: DAY, kind: 'rename', taskId: excel.id, name: '' });
+    const [typed, cleared] = exported(agent).taskDecisions;
+    expect(JSON.stringify(typed)).not.toContain('Budget');
+    expect(cleared).toEqual({ day: DAY, kind: 'rename', taskId: excel.id, name: '' });
+    agent.close();
+  });
+
   it('is removed by Delete everything, so a new store under the same key starts with the rule-based names', () => {
     const dir = freshDir();
     const key = randomBytes(32);

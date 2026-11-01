@@ -6,8 +6,18 @@ import { join } from 'node:path';
 /**
  * 'handoffs' is no longer written, since the OpenMausBot integration was removed. Its rows from earlier versions are
  * pruned once they are past the retention window, and the data export carries the rest as stored. Nothing else reads them.
+ * 'renamedAutomations' holds the ids of automations the person renamed. Their names are typed, so the export replaces them.
  */
-export const COLLECTIONS = ['events', 'ledger', 'automations', 'autonomy', 'settings', 'handoffs', 'taskDecisions'] as const;
+export const COLLECTIONS = [
+  'events',
+  'ledger',
+  'automations',
+  'autonomy',
+  'settings',
+  'handoffs',
+  'taskDecisions',
+  'renamedAutomations',
+] as const;
 export type Collection = (typeof COLLECTIONS)[number];
 
 const DATABASE_FILE = 'twin.db';
