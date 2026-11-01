@@ -60,7 +60,9 @@ The local API is off by default. When it is on, programs on this device can sear
 
 Every route is `GET` only. Every route except `/health` needs the token. `/health` says only that the API is running. The routes are `/v1/status`, `/v1/search` and `/v1/frames/:id`.
 
-Use **Copy token** in Settings to give the token to a program. The page never shows the token. **Rotate token** makes the old token stop working at once.
+Search and image requests are refused while **Read text on screen** is off, microphone text included. `/v1/status` still answers. Anyone who holds the token can read the stored text and images for as long as they are kept, so turn the local API off, or rotate the token, if it may have leaked.
+
+Use **Copy token** in Settings to give the token to a program. The page never shows the token. **Rotate token** makes the old token stop working at once. If the new token cannot be saved, the local API is switched off, so the old token stops working too.
 
 ## What leaves the device
 

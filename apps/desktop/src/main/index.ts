@@ -51,8 +51,18 @@ let runtime: TwinRuntime | undefined;
 let mainWindow: BrowserWindow | undefined;
 let trayWindow: BrowserWindow | undefined;
 let tray: Tray | undefined;
-let paused = false;
 let quitting = false;
+
+/** How long the operating system is asked to be idle before it reports a locked screen. Only used while the lock state is unknown. */
+const LOCK_QUERY_IDLE_SECONDS = 60;
+
+/** The screen's lock state from the operating system. Undefined when the system cannot say, so the check is asked again later. */
+function screenLockedNow(): boolean | undefined {
+  if (!app.isPackaged && process.env.COMPANYOS_TEST_FAKE_PLATFORM) return false;
+  const state = powerMonitor.getSystemIdleState(LOCK_QUERY_IDLE_SECONDS);
+  if (state === 'unknown') return undefined;
+  return state === 'locked';
+}
 
 // COMPANYOS_USER_DATA moves the twin's data folder. The performance harness uses it, so a measured run never touches a real install.
 if (process.env.COMPANYOS_USER_DATA) app.setPath('userData', resolve(process.env.COMPANYOS_USER_DATA));
@@ -164,7 +174,6 @@ function registerIpc(): void {
 
   handle(IPC.setPaused, value => {
     if (typeof value !== 'boolean') throw new Error('Invalid value.');
-    paused = value;
     requireRuntime().setPaused(value);
     rebuildTrayMenu();
   });
@@ -456,10 +465,9 @@ function rebuildTrayMenu(): void {
     Menu.buildFromTemplate([
       { label: 'Open companyOS Twin', click: () => showMainWindow() },
       {
-        label: paused ? 'Resume capture' : 'Pause capture',
+        label: runtime?.capturePaused() ? 'Resume capture' : 'Pause capture',
         click: () => {
-          paused = !paused;
-          requireRuntime().setPaused(paused);
+          requireRuntime().setPaused(!requireRuntime().capturePaused());
           rebuildTrayMenu();
         },
       },
@@ -501,6 +509,7 @@ async function boot(): Promise<void> {
       // The test platform has no real input device, so idle time is pinned to zero for it.
       idleSeconds: () => (!app.isPackaged && process.env.COMPANYOS_TEST_FAKE_PLATFORM ? 0 : powerMonitor.getSystemIdleTime()),
       onBattery: () => powerMonitor.onBatteryPower,
+      screenLocked: screenLockedNow,
       onChange: () => undefined,
       onOffer: showOffer,
       onUnattendedRun: result => {
@@ -528,15 +537,15 @@ async function boot(): Promise<void> {
     return;
   }
 
+  // Registered before start, which reads the saved pause and the lock state first, so a lock during start is not missed.
+  powerMonitor.on('lock-screen', () => runtime?.setLocked(true));
+  powerMonitor.on('unlock-screen', () => runtime?.setLocked(false));
   await runtime.start();
   // Test-only, for the performance harness. It needs an unpackaged run in its own data folder, so a real install never seeds.
   const seedDays = Number(process.env.COMPANYOS_MEASURE_SEED_DAYS);
   if (!app.isPackaged && process.env.COMPANYOS_USER_DATA && Number.isInteger(seedDays) && seedDays > 0) {
     runtime.seedMeasurementActivity(Math.min(seedDays, 30));
   }
-  powerMonitor.on('lock-screen', () => runtime?.setLocked(true));
-  powerMonitor.on('unlock-screen', () => runtime?.setLocked(false));
-
   protocol.handle('app', serveRenderer);
   registerIpc();
   createMainWindow();

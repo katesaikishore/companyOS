@@ -45,8 +45,10 @@ The ledger lists every model download and update check the device made, as it wa
 
 ## Local API
 
-The local API is off by default. When it is on, programs on this device can search stored screen and microphone text, and read screen images, with a token that you can rotate. It listens on `127.0.0.1` only and refuses browser requests. Nothing on it leaves the device. See [Recall](/recall#local-api).
+The local API is off by default. When it is on, programs on this device can search stored screen and microphone text, and read screen images, with a token that you can rotate. It listens on `127.0.0.1` only and refuses browser requests. Nothing on it leaves the device. Search and image requests are refused while **Read text on screen** is off, microphone text included.
+
+See [Recall](/recall#local-api).
 
 ## Excluded apps
 
-An excluded app is not recorded from then on, and its recent events are removed. Screen and microphone text read while it was the app in front is removed as well. Screen text read from its windows while another app was in front is stored under that other app, and it is not removed. Handoff records saved by an earlier version may still name the app until they are removed after 90 days, or until you delete everything.
+An excluded app is not recorded from then on, and its recent events are removed. Screen text read while it was the app in front is removed as well. Microphone text is not linked to any app, so an exclusion does not remove it. Screen text read from its windows while another app was in front is stored under that other app, and it is not removed. Handoff records saved by an earlier version may still name the app until they are removed after 90 days, or until you delete everything.

@@ -70,6 +70,8 @@ export interface RuntimeOptions {
   idleSeconds: () => number;
   /** True when the device runs on battery. Model work waits for AC power or idleness (plan §5.5). */
   onBattery: () => boolean;
+  /** The screen's lock state from the operating system, or undefined when it cannot say. Asked only while the state is unknown. */
+  screenLocked?: () => boolean | undefined;
   /** Called when model downloads change, so open pages refresh. */
   onChange: () => void;
   /** Called when a routine is offered. The main process shows the tray and a notification. */
@@ -247,6 +249,9 @@ export class TwinRuntime {
   }
 
   async start(): Promise<void> {
+    // The saved pause and the lock state are read before the first await, so no capture check runs before them.
+    this.capture.setPaused(this.agent.configuration.capturePaused);
+    this.learnLockState();
     await this.housekeeping();
     await this.models.reconcile();
     await this.laya.reconcile();
@@ -282,9 +287,16 @@ export class TwinRuntime {
     this.refreshCapture();
   }
 
+  /** The person's pause. It is saved in the encrypted settings, so a relaunch keeps it. */
   setPaused(paused: boolean): void {
+    this.agent.updateConfig({ capturePaused: paused });
     this.capture.setPaused(paused);
     this.refreshCapture();
+  }
+
+  /** Whether the person has paused capture. The tray label reads it. */
+  capturePaused(): boolean {
+    return this.agent.configuration.capturePaused;
   }
 
   hardware(): Promise<HardwareProfile> {
@@ -389,6 +401,8 @@ export class TwinRuntime {
       this.browserProblem = undefined;
     }
     const saved = this.agent.updateConfig(next);
+    // The pause is kept in the settings, so the capture check is given the saved value whichever path changed it.
+    this.capture.setPaused(saved.capturePaused);
     // Removing an app from the captured text happens when the exclusion list changes, so the counts are read again.
     if (changed.excludedApps !== undefined) this.refreshCaptureCounts();
     // A shorter image period takes effect now, not at the next sweep.
@@ -662,8 +676,17 @@ export class TwinRuntime {
 
   /** What activity capture says about the person now. Lock, pause and idle all keep the capture channels quiet. */
   private captureFlags(): { locked: boolean; paused: boolean; idle: boolean } {
-    const state = this.capture.state;
-    return { locked: state === 'locked', paused: state === 'paused', idle: state === 'idle' };
+    return this.capture.holds();
+  }
+
+  /**
+   * Asks the operating system for the lock state while it is unknown. Once known, the lock events keep it. Unknown counts as
+   * locked for screen and microphone reads, so nothing is read before the state is known.
+   */
+  private learnLockState(): void {
+    if (this.capture.lockKnown) return;
+    const locked = this.options.screenLocked?.();
+    if (locked !== undefined) this.capture.learnLock(locked);
   }
 
   private heldBack(): boolean {
@@ -763,6 +786,7 @@ export class TwinRuntime {
 
   /** Gives both channels the current settings and state, and starts or stops the screen channel to match. */
   private refreshCapture(): void {
+    this.learnLockState();
     const config = this.agent.configuration;
     // Microphone text needs the speech model. Without it, audio is not kept or transcribed.
     this.audio.setContext({ enabled: config.audioCaptureEnabled && this.speechInstalled(), ...this.captureFlags() });

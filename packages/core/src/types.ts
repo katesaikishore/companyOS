@@ -122,6 +122,8 @@ export const TwinConfigSchema = z
     localApiEnabled: z.boolean().default(false),
     /** How many days captured screen images are kept. Their text is kept for the same 90 days as the rest of the history. */
     frameRetentionDays: z.union([z.literal(1), z.literal(3), z.literal(7), z.literal(14)]).default(7),
+    /** Whether the person paused screen and microphone capture. Kept here, so a relaunch keeps the pause. Set by the pause control. */
+    capturePaused: z.boolean().default(false),
   })
   .strict();
 export type TwinConfig = z.infer<typeof TwinConfigSchema>;
@@ -170,4 +172,5 @@ export const DEFAULT_CONFIG: TwinConfig = {
   audioCaptureEnabled: false,
   localApiEnabled: false,
   frameRetentionDays: 7,
+  capturePaused: false,
 };
