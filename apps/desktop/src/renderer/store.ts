@@ -10,6 +10,8 @@ export type Route =
   | { name: 'readiness'; app?: string }
   /** Today's tasks, for the end-of-day review. It is opened from the Overview. */
   | { name: 'review' }
+  /** What the twin knows: its routines, its habits, what the person said no to, and today's tasks. */
+  | { name: 'knows' }
   | { name: 'settings' };
 
 export interface Notice {
@@ -152,6 +154,8 @@ export function routeFromHash(hash: string): Route {
       return parts[1] ? { name: 'readiness', app: safeDecode(parts[1]) } : { name: 'readiness' };
     case 'review':
       return { name: 'review' };
+    case 'knows':
+      return { name: 'knows' };
     case 'settings':
       return { name: 'settings' };
     default:

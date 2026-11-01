@@ -489,7 +489,7 @@ async function main() {
 
     // 11. The window has one fixed size. Every main route holds the checks in responsiveProblems at 900x600, and the
     // window still reports that it cannot be resized, maximised or made full screen.
-    const ROUTES = ['overview', 'suggestions', 'automations', 'readiness', 'review', 'ledger', 'settings'];
+    const ROUTES = ['overview', 'suggestions', 'automations', 'readiness', 'knows', 'review', 'ledger', 'settings'];
     for (const route of ROUTES) {
       if (route === 'review') {
         // The review has no sidebar link. It opens from the Overview, and its route still has to lay out.
