@@ -30,7 +30,9 @@ your approval, and it runs on its own only after it has earned that. Your activi
 
 - **It records little.** The app name in front, the window type and, if you turn browser capture on, the host and path
   shape of the active tab. Activity capture never reads window titles, page text, typed text, the clipboard or keystrokes.
-  Recall, which is off by default, keeps text read from the screen and the microphone only if you turn it on.
+  Recall, which is off by default, keeps text read from the screen and the microphone only if you turn it on. Screen
+  text is read from the whole screen, so a visible browser or excluded-app window can be read too, and its text is stored
+  under the app in front.
 - **Automations earn autonomy.** A routine starts as a draft, and it runs on its own only after eight conditions hold
   for it, only for steps that are local and reversible, and only while the unattended switch is on.
 - **The store is encrypted.** One SQLCipher database, opened with a key that the OS keychain seals. Without a keychain
@@ -85,7 +87,7 @@ name routines. Typing, clicking and sending are not built, and no release has be
   versions too. Export writes a plain file after a warning, with a placeholder for any name you typed for a task or an
   automation. Delete everything removes the database, the data key, the installed models and any screen images.
 - **Recall (off by default, a preview).** Screen text, read on macOS only, and microphone text, in 30-second parts, are
-  kept encrypted for search. Text is kept 90 days. Screen images are kept for 1 to 14 days, as you choose. The local API
+  kept encrypted for search. Text is kept 90 days. Screen images are kept for 1 to 14 days, as you choose. Screen text comes from the whole display, so a browser or excluded app visible behind the app in front can be read. The local API
   is off by default and listens on 127.0.0.1 only. See [the Recall page](https://docs.qbrin.com/recall). Its Screen
   Recording and microphone prompts are not yet checked on a Mac with a password field on screen, and its speech model
   has no install control in setup or Settings yet.

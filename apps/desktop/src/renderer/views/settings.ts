@@ -240,7 +240,7 @@ function capturePanel(
     block(
       textBlock(
         'Excluded apps',
-        'The twin forgets anything it recorded from an excluded app and never records it again. Handoff records saved by an earlier version may still name the app until they are removed after 90 days, or until you delete everything.',
+        'The twin forgets anything it recorded from an excluded app and never records it again. Screen text read from an excluded app\'s window while another app was in front is stored under that other app, and it is not forgotten. Handoff records saved by an earlier version may still name the app until they are removed after 90 days, or until you delete everything.',
       ),
       exclusionEditor('exclusions:settings', excluded, 'settings-exclusions', next =>
         void saveConfig('exclusions:settings', { excludedApps: next }),
@@ -273,7 +273,7 @@ function recallPanel(status: TwinStatus): HTMLElement {
       toggleRow({
         testid: 'settings-screen',
         label: 'Read text on screen',
-        note: 'Reads the primary display when what is on it changes. Password fields, browser windows, excluded apps and paused or locked capture are skipped. On macOS it needs Screen Recording permission.',
+        note: 'Reads the whole primary display when what is on it changes. A browser, an excluded app or a password field is skipped only when it has focus, so a window of one visible behind another app can still be read. Paused or locked capture is skipped. On macOS it needs Screen Recording permission.',
         checked: config.screenCaptureEnabled,
         onChange: checked => void saveConfig('screen-capture', { screenCaptureEnabled: checked }),
       }),

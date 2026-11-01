@@ -210,7 +210,7 @@ function recallStep(status: TwinStatus): Child[] {
       permRow(
         'Screen text',
         'off by default',
-        `Reads the primary display when what is on it changes. Password fields, browser windows and excluded apps are skipped. Images are kept ${config.frameRetentionDays} days.`,
+        `Reads the whole primary display when what is on it changes. A browser, an excluded app or a password field is skipped only when it has focus, so a window of one visible behind another app can still be read. Images are kept ${config.frameRetentionDays} days.`,
         toggleRow({
           testid: 'setup-screen',
           label: 'Read text on screen',

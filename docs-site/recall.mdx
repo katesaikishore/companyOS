@@ -33,7 +33,7 @@ Nothing is read in these cases:
 
 Microphone text is read in 30-second parts, and a part that is almost silent is dropped. Nothing is heard while capture is paused, the screen is locked, or you are away. The microphone also picks up people nearby and on calls, so check the recording rules where you work first. System audio is not recorded.
 
-Screen text is whatever OCR reads from the screen. OCR reads everything visible, including window titles, chat messages, and any password shown as plain text. Password managers are excluded by default. The browser skip, the pause, the lock and the exclusions are the only protection against the rest, and they are not complete.
+Screen text is whatever OCR reads from the screen. OCR reads everything visible, including window titles, chat messages, and any password shown as plain text. Password managers are excluded by default. The checks on the app in front, the pause, the lock and the idle check are the only protection. They do not cover what is visible behind the app in front: a browser window or an excluded app there is read, and its text is stored under the name of the app in front. Excluding that app later does not remove that text. So these checks are not complete.
 
 ## Where it is kept
 

@@ -12,7 +12,7 @@ Your activity is stored on this device and nowhere else. Apart from the calls li
 
 Activity capture never records window titles, page text, typed text, the clipboard or keystrokes.
 
-Screen text and screen images are recorded only when you turn on **Read text on screen**, and microphone text only when you turn on **Transcribe the microphone**. Both are off by default, and they are described in [Recall](/recall). Screen text is what OCR reads from the primary display, so it can include window titles and page text that are visible on screen. Screen text is not read while a password field may have focus, or when the app cannot check for one. Password managers are excluded by default.
+Screen text and screen images are recorded only when you turn on **Read text on screen**, and microphone text only when you turn on **Transcribe the microphone**. Both are off by default, and they are described in [Recall](/recall). Screen text is what OCR reads from the primary display, so it can include window titles and page text that are visible on screen. That includes browser and excluded-app windows visible behind the app in front. Screen text is not read while a password field may have focus, or when the app cannot check for one. Password managers are excluded by default.
 
 The only text you type that the app keeps is a name you give inside companyOS itself: a task in the end-of-day review, or an automation you rename. It stays in the encrypted store and is never captured from another app. An export shows a placeholder in its place.
 
@@ -49,4 +49,4 @@ The local API is off by default. When it is on, programs on this device can sear
 
 ## Excluded apps
 
-An excluded app is not recorded from then on, and its recent events are removed. Its screen and microphone text is removed as well. Handoff records saved by an earlier version may still name the app until they are removed after 90 days, or until you delete everything.
+An excluded app is not recorded from then on, and its recent events are removed. Screen and microphone text read while it was the app in front is removed as well. Screen text read from its windows while another app was in front is stored under that other app, and it is not removed. Handoff records saved by an earlier version may still name the app until they are removed after 90 days, or until you delete everything.
