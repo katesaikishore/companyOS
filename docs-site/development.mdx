@@ -45,6 +45,8 @@ The script uses a temporary data folder, and it needs network access to huggingf
 
 The privacy suite treats two places as exceptions. The first is the decrypted capture index, which holds the text of a kept screen frame, because screen text is stored encrypted and the data key opens it. It is named in `tests/privacy/canaries.ts`. The second is the local API, whose search reply carries that text to a program that holds the token. It is checked in `tests/privacy/privacy.test.ts`. Each test also proves the text is really there, so neither exception can pass on an empty store.
 
+The screen service has its own tests in `tests/privacy/screen-service.test.ts`. They run the real service, with the grab and the OCR replaced, and check that canaries in frames that must not be stored never reach an output. They also pin one behaviour that is a decision, not a guard: text from a browser window visible behind an allowed app is stored under that app. Excluding the browser later does not remove it, and excluding the app in front does. [Recall](/recall#what-is-read) describes it.
+
 ## Decision-model tests
 
 `apps/desktop/test/laya.test.ts` tests the bundle manager against a local server that stands in for Hugging Face. It never downloads the real bundle. One opt-in test uses the real bundle already on your machine. It reads the files, checks them against the pinned digests, loads the model and asks one question:
