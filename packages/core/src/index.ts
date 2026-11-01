@@ -16,6 +16,7 @@ export * from './agent';
 export * from './models';
 export * from './triggers';
 export * from './dismissed';
+export * from './known';
 export * from './contract';
 export * from './readiness';
 export * from './habits';

@@ -3,7 +3,9 @@ import {
   MAX_SIGNATURE_CHARS,
   addSignature,
   matchesDismissed,
+  routineIdOf,
   signatureOf,
+  withoutRoutine,
   type Routine,
   type RoutineStep,
   type WindowClass,
@@ -17,6 +19,14 @@ function routine(id: string, classes: WindowClass[]): Routine {
 
 const SHEET_FLOW: WindowClass[] = ['spreadsheet', 'document', 'chat', 'design'];
 const DISMISSED = signatureOf(routine('dismissed', SHEET_FLOW));
+
+describe('withoutRoutine', () => {
+  it('drops the signature whose hash is the routine id, and keeps the others', () => {
+    const other = signatureOf(routine('other', ['editor', 'chat']));
+    expect(withoutRoutine([DISMISSED, other], routineIdOf(DISMISSED))).toEqual([other]);
+    expect(withoutRoutine([DISMISSED, other], routineIdOf('unrelated'))).toEqual([DISMISSED, other]);
+  });
+});
 
 describe('signatureOf', () => {
   it('joins the step keys in order: a site follows an @, and an unknown app is keyed by its name', () => {

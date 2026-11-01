@@ -35,7 +35,7 @@ export function splitChoices(task: TaskView): Array<{ id: string; label: string 
 }
 
 /** The line under today's tile on the Overview. */
-export function tasksNote(tasks: readonly TaskView[]): string {
+export function tasksNote(tasks: readonly Pick<TaskView, 'confirmed'>[]): string {
   const open = tasks.filter(task => !task.confirmed).length;
   return open === 0 ? 'All confirmed' : plural(open, 'task to confirm', 'tasks to confirm');
 }

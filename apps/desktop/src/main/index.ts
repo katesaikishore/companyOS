@@ -114,6 +114,7 @@ function registerIpc(): void {
     requireRuntime().acceptRoutine(routineId(id), typeof name === 'string' ? name.slice(0, 80) : undefined),
   );
   handle(IPC.dismissRoutine, id => requireRuntime().dismissRoutine(routineId(id)));
+  handle(IPC.resetDecline, id => requireRuntime().resetDecline(routineId(id)));
   handle(IPC.renameAutomation, (id, name) => {
     const value = renamedAutomationName(name);
     if (!value) throw new Error('Give the automation a name.');

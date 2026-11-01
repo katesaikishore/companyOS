@@ -17,6 +17,7 @@ function availableCommands(): Command[] {
     { title: 'Your twin', detail: 'Open overview', run: () => go('#/overview') },
     { title: 'Suggestions', detail: 'Review routines the twin noticed', run: () => go('#/suggestions') },
     { title: 'Automations', detail: 'Review accepted routines and runs', run: () => go('#/automations') },
+    { title: 'What the twin knows', detail: 'See routines, habits and declines', run: () => go('#/knows') },
     { title: 'Network ledger', detail: 'Review model downloads and network calls', run: () => go('#/ledger') },
     { title: 'Settings', detail: 'Change capture, autonomy, and appearance', run: () => go('#/settings') },
   ];

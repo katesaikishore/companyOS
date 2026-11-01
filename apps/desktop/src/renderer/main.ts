@@ -4,6 +4,7 @@ import { shell } from './components/shell.js';
 import { openCommandPalette } from './commands.js';
 import { layaFraction, layaStateLabel, modelFraction, modelStateLabel } from './labels.js';
 import { automationDetailView, automationsView } from './views/automations.js';
+import { knowsView } from './views/knows.js';
 import { ledgerView } from './views/ledger.js';
 import { readinessView } from './views/readiness.js';
 import { overviewView } from './views/overview.js';
@@ -130,6 +131,8 @@ function viewFor(status: TwinStatus, route: Route): HTMLElement {
       return automationsView(status);
     case 'automation':
       return automationDetailView(status, route.id);
+    case 'knows':
+      return knowsView(status);
     case 'ledger':
       return ledgerView(status);
     case 'readiness':
