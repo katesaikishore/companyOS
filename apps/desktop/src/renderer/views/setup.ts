@@ -458,7 +458,7 @@ function layaCard(laya: LayaBundleView): HTMLElement {
 function layaSummary(laya: LayaBundleView): string {
   switch (layaState(laya)) {
     case 'installed':
-      return 'Installed, not used yet';
+      return 'Installed. It labels routines with unknown apps.';
     case 'downloading':
       return 'Downloading';
     case 'unsupported':

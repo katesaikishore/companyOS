@@ -327,7 +327,7 @@ async function main(userDataDir, fixtureDir) {
 
     await page.click('[data-testid="setup-next"]');
     await page.waitForSelector('[data-testid="setup-step"][data-step="5"]');
-    assert.match(await page.textContent('[data-testid="setup-step"]'), /Decision modelInstalled, not used yet/);
+    assert.match(await page.textContent('[data-testid="setup-step"]'), /Decision modelInstalled\. It labels routines with unknown apps\./);
     await page.click('[data-testid="setup-start-observing"]');
     await page.waitForSelector('[data-testid="app-shell"]', { timeout: 15_000 });
     log('setup finished, app shell visible');

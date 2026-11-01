@@ -7,7 +7,7 @@ them.
 
 ## Result
 
-The **Qwen3 1.7B** model (Q8_0) fits best of the three. It gives a clean name for 88% of the test routines, takes about
+The **Qwen3 1.7B** model (Q8_0) fits best of the three. It gives a usable name for 88% of the test routines, takes about
 2.4 seconds a name, and uses about 4.1 GiB of memory. The planner now recommends it on devices with enough memory, and the
 4B model is no longer recommended for naming.
 

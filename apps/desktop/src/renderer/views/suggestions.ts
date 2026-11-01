@@ -89,7 +89,7 @@ function suggestionCard(item: SuggestionView): HTMLElement {
     h(
       'div',
       { class: 'sg-foot' },
-      h('span', { class: 'sg-foot-text' }, 'You confirm every step on the first runs.'),
+      h('span', { class: 'sg-foot-text' }, 'You start each run. Some steps ask first.'),
       button('Not a routine', {
         variant: 'secondary',
         testid: 'suggestion-dismiss',
