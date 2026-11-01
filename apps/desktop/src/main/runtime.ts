@@ -42,7 +42,7 @@ import {
   normalizeAppName,
 } from '@companyos/twin-core';
 import { WHISPER_MODEL_ID } from '@companyos/twin-core';
-import { desktopCapturer, systemPreferences } from 'electron';
+import { app, desktopCapturer, systemPreferences } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -104,6 +104,8 @@ const CAPTURE_SYNC_MS = 5_000;
 /** The image folder's cap. Once it is over, the oldest images go first. Their text stays. */
 const MEDIA_CAP_BYTES = 2 * 1024 ** 3;
 const MEDIA_CAP_BATCH = 200;
+/** The least time between sweeps that run because a frame was kept. A busy screen keeps a frame every few seconds. */
+const SWEEP_MIN_INTERVAL_MS = 60_000;
 /** Reading the image folder means looking at every file, so its size is refreshed at most this often while frames are kept. */
 const MEDIA_SIZE_REFRESH_MS = 60_000;
 /** A frame larger than this is not sent to the page. Frames are about 120 KB, so this only stops a runaway file. */
@@ -141,6 +143,9 @@ export class TwinRuntime {
   private readonly audio: AudioCaptureService;
   /** The speech model state the microphone was last decided on. Undefined until the first decision. */
   private speechWasInstalled: boolean | undefined;
+  /** The daily sweep of expired text and images. Cleared on stop, so a stopped app does not keep a timer. */
+  private sweepTimer: ReturnType<typeof setInterval> | undefined;
+  private lastSweepAt = 0;
   private readonly media: MediaStore;
   private readonly grabber = electronFrameSource();
   private captureTimer: ReturnType<typeof setInterval> | undefined;
@@ -235,7 +240,7 @@ export class TwinRuntime {
 
   static async create(options: RuntimeOptions): Promise<TwinRuntime> {
     const dataKey = await loadOrCreateDataKey(options.userData);
-    const { platform, detail } = await choosePlatform();
+    const { platform, detail } = await choosePlatform(app.isPackaged);
     return new TwinRuntime(options, platform, detail, dataKey);
   }
 
@@ -254,10 +259,13 @@ export class TwinRuntime {
     }
     this.namer.start();
     this.startKindLabels();
-    setInterval(() => void this.housekeeping(), DAY_MS).unref();
+    this.sweepTimer = setInterval(() => void this.sweepMedia(), DAY_MS);
+    this.sweepTimer.unref();
   }
 
   stop(): void {
+    clearInterval(this.sweepTimer);
+    this.sweepTimer = undefined;
     this.capture.stop();
     void this.stopCapture();
     void this.setLocalApi(false);
@@ -381,6 +389,8 @@ export class TwinRuntime {
     const saved = this.agent.updateConfig(next);
     // Removing an app from the captured text happens when the exclusion list changes, so the counts are read again.
     if (changed.excludedApps !== undefined) this.refreshCaptureCounts();
+    // A shorter image period takes effect now, not at the next sweep.
+    if (changed.frameRetentionDays !== undefined) void this.sweepMedia();
     this.refreshCapture();
     if (changed.localApiEnabled !== undefined) await this.setLocalApi(saved.localApiEnabled);
     return saved;
@@ -782,6 +792,7 @@ export class TwinRuntime {
   private async writeFrame(mediaId: string, jpeg: Buffer): Promise<void> {
     await this.media.write(mediaId, jpeg);
     this.noteFrameKept();
+    this.sweepSoon();
   }
 
   private noteFrameKept(): void {
@@ -817,19 +828,40 @@ export class TwinRuntime {
   }
 
   /**
-   * Removes text and images past their retention, keeps the image folder under its cap, and deletes image files that no
-   * stored item names. Runs at start and once a day. A failed sweep is tried again on the next run.
+   * Removes text and images past their retention, and keeps the image folder under its cap. Safe while capture is
+   * running: it never deletes an image that a stored item does not yet name. Runs after kept frames, when retention
+   * changes, and once a day.
    */
-  private async housekeeping(): Promise<void> {
+  private async sweepMedia(): Promise<void> {
     try {
       const { mediaIds } = this.agent.pruneWithMedia();
       await this.media.remove(mediaIds);
       await this.enforceMediaCap();
-      await this.media.reconcile(new Set(this.agent.liveMediaIds()));
       this.refreshCaptureCounts();
     } catch {
       // The error is dropped. A path under the media folder or a stored id should not reach a log.
     }
+  }
+
+  /**
+   * At start, before capture runs: a sweep, then removal of image files that no stored item names. The second step is
+   * not safe while capture is running, because an image is written before its text is stored.
+   */
+  private async housekeeping(): Promise<void> {
+    await this.sweepMedia();
+    try {
+      await this.media.reconcile(new Set(this.agent.liveMediaIds()));
+    } catch {
+      // The error is dropped, as in the sweep.
+    }
+  }
+
+  /** Runs a sweep after a kept frame, at most once a minute, so the cap is held while images are being written. */
+  private sweepSoon(): void {
+    const now = Date.now();
+    if (now - this.lastSweepAt < SWEEP_MIN_INTERVAL_MS) return;
+    this.lastSweepAt = now;
+    void this.sweepMedia();
   }
 
   /** Removes the oldest images while the folder is over its cap. Their text stays. */

@@ -64,6 +64,15 @@ describe('FrameDeduper', () => {
     expect(deduper.shouldKeep('aaaaaaaaaaaaaaaa')).toBe(true);
   });
 
+  it('reads an identical frame again after reset, so a dropped frame does not stand as the reference', () => {
+    const deduper = new FrameDeduper();
+    const frame = '0123456789abcdef';
+    expect(deduper.shouldKeep(frame)).toBe(true);
+    expect(deduper.shouldKeep(frame)).toBe(false);
+    deduper.reset();
+    expect(deduper.shouldKeep(frame)).toBe(true);
+  });
+
   it('refuses a fingerprint that is not sixteen hex characters', () => {
     const deduper = new FrameDeduper();
     expect(() => deduper.shouldKeep('not-a-fingerprint')).toThrow('The frame fingerprint is not valid.');

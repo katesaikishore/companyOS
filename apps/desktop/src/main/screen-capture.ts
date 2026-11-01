@@ -73,6 +73,28 @@ interface Job {
   ts: number;
   context: ScreenContext;
   png: Buffer;
+  /** The capture generation the frame was taken in. A stop or a delete moves the generation on, so an older frame is dropped. */
+  generation: number;
+}
+
+/** The longest a state check or a grab may take before the cycle gives up. The chain then goes on with the next frame. */
+const CHECK_TIMEOUT_MS = 15_000;
+
+/** Resolves with the promise's value, or with the fallback when it rejects or takes longer than ms. */
+function settleWithin<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise<T>(resolve => {
+    const timer = setTimeout(() => resolve(fallback), ms);
+    promise.then(
+      value => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(fallback);
+      },
+    );
+  });
 }
 
 /** Turns a frame into the JPEG kept on disk, scaled down so that each image stays small. */
@@ -89,6 +111,10 @@ export class ScreenCaptureService {
   private grabbing = false;
   /** Set while a read is in flight. It resolves when the read and its storage have ended. */
   private draining: Promise<void> | undefined;
+  /** Set while a cycle is checking the state or grabbing the screen. A stop waits for it too. */
+  private cycling: Promise<void> | undefined;
+  /** Moves on at every stop, so frames taken before it are never stored after it. */
+  private generation = 0;
   /** The one frame waiting to be read. A newer frame replaces it, so a slow read never builds a queue. */
   private pending: Job | null = null;
   private deduper = new FrameDeduper();
@@ -114,6 +140,7 @@ export class ScreenCaptureService {
    */
   stop(): Promise<void> {
     this.running = false;
+    this.generation += 1;
     clearTimeout(this.timer);
     this.timer = undefined;
     this.pending = null;
@@ -122,7 +149,8 @@ export class ScreenCaptureService {
       this.focus.resolve();
       this.focus = undefined;
     }
-    return this.draining ?? Promise.resolve();
+    const inFlight = [this.draining, this.cycling].filter((work): work is Promise<void> => work !== undefined);
+    return Promise.all(inFlight).then(() => undefined);
   }
 
   setContext(context: ScreenContext | null): void {
@@ -177,18 +205,29 @@ export class ScreenCaptureService {
     const context = this.context;
     if (!this.running || this.grabbing || !context || !context.enabled) return;
     this.grabbing = true;
+    const attempt = this.grabAndQueue(this.generation);
+    this.cycling = attempt;
     try {
-      const secureInput = await this.deps.secureInput();
-      if (!screenDecision({ ...context, secureInput }).capture) return;
-      const frame = await this.deps.source.grab();
-      if (!frame) return;
-      // A repeat of the last kept frame costs no OCR and no storage. The fingerprint is kept even if the frame is later dropped.
-      if (!this.deduper.shouldKeep(fingerprintBitmap(frame.bgra, frame.width, frame.height))) return;
-      this.enqueue({ ts: this.deps.now(), context, png: frame.png });
-    } catch {
-      // The error text is dropped on purpose. It can describe what was on screen.
+      await attempt;
     } finally {
       this.grabbing = false;
+      if (this.cycling === attempt) this.cycling = undefined;
+    }
+  }
+
+  private async grabAndQueue(generation: number): Promise<void> {
+    try {
+      // The secure input check also refreshes the app in front, so the frame is labelled with the app on screen now.
+      const secureInput = await settleWithin(this.deps.secureInput(), CHECK_TIMEOUT_MS, 'unknown' as const);
+      const current = this.context;
+      if (generation !== this.generation || !current || !screenDecision({ ...current, secureInput }).capture) return;
+      const frame = await settleWithin(this.deps.source.grab(), CHECK_TIMEOUT_MS, null);
+      if (!frame || generation !== this.generation) return;
+      // A repeat of the last kept frame costs no OCR and no storage. The fingerprint is kept even if the frame is later dropped.
+      if (!this.deduper.shouldKeep(fingerprintBitmap(frame.bgra, frame.width, frame.height))) return;
+      this.enqueue({ ts: this.deps.now(), context: current, png: frame.png, generation });
+    } catch {
+      // The error text is dropped on purpose. It can describe what was on screen.
     }
   }
 
@@ -215,16 +254,28 @@ export class ScreenCaptureService {
     try {
       text = normaliseOcr(await this.deps.ocr.recognise(job.png));
     } catch {
+      // A dropped frame must not stand as the reference for the next one, or an unchanged screen is never read again.
+      this.deduper.reset();
       return;
     }
     this.recentReads.push(this.deps.now() - started);
     if (this.recentReads.length > RECENT_READS) this.recentReads.shift();
-    // The frame passed every check when it was taken. It is kept only if the state still allows it now. The probe was
-    // clear then, so it is not run again here.
-    if (!this.running || !this.context || !screenDecision({ ...this.context, secureInput: false }).capture) return;
+    // The frame passed its checks when it was taken. It is kept only if the state still allows it now, and a secure field
+    // that took focus during OCR stops it.
+    if (!(await this.stillAllowed(job))) {
+      this.deduper.reset();
+      return;
+    }
     // A frame with no text cannot be found by search, so its image is not kept either.
     if (text === '') return;
     const mediaId = await this.keepImage(job.png);
+    // Pause, stop, delete or a secure field can arrive while the image is written. They are checked again before the text
+    // is stored, and an image that is no longer wanted is removed.
+    if (!(await this.stillAllowed(job))) {
+      this.deduper.reset();
+      if (mediaId) await this.deps.media.remove([mediaId]).catch(() => undefined);
+      return;
+    }
     let stored = false;
     try {
       stored = this.deps.sink.ingestScreen({
@@ -238,7 +289,21 @@ export class ScreenCaptureService {
       stored = false;
     }
     // An image whose text was not stored would be kept with nothing to find it by, so it is removed.
-    if (!stored && mediaId) await this.deps.media.remove([mediaId]).catch(() => undefined);
+    if (!stored) {
+      this.deduper.reset();
+      if (mediaId) await this.deps.media.remove([mediaId]).catch(() => undefined);
+    }
+  }
+
+  /**
+   * True while the frame's capture generation is current, capture is running, and the policy allows a screen read now.
+   * It runs the secure input check again, so a password field that took focus after the frame was grabbed stops the read.
+   */
+  private async stillAllowed(job: Job): Promise<boolean> {
+    if (job.generation !== this.generation || !this.running) return false;
+    const secureInput = await settleWithin(this.deps.secureInput(), CHECK_TIMEOUT_MS, 'unknown' as const);
+    const current = this.context;
+    return current !== null && screenDecision({ ...current, secureInput }).capture;
   }
 
   /** Seals the frame as an image and returns its id. A failed write returns null, and the text is still kept. */

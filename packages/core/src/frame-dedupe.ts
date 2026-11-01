@@ -55,4 +55,9 @@ export class FrameDeduper {
     this.lastKept = fingerprint;
     return true;
   }
+
+  /** Forgets the last kept frame, so the next identical frame is read again. Used when a kept frame is then dropped. */
+  reset(): void {
+    this.lastKept = undefined;
+  }
 }

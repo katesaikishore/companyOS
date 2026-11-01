@@ -4,10 +4,13 @@ import { join } from 'node:path';
 import { APP_ORIGIN } from '../shared/ipc';
 import type { TranscribeReply } from './transcribe-worker';
 
+/** How long after a crashed capture page the window is opened again. */
+const RECOVER_MS = 2_000;
+
 /**
  * Microphone capture. A hidden window holds the microphone and cuts it into 30 second segments. This module decides whether
- * each segment may be kept, turns it into text in a utility process, and stores the text through the twin. The window is
- * open only while the policy allows listening, so the microphone is released as soon as it is not allowed.
+ * each segment may be kept, turns it into text in a utility process, and stores the text through the twin. The window stays
+ * open while the setting is on. When listening is not allowed, the page is told to stop, and it releases the microphone.
  */
 
 /** Channel names. capture-preload.ts repeats them, because sandboxed preloads cannot import modules. */
@@ -173,6 +176,11 @@ export class AudioCaptureService {
     window.webContents.on('did-finish-load', () => {
       this.windowReady = true;
       this.send();
+    });
+    // A crashed or killed page must not leave the microphone state on. The window is closed and opened again.
+    window.webContents.on('render-process-gone', () => {
+      if (this.window === window) this.close();
+      setTimeout(() => this.apply(), RECOVER_MS).unref();
     });
     window.on('closed', () => {
       if (this.window === window) {
