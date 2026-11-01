@@ -1,0 +1,501 @@
+{
+  "model": {
+    "id": "qwen3.5-2b",
+    "file": "Qwen3.5-2B-Q8_0.gguf",
+    "bytes": 2012012800,
+    "sha256": "1b04acba824817554f4ce23639bc8495ff70453b8fcb047900c731521021f2c1"
+  },
+  "template": "thinking switched off with an empty think block, grammar from ROUTINE_NAME_JSON_SCHEMA",
+  "wideSample": {
+    "names": [
+      {
+        "steps": "microsoft excel > whatsapp > libreoffice calc",
+        "raw": {
+          "name": "spreadsheet automation"
+        },
+        "outcome": "passes",
+        "ms": 4348
+      },
+      {
+        "steps": "pycharm > telegram > telegram",
+        "raw": {
+          "name": "telegram"
+        },
+        "outcome": "passes",
+        "ms": 3340
+      },
+      {
+        "steps": "visual studio code > zoom > zoom > microsoft excel > notion",
+        "raw": {
+          "name": "visual studio code zoom zoom microsoft excel notion"
+        },
+        "outcome": "passes",
+        "ms": 3866
+      },
+      {
+        "steps": "whatsapp > pycharm > libreoffice calc",
+        "raw": {
+          "name": "python whatsapp calc"
+        },
+        "outcome": "passes",
+        "ms": 3648
+      },
+      {
+        "steps": "pages > xcode > notion > safari > microsoft word",
+        "raw": {
+          "name": "work sessions"
+        },
+        "outcome": "passes",
+        "ms": 3495
+      },
+      {
+        "steps": "safari > pycharm > discord > safari > discord > libreoffice calc",
+        "raw": {
+          "name": "safari and discord routine"
+        },
+        "outcome": "passes",
+        "ms": 3881
+      },
+      {
+        "steps": "visual studio code > microsoft word > microsoft outlook > libreoffice calc",
+        "raw": {
+          "name": "spreadsheet automation"
+        },
+        "outcome": "passes",
+        "ms": 3787
+      },
+      {
+        "steps": "telegram > microsoft excel > thunderbird > zoom > pages > discord",
+        "raw": {
+          "name": "work sessions"
+        },
+        "outcome": "passes",
+        "ms": 3734
+      },
+      {
+        "steps": "firefox > notion > slack > figma",
+        "raw": {
+          "name": "work routine"
+        },
+        "outcome": "passes",
+        "ms": 3483
+      },
+      {
+        "steps": "figma > notion > zoom > microsoft excel > microsoft teams",
+        "raw": {
+          "name": "figma and notion workflow"
+        },
+        "outcome": "passes",
+        "ms": 3962
+      },
+      {
+        "steps": "visual studio code > microsoft excel > microsoft word",
+        "raw": {
+          "name": "work routine"
+        },
+        "outcome": "passes",
+        "ms": 3494
+      },
+      {
+        "steps": "microsoft word > xcode > notion",
+        "raw": {
+          "name": "word and xcode workflow"
+        },
+        "outcome": "passes",
+        "ms": 3696
+      },
+      {
+        "steps": "slack > pages > discord > google chrome > numbers > microsoft word",
+        "raw": {
+          "name": "work sessions"
+        },
+        "outcome": "passes",
+        "ms": 3485
+      },
+      {
+        "steps": "notion > numbers > obsidian > whatsapp",
+        "raw": {
+          "name": "notion numbers obsidian whatsapp"
+        },
+        "outcome": "passes",
+        "ms": 3761
+      },
+      {
+        "steps": "slack > pages > xcode > visual studio code > notion > pycharm",
+        "raw": {
+          "name": "python development workflow"
+        },
+        "outcome": "passes",
+        "ms": 3924
+      },
+      {
+        "steps": "visual studio code > notion > google chrome > zoom > pages",
+        "raw": {
+          "name": "work session routine"
+        },
+        "outcome": "passes",
+        "ms": 3436
+      },
+      {
+        "steps": "visual studio code > thunderbird > notion",
+        "raw": {
+          "name": "visual studio code thunderbird notion"
+        },
+        "outcome": "passes",
+        "ms": 3818
+      },
+      {
+        "steps": "notion > safari > firefox > visual studio code",
+        "raw": {
+          "name": "work sessions"
+        },
+        "outcome": "passes",
+        "ms": 3307
+      },
+      {
+        "steps": "libreoffice calc > figma > discord > whatsapp",
+        "raw": {
+          "name": "office and social apps"
+        },
+        "outcome": "passes",
+        "ms": 3488
+      },
+      {
+        "steps": "telegram > microsoft word > numbers > whatsapp",
+        "raw": {
+          "name": "telegram and microsoft word"
+        },
+        "outcome": "passes",
+        "ms": 4015
+      },
+      {
+        "steps": "figma > obsidian > libreoffice calc > microsoft excel",
+        "raw": {
+          "name": "figma obsidian libreoffice calc microsoft excel"
+        },
+        "outcome": "passes",
+        "ms": 4339
+      },
+      {
+        "steps": "figma > xcode > safari > safari > microsoft excel",
+        "raw": {
+          "name": "figma workflow"
+        },
+        "outcome": "passes",
+        "ms": 3587
+      },
+      {
+        "steps": "safari > microsoft excel > telegram",
+        "raw": {
+          "name": "work sessions"
+        },
+        "outcome": "passes",
+        "ms": 3432
+      },
+      {
+        "steps": "pycharm > pages > figma > pycharm",
+        "raw": {
+          "name": "pycharm pages figma pycharm"
+        },
+        "outcome": "passes",
+        "ms": 3683
+      },
+      {
+        "steps": "microsoft word > notion > whatsapp",
+        "raw": {
+          "name": "word-notion-whatsapp"
+        },
+        "outcome": "passes",
+        "ms": 3463
+      },
+      {
+        "steps": "safari > firefox > microsoft teams > zoom",
+        "raw": {
+          "name": "work sessions"
+        },
+        "outcome": "passes",
+        "ms": 3318
+      },
+      {
+        "steps": "libreoffice calc > microsoft teams > zoom",
+        "raw": {
+          "name": "work sessions"
+        },
+        "outcome": "passes",
+        "ms": 3433
+      },
+      {
+        "steps": "zoom > discord > telegram > pycharm > figma > microsoft excel",
+        "raw": {
+          "name": "zoom discord telegram pycharm figma microsoft excel"
+        },
+        "outcome": "passes",
+        "ms": 4693
+      },
+      {
+        "steps": "discord > telegram > slack",
+        "raw": {
+          "name": "social media check"
+        },
+        "outcome": "passes",
+        "ms": 3729
+      },
+      {
+        "steps": "telegram > google chrome > pycharm > firefox",
+        "raw": {
+          "name": "telegram and google chrome and pycharm and firefox"
+        },
+        "outcome": "passes",
+        "ms": 4403
+      },
+      {
+        "steps": "zoom > libreoffice calc > notion",
+        "raw": {
+          "name": "zoom and libreoffice calc"
+        },
+        "outcome": "passes",
+        "ms": 3858
+      },
+      {
+        "steps": "whatsapp > firefox > xcode > microsoft excel",
+        "raw": {
+          "name": "work routine"
+        },
+        "outcome": "passes",
+        "ms": 3525
+      },
+      {
+        "steps": "xcode > xcode > pycharm > libreoffice calc > safari",
+        "raw": {
+          "name": "xcode workflow"
+        },
+        "outcome": "passes",
+        "ms": 3803
+      },
+      {
+        "steps": "xcode > safari > telegram > visual studio code > microsoft word > google chrome",
+        "raw": {
+          "name": "xcode and visual studio code"
+        },
+        "outcome": "passes",
+        "ms": 4181
+      },
+      {
+        "steps": "firefox > slack > safari > numbers > numbers > obsidian",
+        "raw": {
+          "name": "work routine"
+        },
+        "outcome": "passes",
+        "ms": 3710
+      },
+      {
+        "steps": "pycharm > numbers > libreoffice calc",
+        "raw": {
+          "name": "pycharm numbers libreoffice calc"
+        },
+        "outcome": "passes",
+        "ms": 4197
+      },
+      {
+        "steps": "microsoft excel > zoom > obsidian > firefox > google chrome > discord",
+        "raw": {
+          "name": "work routine"
+        },
+        "outcome": "passes",
+        "ms": 3870
+      },
+      {
+        "steps": "obsidian > obsidian > visual studio code > visual studio code > xcode",
+        "raw": {
+          "name": "obsidian workflow"
+        },
+        "outcome": "passes",
+        "ms": 3845
+      },
+      {
+        "steps": "pages > safari > pycharm > whatsapp",
+        "raw": {
+          "name": "work sessions"
+        },
+        "outcome": "passes",
+        "ms": 3325
+      },
+      {
+        "steps": "microsoft word > firefox > microsoft word > safari",
+        "raw": {
+          "name": "word and browser routine"
+        },
+        "outcome": "passes",
+        "ms": 3454
+      },
+      {
+        "steps": "discord > visual studio code > microsoft teams > numbers > libreoffice calc > discord",
+        "raw": {
+          "name": "discord and visual studio code"
+        },
+        "outcome": "passes",
+        "ms": 3986
+      },
+      {
+        "steps": "whatsapp > microsoft teams > discord > numbers > google chrome",
+        "raw": {
+          "name": "work routine"
+        },
+        "outcome": "passes",
+        "ms": 3830
+      },
+      {
+        "steps": "discord > microsoft excel > telegram",
+        "raw": {
+          "name": "discord microsoft excel telegram"
+        },
+        "outcome": "passes",
+        "ms": 3818
+      },
+      {
+        "steps": "obsidian > zoom > slack",
+        "raw": {
+          "name": "obsidian and zoom"
+        },
+        "outcome": "passes",
+        "ms": 4215
+      },
+      {
+        "steps": "obsidian > xcode > google chrome > notion",
+        "raw": {
+          "name": "obsidian xcode google chrome notion"
+        },
+        "outcome": "passes",
+        "ms": 4340
+      },
+      {
+        "steps": "libreoffice calc > google chrome > microsoft teams",
+        "raw": {
+          "name": "work sessions"
+        },
+        "outcome": "passes",
+        "ms": 4011
+      },
+      {
+        "steps": "figma > discord > microsoft teams > pages > figma > obsidian",
+        "raw": {
+          "name": "figma workflow"
+        },
+        "outcome": "passes",
+        "ms": 3676
+      },
+      {
+        "steps": "libreoffice calc > obsidian > notion > telegram > xcode > firefox",
+        "raw": {
+          "name": "work routine"
+        },
+        "outcome": "passes",
+        "ms": 4166
+      },
+      {
+        "steps": "slack > zoom > microsoft teams > zoom > thunderbird",
+        "raw": {
+          "name": "remote work setup"
+        },
+        "outcome": "passes",
+        "ms": 4011
+      },
+      {
+        "steps": "google chrome > notion > pages",
+        "raw": {
+          "name": "google chrome and pages"
+        },
+        "outcome": "passes",
+        "ms": 4617
+      },
+      {
+        "steps": "google chrome > xcode > firefox",
+        "raw": {
+          "name": "google chrome xcode firefox"
+        },
+        "outcome": "passes",
+        "ms": 4534
+      },
+      {
+        "steps": "figma > microsoft excel > libreoffice calc > google chrome > obsidian > whatsapp",
+        "raw": {
+          "name": "design workflow"
+        },
+        "outcome": "passes",
+        "ms": 3887
+      },
+      {
+        "steps": "xcode > discord > microsoft outlook > pages",
+        "raw": {
+          "name": "xcode discord microsoft outlook pages"
+        },
+        "outcome": "passes",
+        "ms": 3799
+      },
+      {
+        "steps": "microsoft outlook > firefox > pycharm > pages > google chrome > libreoffice calc",
+        "raw": {
+          "name": "workout routine"
+        },
+        "outcome": "passes",
+        "ms": 3652
+      },
+      {
+        "steps": "pycharm > telegram > google chrome > libreoffice calc > microsoft word > figma",
+        "raw": {
+          "name": "python development workflow"
+        },
+        "outcome": "passes",
+        "ms": 3771
+      },
+      {
+        "steps": "xcode > slack > thunderbird",
+        "raw": {
+          "name": "xcode and slack"
+        },
+        "outcome": "passes",
+        "ms": 3833
+      },
+      {
+        "steps": "pages > safari > microsoft excel",
+        "raw": {
+          "name": "work sessions"
+        },
+        "outcome": "passes",
+        "ms": 3680
+      },
+      {
+        "steps": "zoom > microsoft word > figma > microsoft outlook > microsoft outlook > notion",
+        "raw": {
+          "name": "zoom and word and figma and outlook and notion"
+        },
+        "outcome": "invalid_output",
+        "ms": 4882
+      },
+      {
+        "steps": "visual studio code > microsoft outlook > microsoft outlook > thunderbird > discord > visual studio code",
+        "raw": {
+          "name": "visual studio code and outlook"
+        },
+        "outcome": "passes",
+        "ms": 4199
+      },
+      {
+        "steps": "figma > safari > slack > firefox",
+        "raw": {
+          "name": "figma workflow"
+        },
+        "outcome": "passes",
+        "ms": 3556
+      }
+    ],
+    "tally": {
+      "passes": 59,
+      "invalid_output": 1
+    },
+    "callMs": {
+      "median": 3803,
+      "p90": 4340
+    }
+  }
+}

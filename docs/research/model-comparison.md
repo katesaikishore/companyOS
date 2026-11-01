@@ -15,6 +15,80 @@ Two other findings change how the planner works. Its memory estimate was 30 to 3
 planner now uses the measured peak where it is known. And the 4B model, which it recommended on a 16 GiB laptop, was
 the worst at naming.
 
+## Qwen 3.5 and 3.6 / 3.8: what exists, and the smaller models tested
+
+As of 2026-11-01 the Qwen family has moved on from the Qwen3 models in the catalogue:
+
+- **Qwen 3.5** (2026-02). Small models at 0.8B, 2B, 4B and 9B are official Qwen repositories, Apache-2.0. Unsloth publishes
+  GGUF builds of the 2B and 4B models, also Apache-2.0. The official cards compare the 2B model with Qwen3-1.7B and
+  Qwen3-4B-2507 ([Qwen3.5-2B card](https://huggingface.co/Qwen/Qwen3.5-2B)). The 4B card compares only with much larger
+  models, so it doesn't give a like-for-like comparison.
+- **Qwen 3.6** (2026-04). The first release was a 27B dense model and a 35B mixture-of-experts model with about 3B active
+  parameters. No small size was released.
+- **Qwen 3.8** (2026-08). The official Qwen organisation lists six 3.8 repositories: 27B (27.8B dense), Flash-Next (about
+  180B), 2.4T-A95B, and FP8 variants of these. The smallest is the 27B, too large for this device. The GitHub README
+  mentions no small size either. An unofficial page mentioning a "Qwen3.8 4B" distilled model was not verified and is not
+  used here.
+
+The planner cannot use any Qwen 3.6 or 3.8 model on a 16 GiB laptop. The 27B dense model is about 16 GB at 4-bit, so the
+smaller Qwen 3.5 models are the candidates.
+
+### Published benchmarks, non-thinking mode
+
+The app runs naming with thinking off, so the non-thinking rows matter most. Scores are from the official cards.
+
+| Benchmark | Qwen3-1.7B | Qwen3.5-2B | Qwen3-4B-2507 |
+|---|---|---|---|
+| MMLU-Pro | 40.2 | 55.3 | 69.6 |
+| IFEval | 68.2 | 61.2 | 83.4 |
+
+The 2B model is ahead of Qwen3-1.7B on knowledge (MMLU-Pro) but behind it on instruction following (IFEval). Naming
+depends on following the output format, so the naming test below matters more than these scores.
+
+### What the app does with Qwen 3.5 today
+
+The app's naming worker uses a chat session, which turns thinking on by default for Qwen 3.5. The app's `/no_think`
+switch does not turn it off. With the grammar, the 2B model returned no name for any of the three seeded routines
+(`model_error`). The app's worker discards the error text on purpose, so the cause was found by hand. Writing the chat
+template out with an empty thinking block (`<think></think>`) and keeping the same JSON grammar fixed it.
+
+So the app cannot use either Qwen 3.5 model yet. Using one needs a worker change: a catalogue flag that tells the worker
+to write the template out with thinking off. That change is not made here, and the untested models are not in the
+catalogue, so no user can download one that the worker cannot run.
+
+### Naming test, thinking off
+
+`scripts/model-smoke/chat-naming-raw.mjs` names the same 60 synthetic routines with the template written out and the same
+JSON grammar. It writes the report that `score-names.py` reads. This is not the app's own path, so the 1.7B and 4B rows
+above (from the app's chat session) are not exactly the same method. The results are in
+`model-comparison-data/qwen3.5-2b-raw.json` and `qwen3.5-4b-raw.json`. The script needs the two Qwen 3.5 catalogue entries
+to run, which are not in the catalogue yet.
+
+| | Qwen3-1.7B (app path) | Qwen3.5-2B (thinking off) | Qwen3-4B (app path) | Qwen3.5-4B (thinking off) |
+|---|---|---|---|---|
+| Passing the namer's check | 59 of 60 | 59 of 60 | 59 of 60 | 60 of 60 |
+| Usable names | 53 (88%) | 55 (92%) | 56 (93%) | 56 (93%) |
+| Clean names that name an app of the routine | 19 | 32 | 4 | 54 |
+| Median call, one name | 2.4 s | 3.8 s | 7.2 s | 9.6 s |
+| Model file | 1.8 GB (Q8_0) | 2.0 GB (Q8_0) | 2.5 GB (Q4_K_M) | 4.5 GB (Q8_0) |
+
+Reading the table:
+
+- **Qwen3.5-2B** is the best value in this set. Its usable share is about the same as the 4B models, and it names apps more
+  often than the 1.7B model. It is slower than the 1.7B model, and its file is about the same size. Its names are readable,
+  but many are generic ("work routine", "work sessions"), and one was wrong ("spreadsheet automation" for Excel, Outlook
+  and Slack).
+- **Qwen3.5-4B** names an app in 54 of 60 routines, but the names are mostly literal lists of apps ("pages xcode notion
+  safari microsoft word"). A list like that is accurate but not how a person would name a routine. It is also the slowest
+  model, and its Q8 file is 4.5 GB, which the planner would rate "tight" on a 16 GiB laptop.
+- **Memory** was not measured in the raw harness, so the 2B and 4B memory figures are unknown here. The app's worker
+  reported 4.4 GiB for the 2B model while it was failing, which includes its context, so it is not comparable.
+
+**Recommendation.** Once the worker can run Qwen 3.5 with thinking off, the 2B model is the candidate to recommend for
+naming: about the same usable share as the best model here, more app-specific names than the 1.7B model, and a 2 GB file.
+Until then, the recommendation stays on Qwen3 1.7B, because the app cannot run the Qwen 3.5 models. That is a decision for
+the owner, because it changes the worker and the default download.
+
 ## What was measured
 
 The same 60 routines went to each model. They are the seeded synthetic routines from `scripts/model-smoke/lib.mjs`
