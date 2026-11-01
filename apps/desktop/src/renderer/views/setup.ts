@@ -376,8 +376,8 @@ function alternativeRow(fit: ModelFit, plan: SetupPlan, status: TwinStatus): HTM
 }
 
 /**
- * The optional decision-model download (Laya). It is offered once, with its size and what it is for. Skipping it, or
- * not finishing it, changes nothing today, because no part of the app asks it for a decision yet.
+ * The optional decision-model download (Laya). It is offered once, with its size and what it is for. Without it, or
+ * until it is installed, the kind labels on suggestions come from the rules, as they always did.
  */
 function decisionModel(status: TwinStatus): Child[] {
   const laya = status.laya;
@@ -387,7 +387,7 @@ function decisionModel(status: TwinStatus): Child[] {
       { class: 'lede' },
       `An optional small model that answers choice, score and yes/no questions on this device. It is about ${formatDecimalBytes(laya.totalBytes)}, and the twin works without it.`,
     ),
-    h('p', { class: 'muted small', 'data-testid': 'setup-laya-note' }, 'This version only downloads and checks it. Nothing uses it yet, so skipping it changes nothing today.'),
+    h('p', { class: 'muted small', 'data-testid': 'setup-laya-note' }, 'It labels a routine that includes an app companyOS does not know. Skipping it keeps the rule-based labels, which work without it.'),
     layaCard(laya),
   ];
 }

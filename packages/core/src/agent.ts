@@ -3,6 +3,7 @@ import { isExcludedApp, normalizeAppName } from './classify';
 import { TriggerGate, openingApps } from './triggers';
 import { addSignature, matchesDismissed, signatureOf, signaturesWithNamesIn, withoutExcludedApps, withoutRoutine } from './dismissed';
 import { DEFAULT_MINING, mineRoutines, type Routine } from './mine';
+import { hasUnknownStep, ruleKindOfSteps, type KindLabeling } from './labels';
 import { computeReadiness } from './readiness';
 import { habits as computeHabits, HABITS_WINDOW_DAYS } from './habits';
 import type { AppReadinessView, DayTasksView, HabitsView, KnownRoutinesView } from './contract';
@@ -105,6 +106,7 @@ export class TwinAgent {
   private readonly running = new Set<string>();
   /** Names from the local model for detected routines. Memory only: a restart names them again. */
   private readonly routineNames = new Map<string, string>();
+  private readonly routineKinds = new Map<string, KindLabeling>();
   /** Offers and declines. The declines are loaded from the config when the agent starts, and written back when they change. */
   private readonly gate: TriggerGate;
 
@@ -204,6 +206,45 @@ export class TwinAgent {
       const oldest = this.routineNames.keys().next();
       if (!oldest.done) this.routineNames.delete(oldest.value);
     }
+  }
+
+  /** The kind label the decision model gave a routine, when it gave one. Otherwise undefined and the rules apply. */
+  routineKind(routineId: string): KindLabeling | undefined {
+    return this.routineKinds.get(routineId);
+  }
+
+  /** Stores a kind label for a routine. Bounded like the names, so memory does not grow with the history. */
+  setRoutineKind(routineId: string, labeling: KindLabeling): void {
+    this.routineKinds.delete(routineId);
+    this.routineKinds.set(routineId, labeling);
+    if (this.routineKinds.size > MAX_ROUTINE_NAMES) {
+      const oldest = this.routineKinds.keys().next();
+      if (!oldest.done) this.routineKinds.delete(oldest.value);
+    }
+  }
+
+  /**
+   * Routines the kind labeller may label: detected, neither accepted nor dismissed, not labelled yet, and with a step the
+   * catalogue does not know. A routine made only of known apps is labelled by the rules, so it is never asked about.
+   */
+  routinesToLabelKind(): Array<{ routineId: string; steps: Array<{ app: string; windowClass: Routine['steps'][number]['windowClass'] }> }> {
+    const accepted = new Set(this.readAutomations().map(automation => automation.routineId));
+    return this.analyze()
+      .routines.filter(
+        routine =>
+          !accepted.has(routine.id) &&
+          !this.isDismissed(routine) &&
+          !this.routineKinds.has(routine.id) &&
+          hasUnknownStep(routine.steps),
+      )
+      .map(routine => ({ routineId: routine.id, steps: routine.steps.map(step => ({ app: step.app, windowClass: step.windowClass })) }));
+  }
+
+  /** The label a suggestion shows: the model's when it gave one, else the rule-based label of its steps. */
+  kindOfRoutine(routine: Routine): { label: KindLabeling['kind']; source: 'model' | 'rule' } {
+    const labeled = this.routineKinds.get(routine.id);
+    if (labeled) return { label: labeled.kind, source: labeled.source };
+    return { label: ruleKindOfSteps(routine.steps), source: 'rule' };
   }
 
   /**

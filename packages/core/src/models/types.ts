@@ -29,6 +29,13 @@ export interface ModelSpec {
   sizeBytes: number;
   sha256: string;
   summary: string;
+  /**
+   * Whether the planner may recommend this model for naming routines. False for a model that was measured worse at the
+   * task, or not measured at all. It is still listed as an alternative. See docs/research/model-comparison.md.
+   */
+  recommended?: boolean;
+  /** Peak memory of the model's worker process when it named routines, measured on the check machine. */
+  measuredPeakBytes?: number;
 }
 
 export type Fit = 'good' | 'tight' | 'too_large';

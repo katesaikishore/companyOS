@@ -123,6 +123,11 @@ export function classifyApp(name: string): WindowClass {
   return CATALOG[normalizeAppName(name)] ?? 'other';
 }
 
+/** Every app name the catalogue knows, normalised. The Laya label check uses them, so its truth comes from the catalogue. */
+export function cataloguedApps(): string[] {
+  return Object.keys(CATALOG);
+}
+
 /**
  * Web browsers the catalogue does not list, by normalised name. They keep the class 'other', so they are mined like any
  * unknown app, but browser capture is off by default and must cover them too (see isBrowserApp).

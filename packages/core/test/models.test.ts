@@ -67,10 +67,13 @@ describe('catalog', () => {
 });
 
 describe('planSetup', () => {
-  it('recommends the largest comfortable chat model on a 16 GB Linux laptop', () => {
+  it('recommends the 1.7B model on a 16 GB Linux laptop, the best measured fit for names', () => {
     const plan = planSetup(hardware());
-    expect(plan.chat?.spec.id).toBe('qwen3-4b');
+    expect(plan.chat?.spec.id).toBe('qwen3-1.7b');
     expect(plan.chat?.fit).toBe('good');
+    // The 4B model fits this laptop, but it was measured worse at naming, so it is an alternative only.
+    expect(plan.alternatives.find(entry => entry.spec.id === 'qwen3-4b')?.fit).toBe('good');
+    expect(plan.alternatives.find(entry => entry.spec.id === 'qwen3-4b')?.spec.recommended).toBe(false);
     expect(plan.alternatives.find(entry => entry.spec.id === 'qwen3-8b')?.fit).toBe('tight');
     expect(plan.alternatives.find(entry => entry.spec.id === 'qwen3-14b')?.fit).toBe('too_large');
     expect(plan.embedding.id).toBe('nomic-embed-text-v1.5');
@@ -78,8 +81,10 @@ describe('planSetup', () => {
 
   it('uses more of unified memory on Apple silicon', () => {
     const plan = planSetup(hardware({ platform: 'darwin', arch: 'arm64', unifiedMemory: true, gpu: { vendor: 'apple' }, memoryBytes: 8 * GIB }));
-    expect(plan.chat?.spec.id).toBe('qwen3-1.7b');
     expect(plan.memoryBudgetBytes).toBe(Math.floor(8 * GIB * 0.6));
+    // The 1.7B model's measured peak is above the comfort line on this budget, so the comfortable 0.6B model is recommended.
+    expect(plan.alternatives.find(entry => entry.spec.id === 'qwen3-1.7b')?.fit).toBe('tight');
+    expect(plan.chat?.spec.id).toBe('qwen3-0.6b');
   });
 
   it('falls back to a tight fit when nothing is comfortable', () => {
@@ -115,7 +120,9 @@ describe('planSetup', () => {
     expect(classifyFit(70, 100)).toBe('good');
     expect(classifyFit(90, 100)).toBe('tight');
     expect(classifyFit(101, 100)).toBe('too_large');
-    expect(requiredMemoryBytes({ ...CATALOG[0], sizeBytes: 0 })).toBe(GIB);
+    expect(requiredMemoryBytes({ ...CATALOG[0], sizeBytes: 0, measuredPeakBytes: undefined })).toBe(GIB);
+    // A measured peak is used when it is larger than the estimate.
+    expect(requiredMemoryBytes({ ...CATALOG[0], sizeBytes: 0, measuredPeakBytes: 3 * GIB })).toBe(3 * GIB);
   });
 });
 

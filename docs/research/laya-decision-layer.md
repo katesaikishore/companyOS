@@ -1,8 +1,10 @@
 # Laya as a local decision layer
 
 Status: the optional onboarding download is built and tested (see "Onboarding download: built"). The app can fetch, check,
-store and load the model bundle. No part of the app calls Laya for a decision yet, and the default decision model always
-abstains, so behaviour has not changed. Accuracy on companyOS decisions has not been tested.
+store and load the model bundle. As of 2026-11-01 the app uses Laya for one thing: a kind label for a routine that includes
+an app the catalogue does not know. The label is shown beside the suggestion only when the model is confident (0.7), and
+the rules label every other routine. No policy or approval reads it. Its accuracy was checked against the catalogue (see
+"Kind labels"). Checks on companyOS decisions beyond that have not been made.
 
 ## What Laya is (checked 2026-10-31)
 
@@ -78,12 +80,55 @@ The first three were given on 2026-10-31 (see "Verified pins and smoke test"). T
 4. Choosing the onboarding offer (recommended) or first-use only. The onboarding offer is built. The first-use fallback is
    not: a person who skips the step has no download until they ask for it in Settings.
 
+## Kind labels (built 2026-11-01)
+
+What the app does: a routine whose steps include an app the catalogue does not know is sent to Laya with the app names
+only. Laya chooses one kind of work from Web, Code, Spreadsheets, Documents, Email, Messages, Terminal, Design, Mixed and
+Other. The label is shown as "Kind" on the suggestion card, with "· model" when Laya gave it. When Laya answers Other, is
+below the threshold, does not answer in time, or is not installed, the rule-based label is shown. Routines made only of
+catalogued apps never reach the model. The label is for display only. It is not read by policy, approvals, the runner or
+the autonomy gate. A guard test in `packages/core/test/decision.test.ts` checks which modules read the model and the labels.
+
+**Accuracy check.** `scripts/laya-check/label-eval.mjs` runs the same adapter the app uses on each catalogued app name, one
+at a time, with the same question. Laya sees the name only. The catalogue's class for the name is the truth, kept from Laya.
+The check ran on 57 names, on the 2026-11-01 build, with `receptron/laya-onnx` at the pinned commit. The raw output is in
+`docs/research/model-comparison-data/laya-kind-labels-check.json`.
+
+| Threshold | Names shown | Share of the 57 names | Shown labels that match the catalogue |
+|---|---|---|---|
+| 0.4 | 33 | 58% | 82% |
+| 0.5 | 29 | 51% | 86% |
+| 0.6 | 26 | 46% | 88% |
+| **0.7 (chosen)** | **20** | **35%** | **95%** |
+
+One shown label was wrong at 0.7: `powershell` was labelled Code at 0.89, and its catalogue kind is Terminal. Answers at
+every threshold are in the JSON.
+
+**Uncatalogued apps.** The check does not know their truth, so these are only what the model said. None of the 11
+uncatalogued names reached 0.7. The highest was 0.53, for Arc and Raycast, and several were wrong: Arc was given Code,
+Zed Messages, and Warp and Ghostty Code and Messages. So for an app the catalogue does not know, the rules will usually
+keep their label, and the model adds little. Adding the app to the catalogue is cheaper and more accurate than trusting a
+label of 0.7 or less. The model is most useful for the rare name it knows well.
+
+**Cost.** The model loaded in 7 to 117 seconds: 117 seconds on a cold disk cache, and 7 to 8 seconds once the file was
+cached. One answer took a median of 0.40 seconds and 0.49 seconds at the 90th percentile. The model is freed after five
+idle minutes. Its memory while loaded was not measured in the app.
+
+**Timeouts.** The eight-second limit now covers loading as well as the answer. A first load that is still running at the
+limit is abandoned for that call, and it finishes in the background, so the next call finds the model ready.
+
+**Not built.** The decision model is not used for locator repair, for scoring candidate steps, or for flagging untrusted
+text, which the design also allows. Those would need their own checks. The embedding model is still downloaded and never
+loaded.
+
 ## Not done
 
-- No accuracy testing of Laya on companyOS decisions.
-- No measurement of the real footprint on the three platforms.
-- No packaging run on macOS or Windows. The Linux unpacked app was built and run (see "Onboarding download: built").
-- No code in the product calls Laya for a decision.
+- The threshold was set on 57 catalogue names with one model on one machine. Real routines may behave differently, so the
+  check should be run again before the threshold is changed.
+- No measurement of the real footprint on the three platforms, and no packaging run on macOS or Windows. The Linux
+  unpacked app was built and run (see "Onboarding download: built").
+- The kind labels were not run inside a running app with the real bundle installed. Their adapter, the job and the release
+  timer are tested with fakes, and the adapter was run against the real bundle outside the app.
 
 ## Verified pins and smoke test
 
@@ -183,7 +228,7 @@ in `apps/desktop/src/main/laya.ts`, and the types are in `packages/core/src/deci
   hashes all five files, then imports `@receptron/laya` and calls `Laya.load({ modelDir })`, which reads local files and
   sends no request. The package is not imported before that. Nothing in the app calls `load()`.
 - **Setup step.** A new optional step 4, "Decision model", between the device step and "Start observing". It states
-  the size (about 1.7 GB), says that nothing uses the model yet, and has Download, Cancel, Resume, Delete partial download
+  the size (about 1.7 GB), says that the model is optional and what it is used for, and has Download, Cancel, Resume, Delete partial download
   and "Skip, use rules". Cancel keeps what was downloaded. Settings lists the model and can remove it.
 - **Ledger page.** A multi-file download shows the file name in its row and in the exact-request panel.
 

@@ -1,0 +1,804 @@
+{
+  "machine": {
+    "platform": "linux 6.18.44-fc-v185",
+    "arch": "x64",
+    "cpuModel": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "cpuThreads": 4,
+    "memoryGiB": 15.7,
+    "node": "v22.23.4"
+  },
+  "loadAverageAtStart": [
+    3.26,
+    2.21,
+    1.13
+  ],
+  "model": {
+    "id": "qwen3-4b",
+    "file": "Qwen3-4B-Q4_K_M.gguf",
+    "bytes": 2497280256,
+    "sha256": "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5"
+  },
+  "workerPath": {
+    "loadMs": 4019,
+    "memoryAfterLoad": {
+      "rssMiB": 5306.125,
+      "anonMiB": 2887.953125,
+      "fileMiB": 2418.171875,
+      "peakRssMiB": 5306.125
+    },
+    "memoryAfterNames": {
+      "rssMiB": 5367.81640625,
+      "anonMiB": 2949.00390625,
+      "fileMiB": 2418.8125,
+      "peakRssMiB": 5369.07421875
+    },
+    "names": [
+      {
+        "steps": "visual studio code > google chrome > microsoft teams",
+        "ms": 6799,
+        "raw": {
+          "name": "Work Session Routine"
+        },
+        "result": {
+          "source": "model",
+          "name": "Work Session Routine"
+        },
+        "passesValidation": true
+      },
+      {
+        "steps": "microsoft excel > microsoft outlook > slack",
+        "ms": 7337,
+        "raw": {
+          "name": "Workday Communication Routine"
+        },
+        "result": {
+          "source": "model",
+          "name": "Workday Communication Routine"
+        },
+        "passesValidation": true
+      },
+      {
+        "steps": "zoom > notion > microsoft outlook",
+        "ms": 7340,
+        "raw": {
+          "name": "Check Work Emails and Notes"
+        },
+        "result": {
+          "source": "model",
+          "name": "Check Work Emails and Notes"
+        },
+        "passesValidation": true
+      }
+    ],
+    "namingTimeoutMs": 20000
+  },
+  "jobPass": {
+    "ms": 30264,
+    "renamed": [
+      {
+        "steps": "visual studio code > google chrome > microsoft teams",
+        "name": "Work Session Routine"
+      },
+      {
+        "steps": "microsoft excel > microsoft outlook > slack",
+        "name": "Workday Communication Routine"
+      },
+      {
+        "steps": "zoom > notion > microsoft outlook",
+        "name": "Check Work Emails and Notes"
+      }
+    ]
+  },
+  "direct": {
+    "backend": "cpu",
+    "systemInfo": "CPU : SSE3 = 1 | SSSE3 = 1 | AVX = 1 | AVX2 = 1 | F16C = 1 | FMA = 1 | BMI2 = 1 | AVX512 = 1 | AVX512_VBMI = 1 | AVX512_VNNI = 1 | AVX512_BF16 = 1 | AMX_INT8 = 1 | LLAMAFILE = 1 | REPACK = 1 | ",
+    "nodeLlamaCppVersion": "3.22.1",
+    "modelMs": 1994,
+    "contextMs": 1595,
+    "modelSizeMiB": 2376,
+    "contextSize": 2048,
+    "threads": 2,
+    "memoryBeforeModel": {
+      "rssMiB": 129.39453125,
+      "anonMiB": 71.66015625,
+      "fileMiB": 57.734375,
+      "peakRssMiB": 129.39453125
+    },
+    "memoryAfterModel": {
+      "rssMiB": 5038.8671875,
+      "anonMiB": 2617.34765625,
+      "fileMiB": 2421.51953125,
+      "peakRssMiB": 5107.2734375
+    },
+    "memoryAfterContext": {
+      "rssMiB": 5339.94140625,
+      "anonMiB": 2918.28515625,
+      "fileMiB": 2421.65625,
+      "peakRssMiB": 5339.94140625
+    },
+    "memoryAfterRuns": {
+      "rssMiB": 5408.515625,
+      "anonMiB": 2986.24609375,
+      "fileMiB": 2422.26953125,
+      "peakRssMiB": 5409.9375
+    },
+    "runs": [
+      {
+        "steps": "visual studio code > google chrome > microsoft teams",
+        "round": 1,
+        "text": "{\n    \"name\": \"Work Session Routine\"\n}",
+        "inputTokens": 133,
+        "outputTokens": 13,
+        "firstTokenMs": 4114,
+        "totalMs": 7072,
+        "prefillTokensPerSecond": 32.3,
+        "decodeTokensPerSecond": 4.1
+      },
+      {
+        "steps": "microsoft excel > microsoft outlook > slack",
+        "round": 1,
+        "text": "{\n    \"name\": \"Workday Communication Routine\"\n}",
+        "inputTokens": 131,
+        "outputTokens": 14,
+        "firstTokenMs": 3557,
+        "totalMs": 6828,
+        "prefillTokensPerSecond": 36.8,
+        "decodeTokensPerSecond": 4
+      },
+      {
+        "steps": "zoom > notion > microsoft outlook",
+        "round": 1,
+        "text": "{\n    \"name\": \"Check Work Emails and Notes\"\n}",
+        "inputTokens": 130,
+        "outputTokens": 15,
+        "firstTokenMs": 3773,
+        "totalMs": 7353,
+        "prefillTokensPerSecond": 34.5,
+        "decodeTokensPerSecond": 3.9
+      },
+      {
+        "steps": "visual studio code > google chrome > microsoft teams",
+        "round": 2,
+        "text": "{\n    \"name\": \"Work Session Routine\"\n}",
+        "inputTokens": 133,
+        "outputTokens": 13,
+        "firstTokenMs": 3479,
+        "totalMs": 6268,
+        "prefillTokensPerSecond": 38.2,
+        "decodeTokensPerSecond": 4.3
+      },
+      {
+        "steps": "microsoft excel > microsoft outlook > slack",
+        "round": 2,
+        "text": "{\n    \"name\": \"Workday Communication Routine\"\n}",
+        "inputTokens": 131,
+        "outputTokens": 14,
+        "firstTokenMs": 3594,
+        "totalMs": 7075,
+        "prefillTokensPerSecond": 36.4,
+        "decodeTokensPerSecond": 3.7
+      },
+      {
+        "steps": "zoom > notion > microsoft outlook",
+        "round": 2,
+        "text": "{\n    \"name\": \"Check Work Emails and Notes\"\n}",
+        "inputTokens": 130,
+        "outputTokens": 15,
+        "firstTokenMs": 3465,
+        "totalMs": 7057,
+        "prefillTokensPerSecond": 37.5,
+        "decodeTokensPerSecond": 3.9
+      },
+      {
+        "steps": "visual studio code > google chrome > microsoft teams",
+        "round": 3,
+        "text": "{\n    \"name\": \"Work Session Routine\"\n}",
+        "inputTokens": 133,
+        "outputTokens": 13,
+        "firstTokenMs": 3562,
+        "totalMs": 6633,
+        "prefillTokensPerSecond": 37.3,
+        "decodeTokensPerSecond": 3.9
+      },
+      {
+        "steps": "microsoft excel > microsoft outlook > slack",
+        "round": 3,
+        "text": "{\n    \"name\": \"Workday Communication Routine\"\n}",
+        "inputTokens": 131,
+        "outputTokens": 14,
+        "firstTokenMs": 3523,
+        "totalMs": 6951,
+        "prefillTokensPerSecond": 37.2,
+        "decodeTokensPerSecond": 3.8
+      },
+      {
+        "steps": "zoom > notion > microsoft outlook",
+        "round": 3,
+        "text": "{\n    \"name\": \"Check Work Emails and Notes\"\n}",
+        "inputTokens": 130,
+        "outputTokens": 15,
+        "firstTokenMs": 3467,
+        "totalMs": 6697,
+        "prefillTokensPerSecond": 37.5,
+        "decodeTokensPerSecond": 4.3
+      }
+    ],
+    "medianPrefillTokensPerSecond": 37.2,
+    "medianDecodeTokensPerSecond": 3.9,
+    "medianTotalMs": 6951,
+    "sameTextAsWorker": [
+      true,
+      true,
+      true
+    ]
+  },
+  "failurePaths": {
+    "timeout": {
+      "result": {
+        "source": "rule",
+        "reason": "timeout"
+      },
+      "workerStoppedAfterTimeout": true,
+      "nextRequest": {
+        "source": "model",
+        "name": "Work Session Routine"
+      },
+      "nextRequestMsIncludingNewWorkerAndLoad": 12353,
+      "nextRequestUsedANewWorker": true,
+      "workerStoppedWhenIdle": true
+    },
+    "linkOutsideModelsFolder": {
+      "source": "rule",
+      "reason": "model_error"
+    },
+    "cutShort": {
+      "rejected": true,
+      "message": "The local model did not finish."
+    },
+    "overLimit": {
+      "rejected": true,
+      "message": "The local model did not finish."
+    },
+    "afterRefusal": {
+      "source": "model",
+      "name": "Work Session Routine"
+    },
+    "widestRoutine": {
+      "promptChars": 1449,
+      "result": {
+        "source": "model",
+        "name": "Work Routine"
+      }
+    },
+    "allWorkersGone": true
+  },
+  "wideSample": {
+    "routines": 60,
+    "tally": {
+      "passes": 59,
+      "invalid_output": 1
+    },
+    "passingNamesThatContainAnAppWord": 4,
+    "callMs": {
+      "min": 6249,
+      "median": 7188,
+      "p90": 8010,
+      "max": 9451
+    },
+    "workerMemoryAfter": {
+      "rssMiB": 5379.97265625,
+      "anonMiB": 2961.234375,
+      "fileMiB": 2418.73828125,
+      "peakRssMiB": 5381.28515625
+    },
+    "names": [
+      {
+        "steps": "microsoft excel > whatsapp > libreoffice calc",
+        "raw": {
+          "name": "Work sessions with office apps"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "pycharm > telegram > telegram",
+        "raw": {
+          "name": "Check Telegram in PyCharm"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "visual studio code > zoom > zoom > microsoft excel > notion",
+        "raw": {
+          "name": "Work sessions routine"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "whatsapp > pycharm > libreoffice calc",
+        "raw": {
+          "name": "Work sessions with productivity tools"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "pages > xcode > notion > safari > microsoft word",
+        "raw": {
+          "name": "Work sessions routine"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "safari > pycharm > discord > safari > discord > libreoffice calc",
+        "raw": {
+          "name": "Work and Communicate"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "visual studio code > microsoft word > microsoft outlook > libreoffice calc",
+        "raw": {
+          "name": "Work and Communicate"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "telegram > microsoft excel > thunderbird > zoom > pages > discord",
+        "raw": {
+          "name": "Workday Collaboration Routine"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "firefox > notion > slack > figma",
+        "raw": {
+          "name": "Work session routine"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "figma > notion > zoom > microsoft excel > microsoft teams",
+        "raw": {
+          "name": "workshop preparation"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "visual studio code > microsoft excel > microsoft word",
+        "raw": {
+          "name": "workday routine"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "microsoft word > xcode > notion",
+        "raw": {
+          "name": "Work sessions routine"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "slack > pages > discord > google chrome > numbers > microsoft word",
+        "raw": {
+          "name": "Work Session Routine"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "notion > numbers > obsidian > whatsapp",
+        "raw": {
+          "name": "Work session productivity routine"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "slack > pages > xcode > visual studio code > notion > pycharm",
+        "raw": {
+          "name": "Development Workflow"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "visual studio code > notion > google chrome > zoom > pages",
+        "raw": {
+          "name": "Work session routine"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "visual studio code > thunderbird > notion",
+        "raw": {
+          "name": "Work on coding, email, and notes"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "notion > safari > firefox > visual studio code",
+        "raw": {
+          "name": "Work on projects"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "libreoffice calc > figma > discord > whatsapp",
+        "raw": {
+          "name": "Work session routine"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "telegram > microsoft word > numbers > whatsapp",
+        "raw": {
+          "name": "Work and Communicate"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "figma > obsidian > libreoffice calc > microsoft excel",
+        "raw": {
+          "name": "Work on spreadsheets and notes"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "figma > xcode > safari > safari > microsoft excel",
+        "raw": {
+          "name": "Work on Software Development Projects"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "safari > microsoft excel > telegram",
+        "raw": {
+          "name": "Check Email and Review Spreadsheet"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "pycharm > pages > figma > pycharm",
+        "raw": {
+          "name": "PyCharm and Figma Work Sessions"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "microsoft word > notion > whatsapp",
+        "raw": {
+          "name": "Work and Communicate"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "safari > firefox > microsoft teams > zoom",
+        "raw": {
+          "name": "Work Collaboration Routine"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "libreoffice calc > microsoft teams > zoom",
+        "raw": {
+          "name": "Work meetings"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "zoom > discord > telegram > pycharm > figma > microsoft excel",
+        "raw": {
+          "name": "Work session routine"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "discord > telegram > slack",
+        "raw": {
+          "name": "Work communication check"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "telegram > google chrome > pycharm > firefox",
+        "raw": {
+          "name": "Work Session Routine"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "zoom > libreoffice calc > notion",
+        "raw": {
+          "name": "Work on spreadsheets and notes"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "whatsapp > firefox > xcode > microsoft excel",
+        "raw": {
+          "name": "Development and Communication Tools"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "xcode > xcode > pycharm > libreoffice calc > safari",
+        "raw": {
+          "name": "Development and Productivity Routine"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "xcode > safari > telegram > visual studio code > microsoft word > google chrome",
+        "raw": {
+          "name": "work_session_routine"
+        },
+        "outcome": "invalid_output"
+      },
+      {
+        "steps": "firefox > slack > safari > numbers > numbers > obsidian",
+        "raw": {
+          "name": "Work Session Routine"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "pycharm > numbers > libreoffice calc",
+        "raw": {
+          "name": "Work sessions"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "microsoft excel > zoom > obsidian > firefox > google chrome > discord",
+        "raw": {
+          "name": "Work and Communication Routine"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "obsidian > obsidian > visual studio code > visual studio code > xcode",
+        "raw": {
+          "name": "Development Workflow"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "pages > safari > pycharm > whatsapp",
+        "raw": {
+          "name": "Work and Communication Routine"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "microsoft word > firefox > microsoft word > safari",
+        "raw": {
+          "name": "word research and development"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "discord > visual studio code > microsoft teams > numbers > libreoffice calc > discord",
+        "raw": {
+          "name": "Work sessions with team communication and productivity tools"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "whatsapp > microsoft teams > discord > numbers > google chrome",
+        "raw": {
+          "name": "Work and Communication Routine"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "discord > microsoft excel > telegram",
+        "raw": {
+          "name": "Work and Communicate"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "obsidian > zoom > slack",
+        "raw": {
+          "name": "Workshop Collaboration"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "obsidian > xcode > google chrome > notion",
+        "raw": {
+          "name": "Development and Documentation Workflow"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "libreoffice calc > google chrome > microsoft teams",
+        "raw": {
+          "name": "Work Session Routine"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "figma > discord > microsoft teams > pages > figma > obsidian",
+        "raw": {
+          "name": "Work sessions with design and collaboration tools"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "libreoffice calc > obsidian > notion > telegram > xcode > firefox",
+        "raw": {
+          "name": "Work and Communication Routine"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "slack > zoom > microsoft teams > zoom > thunderbird",
+        "raw": {
+          "name": "Work meetings and communication"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "google chrome > notion > pages",
+        "raw": {
+          "name": "Work sessions with Chrome, Notion, and Pages"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "google chrome > xcode > firefox",
+        "raw": {
+          "name": "Work sessions with development tools"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "figma > microsoft excel > libreoffice calc > google chrome > obsidian > whatsapp",
+        "raw": {
+          "name": "Work and Communication Routine"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "xcode > discord > microsoft outlook > pages",
+        "raw": {
+          "name": "Work and Communication"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "microsoft outlook > firefox > pycharm > pages > google chrome > libreoffice calc",
+        "raw": {
+          "name": "Work Session Routine"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "pycharm > telegram > google chrome > libreoffice calc > microsoft word > figma",
+        "raw": {
+          "name": "Work Session Routine"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "xcode > slack > thunderbird",
+        "raw": {
+          "name": "Work and Communication"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "pages > safari > microsoft excel",
+        "raw": {
+          "name": "Workday Routine"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "zoom > microsoft word > figma > microsoft outlook > microsoft outlook > notion",
+        "raw": {
+          "name": "Workday Routine"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "visual studio code > microsoft outlook > microsoft outlook > thunderbird > discord > visual studio code",
+        "raw": {
+          "name": "Check Email and Communicate"
+        },
+        "outcome": "passes"
+      },
+      {
+        "steps": "figma > safari > slack > firefox",
+        "raw": {
+          "name": "Work Session Routine"
+        },
+        "outcome": "passes"
+      }
+    ]
+  },
+  "contention": {
+    "cpuMathCores": 4,
+    "stoppedAfterMs": 45000,
+    "quiet": {
+      "all cores": {
+        "threads": 4,
+        "callMs": [
+          4265,
+          4188,
+          4632
+        ]
+      },
+      "modelThreads()": {
+        "threads": 2,
+        "callMs": [
+          7342,
+          6680,
+          7239
+        ]
+      }
+    },
+    "oneBusyProgram": {
+      "all cores": {
+        "threads": 4,
+        "callMs": [
+          12382,
+          13823,
+          14953,
+          13685,
+          14504,
+          13620
+        ]
+      },
+      "modelThreads()": {
+        "threads": 2,
+        "callMs": [
+          6866,
+          6668,
+          7008,
+          6425,
+          6626,
+          7192
+        ]
+      }
+    },
+    "medians": {
+      "all cores": {
+        "median": 13823,
+        "max": 14953
+      },
+      "modelThreads()": {
+        "median": 6866,
+        "max": 7192
+      }
+    },
+    "loadAverageWhileBusy": [
+      [
+        3.44,
+        2.5,
+        1.79
+      ],
+      [
+        3.79,
+        2.83,
+        1.95
+      ]
+    ],
+    "throughRealWorkerWhileBusy": [
+      {
+        "ms": 7639,
+        "source": "model"
+      },
+      {
+        "ms": 6910,
+        "source": "model"
+      },
+      {
+        "ms": 7170,
+        "source": "model"
+      }
+    ]
+  },
+  "loadAverageAtEnd": [
+    3.53,
+    2.87,
+    1.99
+  ]
+}

@@ -108,12 +108,13 @@ name routines. Typing, clicking and sending are not built, and no release has be
 <details>
 <summary><b>What is not done yet</b></summary>
 
-- **Model use** stops at naming. Routine detection, labels, policy and safety checks are rule-based. Naming has been run
-  with a real chat model (Qwen3 0.6B, Linux CPU, outside Electron). It works, but the names are poor: about a quarter are
-  rejected, and most of the rest are one word. Larger models, Electron, macOS and Windows were not tried. The embedding
-  model loads and gives sensible vectors in an opt-in check, but nothing in the app uses it. Setup offers an optional
-  Laya decision model (about 1.7 GB, checked against pinned SHA-256 digests). This version only downloads it. Nothing
-  uses it yet.
+- **Model use.** A local chat model names routines. The recommended model is now Qwen3 1.7B, which gave a clean name for
+  88% of test routines, against 52% for Qwen3 0.6B and 93% for Qwen3 4B. The 4B model is not recommended, because most of its
+  names were generic (see `docs/research/model-comparison.md`). An optional Laya decision model (about 1.7 GB, checked against
+  pinned SHA-256 digests) labels a routine that includes an app the catalogue does not know. It shows the label only at 0.7
+  confidence or more. On 57 catalogue names, those labels matched the catalogue 95% of the time, for 35% of the names. The
+  rules label everything else, and no policy or approval reads a label. Routine detection, policy and safety checks are
+  rule-based. The embedding model is downloaded and never loaded.
 - **Steps** are limited. Focusing an app and checking focus work wherever app capture works. Opening a link or a file
   works on macOS, Windows and Linux X11 (where `gio` is installed), and a file asks each time. The Linux adapter has run
   only with stand-in apps. Pressing a shortcut works on macOS and Windows and, on X11, through xdotool. It brings the app

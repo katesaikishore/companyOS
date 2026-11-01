@@ -286,7 +286,7 @@ async function main() {
     await page.click('[data-testid="setup-next"]');
     await page.waitForSelector('[data-testid="setup-step"][data-step="4"]');
     await page.waitForSelector('[data-testid="setup-laya"][data-state="not_installed"]');
-    assert.match(await page.textContent('[data-testid="setup-laya-note"]'), /Nothing uses it yet/);
+    assert.match(await page.textContent('[data-testid="setup-laya-note"]'), /keeps the rule-based labels/);
     // The page states the size of the bundle it will fetch. Here that is the 3 MB test bundle. The real one reads "about 1.7 GB" (laya-labels.test.ts).
     assert.match(await page.textContent('[data-testid="setup-step"]'), /about 3 MB/, 'the step states the size of the bundle');
     assert.equal(await page.locator('[data-testid="setup-laya-skip"]').count(), 1, 'Skip is offered before the download');

@@ -1,0 +1,578 @@
+{
+  "model": {
+    "id": "laya",
+    "bundle": "laya",
+    "loadMs": 6822
+  },
+  "rows": [
+    {
+      "name": "chrome",
+      "truth": "Web",
+      "choice": "Web",
+      "confidence": 0.829,
+      "ms": 752
+    },
+    {
+      "name": "google chrome",
+      "truth": "Web",
+      "choice": "Web",
+      "confidence": 0.703,
+      "ms": 414
+    },
+    {
+      "name": "google-chrome",
+      "truth": "Web",
+      "choice": "Web",
+      "confidence": 0.7,
+      "ms": 381
+    },
+    {
+      "name": "chromium",
+      "truth": "Web",
+      "choice": "Web",
+      "confidence": 0.656,
+      "ms": 343
+    },
+    {
+      "name": "msedge",
+      "truth": "Web",
+      "choice": "Web",
+      "confidence": 0.399,
+      "ms": 447
+    },
+    {
+      "name": "microsoft edge",
+      "truth": "Web",
+      "choice": "Web",
+      "confidence": 0.441,
+      "ms": 461
+    },
+    {
+      "name": "firefox",
+      "truth": "Web",
+      "choice": "Web",
+      "confidence": 0.971,
+      "ms": 407
+    },
+    {
+      "name": "mozilla firefox",
+      "truth": "Web",
+      "choice": "Web",
+      "confidence": 0.982,
+      "ms": 499
+    },
+    {
+      "name": "safari",
+      "truth": "Web",
+      "choice": "Web",
+      "confidence": 0.71,
+      "ms": 476
+    },
+    {
+      "name": "brave",
+      "truth": "Web",
+      "choice": "Code",
+      "confidence": 0.4,
+      "ms": 464
+    },
+    {
+      "name": "brave browser",
+      "truth": "Web",
+      "choice": "Web",
+      "confidence": 0.828,
+      "ms": 359
+    },
+    {
+      "name": "excel",
+      "truth": "Spreadsheets",
+      "choice": "Documents",
+      "confidence": 0.45,
+      "ms": 339
+    },
+    {
+      "name": "microsoft excel",
+      "truth": "Spreadsheets",
+      "choice": "Other",
+      "confidence": 0.265,
+      "ms": 285
+    },
+    {
+      "name": "calc",
+      "truth": "Spreadsheets",
+      "choice": "Other",
+      "confidence": 0.282,
+      "ms": 358
+    },
+    {
+      "name": "libreoffice calc",
+      "truth": "Spreadsheets",
+      "choice": "Other",
+      "confidence": 0.354,
+      "ms": 485
+    },
+    {
+      "name": "libreoffice-calc",
+      "truth": "Spreadsheets",
+      "choice": "Other",
+      "confidence": 0.407,
+      "ms": 486
+    },
+    {
+      "name": "numbers",
+      "truth": "Spreadsheets",
+      "choice": "Other",
+      "confidence": 0.286,
+      "ms": 479
+    },
+    {
+      "name": "word",
+      "truth": "Documents",
+      "choice": "Documents",
+      "confidence": 0.704,
+      "ms": 438
+    },
+    {
+      "name": "microsoft word",
+      "truth": "Documents",
+      "choice": "Documents",
+      "confidence": 0.731,
+      "ms": 464
+    },
+    {
+      "name": "writer",
+      "truth": "Documents",
+      "choice": "Other",
+      "confidence": 0.364,
+      "ms": 464
+    },
+    {
+      "name": "libreoffice writer",
+      "truth": "Documents",
+      "choice": "Other",
+      "confidence": 0.296,
+      "ms": 311
+    },
+    {
+      "name": "libreoffice-writer",
+      "truth": "Documents",
+      "choice": "Other",
+      "confidence": 0.253,
+      "ms": 390
+    },
+    {
+      "name": "pages",
+      "truth": "Documents",
+      "choice": "Other",
+      "confidence": 0.396,
+      "ms": 553
+    },
+    {
+      "name": "notion",
+      "truth": "Documents",
+      "choice": "Other",
+      "confidence": 0.238,
+      "ms": 460
+    },
+    {
+      "name": "obsidian",
+      "truth": "Documents",
+      "choice": "Code",
+      "confidence": 0.297,
+      "ms": 410
+    },
+    {
+      "name": "outlook",
+      "truth": "Email",
+      "choice": "Web",
+      "confidence": 0.394,
+      "ms": 465
+    },
+    {
+      "name": "microsoft outlook",
+      "truth": "Email",
+      "choice": "Email",
+      "confidence": 0.509,
+      "ms": 334
+    },
+    {
+      "name": "thunderbird",
+      "truth": "Email",
+      "choice": "Email",
+      "confidence": 0.266,
+      "ms": 299
+    },
+    {
+      "name": "mail",
+      "truth": "Email",
+      "choice": "Email",
+      "confidence": 0.731,
+      "ms": 293
+    },
+    {
+      "name": "slack",
+      "truth": "Messages",
+      "choice": "Messages",
+      "confidence": 0.641,
+      "ms": 384
+    },
+    {
+      "name": "teams",
+      "truth": "Messages",
+      "choice": "Code",
+      "confidence": 0.328,
+      "ms": 446
+    },
+    {
+      "name": "microsoft teams",
+      "truth": "Messages",
+      "choice": "Code",
+      "confidence": 0.267,
+      "ms": 458
+    },
+    {
+      "name": "discord",
+      "truth": "Messages",
+      "choice": "Messages",
+      "confidence": 0.548,
+      "ms": 353
+    },
+    {
+      "name": "zoom",
+      "truth": "Messages",
+      "choice": "Other",
+      "confidence": 0.254,
+      "ms": 294
+    },
+    {
+      "name": "telegram",
+      "truth": "Messages",
+      "choice": "Messages",
+      "confidence": 0.9,
+      "ms": 337
+    },
+    {
+      "name": "whatsapp",
+      "truth": "Messages",
+      "choice": "Messages",
+      "confidence": 0.993,
+      "ms": 454
+    },
+    {
+      "name": "messages",
+      "truth": "Messages",
+      "choice": "Messages",
+      "confidence": 1,
+      "ms": 412
+    },
+    {
+      "name": "code",
+      "truth": "Code",
+      "choice": "Code",
+      "confidence": 0.808,
+      "ms": 496
+    },
+    {
+      "name": "visual studio code",
+      "truth": "Code",
+      "choice": "Code",
+      "confidence": 0.913,
+      "ms": 487
+    },
+    {
+      "name": "xcode",
+      "truth": "Code",
+      "choice": "Code",
+      "confidence": 0.896,
+      "ms": 356
+    },
+    {
+      "name": "pycharm",
+      "truth": "Code",
+      "choice": "Code",
+      "confidence": 0.655,
+      "ms": 367
+    },
+    {
+      "name": "cursor",
+      "truth": "Code",
+      "choice": "Other",
+      "confidence": 0.324,
+      "ms": 301
+    },
+    {
+      "name": "sublime text",
+      "truth": "Code",
+      "choice": "Code",
+      "confidence": 0.6,
+      "ms": 322
+    },
+    {
+      "name": "devenv",
+      "truth": "Code",
+      "choice": "Code",
+      "confidence": 0.292,
+      "ms": 395
+    },
+    {
+      "name": "terminal",
+      "truth": "Terminal",
+      "choice": "Terminal",
+      "confidence": 0.709,
+      "ms": 279
+    },
+    {
+      "name": "iterm2",
+      "truth": "Terminal",
+      "choice": "Code",
+      "confidence": 0.62,
+      "ms": 263
+    },
+    {
+      "name": "powershell",
+      "truth": "Terminal",
+      "choice": "Code",
+      "confidence": 0.891,
+      "ms": 362
+    },
+    {
+      "name": "windowsterminal",
+      "truth": "Terminal",
+      "choice": "Code",
+      "confidence": 0.224,
+      "ms": 480
+    },
+    {
+      "name": "windows terminal",
+      "truth": "Terminal",
+      "choice": "Terminal",
+      "confidence": 0.951,
+      "ms": 349
+    },
+    {
+      "name": "konsole",
+      "truth": "Terminal",
+      "choice": "Web",
+      "confidence": 0.516,
+      "ms": 304
+    },
+    {
+      "name": "gnome-terminal",
+      "truth": "Terminal",
+      "choice": "Terminal",
+      "confidence": 0.77,
+      "ms": 415
+    },
+    {
+      "name": "alacritty",
+      "truth": "Terminal",
+      "choice": "Messages",
+      "confidence": 0.266,
+      "ms": 467
+    },
+    {
+      "name": "kitty",
+      "truth": "Terminal",
+      "choice": "Messages",
+      "confidence": 0.3,
+      "ms": 396
+    },
+    {
+      "name": "figma",
+      "truth": "Design",
+      "choice": "Code",
+      "confidence": 0.606,
+      "ms": 459
+    },
+    {
+      "name": "photoshop",
+      "truth": "Design",
+      "choice": "Design",
+      "confidence": 0.416,
+      "ms": 343
+    },
+    {
+      "name": "illustrator",
+      "truth": "Design",
+      "choice": "Other",
+      "confidence": 0.336,
+      "ms": 291
+    },
+    {
+      "name": "sketch",
+      "truth": "Design",
+      "choice": "Code",
+      "confidence": 0.219,
+      "ms": 386
+    }
+  ],
+  "threshold": 0.5,
+  "names": 57,
+  "answered": 57,
+  "abstained": 0,
+  "shown": 29,
+  "coverage": 0.509,
+  "accuracyAllAnswered": 0.526,
+  "accuracyShown": 0.862,
+  "perKind": {
+    "Web": {
+      "names": 11,
+      "shownCorrect": 8,
+      "shown": 8,
+      "shownAccuracy": 1
+    },
+    "Spreadsheets": {
+      "names": 6,
+      "shownCorrect": 0,
+      "shown": 0,
+      "shownAccuracy": null
+    },
+    "Documents": {
+      "names": 8,
+      "shownCorrect": 2,
+      "shown": 2,
+      "shownAccuracy": 1
+    },
+    "Email": {
+      "names": 4,
+      "shownCorrect": 2,
+      "shown": 2,
+      "shownAccuracy": 1
+    },
+    "Messages": {
+      "names": 8,
+      "shownCorrect": 5,
+      "shown": 5,
+      "shownAccuracy": 1
+    },
+    "Code": {
+      "names": 7,
+      "shownCorrect": 5,
+      "shown": 5,
+      "shownAccuracy": 1
+    },
+    "Terminal": {
+      "names": 9,
+      "shownCorrect": 3,
+      "shown": 6,
+      "shownAccuracy": 0.5
+    },
+    "Design": {
+      "names": 4,
+      "shownCorrect": 0,
+      "shown": 1,
+      "shownAccuracy": 0
+    }
+  },
+  "confusionShown": {
+    "Terminal -> Code": 2,
+    "Terminal -> Web": 1,
+    "Design -> Code": 1
+  },
+  "latencyMs": {
+    "median": 396,
+    "p90": 486
+  },
+  "wrongShown": [
+    {
+      "name": "iterm2",
+      "truth": "Terminal",
+      "choice": "Code",
+      "confidence": 0.62
+    },
+    {
+      "name": "powershell",
+      "truth": "Terminal",
+      "choice": "Code",
+      "confidence": 0.891
+    },
+    {
+      "name": "konsole",
+      "truth": "Terminal",
+      "choice": "Web",
+      "confidence": 0.516
+    },
+    {
+      "name": "figma",
+      "truth": "Design",
+      "choice": "Code",
+      "confidence": 0.606
+    }
+  ],
+  "unknownApps": [
+    {
+      "name": "arc",
+      "label": "Code",
+      "confidence": 0.529
+    },
+    {
+      "name": "linear",
+      "label": "Code",
+      "confidence": 0.267
+    },
+    {
+      "name": "zed",
+      "label": "Messages",
+      "confidence": 0.225
+    },
+    {
+      "name": "notion",
+      "label": "Other",
+      "confidence": 0.238
+    },
+    {
+      "name": "obsidian",
+      "label": "Code",
+      "confidence": 0.297
+    },
+    {
+      "name": "warp",
+      "label": "Code",
+      "confidence": 0.325
+    },
+    {
+      "name": "ghostty",
+      "label": "Messages",
+      "confidence": 0.319
+    },
+    {
+      "name": "wezterm",
+      "label": "Code",
+      "confidence": 0.259
+    },
+    {
+      "name": "raycast",
+      "label": "Code",
+      "confidence": 0.533
+    },
+    {
+      "name": "miro",
+      "label": "Other",
+      "confidence": 0.254
+    },
+    {
+      "name": "discord",
+      "label": "Messages",
+      "confidence": 0.548
+    },
+    {
+      "name": "telegram",
+      "label": "Messages",
+      "confidence": 0.9
+    },
+    {
+      "name": "postman",
+      "label": "Messages",
+      "confidence": 0.255
+    },
+    {
+      "name": "anki",
+      "label": "Messages",
+      "confidence": 0.296
+    },
+    {
+      "name": "todoist",
+      "label": "Email",
+      "confidence": 0.358
+    }
+  ]
+}
