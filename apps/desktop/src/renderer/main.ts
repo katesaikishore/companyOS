@@ -16,7 +16,6 @@ import {
   bridge,
   go,
   refresh,
-  requestRender,
   routeFromHash,
   routeKey,
   setKicker,
@@ -198,7 +197,8 @@ function boot(): void {
     state.route = routeFromHash(location.hash);
     state.dirty.clear();
     state.renaming = undefined;
-    requestRender();
+    // Read status for the new route. The poll runs only while the window is visible, so a hidden window would show old data.
+    void refresh();
   });
 
   window.addEventListener('keydown', event => {
