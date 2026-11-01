@@ -1,4 +1,5 @@
 import type { WorkerRequest, WorkerResponse } from './protocol';
+import type { ModelTemplate } from './template';
 import type { CompletionRequest, LocalCompleter } from './types';
 
 /** One worker process as the client sees it. The desktop app wraps a utility process, and tests wrap a fake. */
@@ -17,6 +18,8 @@ export interface LocalModelClientOptions {
   /** Starts a worker process. Called again after a worker stops. */
   start: () => WorkerChannel;
   contextSize?: number;
+  /** How the worker writes prompts for this model. Defaults to the model's own chat session. See template.ts. */
+  template?: ModelTemplate;
   /** Stops the worker after this long with no request, so the model's memory is returned. */
   idleStopMs?: number;
   loadTimeoutMs?: number;
@@ -113,6 +116,7 @@ export class LocalModelClient implements LocalCompleter {
         modelsDir: this.options.modelsDir,
         modelPath: this.options.modelPath,
         contextSize: this.options.contextSize ?? DEFAULT_CONTEXT_SIZE,
+        template: this.options.template ?? 'chat',
       }),
       undefined,
       this.options.loadTimeoutMs ?? DEFAULT_LOAD_TIMEOUT_MS,

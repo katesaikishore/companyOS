@@ -1,3 +1,5 @@
+import type { ModelTemplate } from '../llm/template';
+
 export type GpuVendor = 'apple' | 'nvidia' | 'amd' | 'intel' | 'other' | 'none' | 'unknown';
 
 /** What this device can run. Measured by the desktop app, then interpreted by planSetup(). */
@@ -36,6 +38,11 @@ export interface ModelSpec {
   recommended?: boolean;
   /** Peak memory of the model's worker process when it named routines, measured on the check machine. */
   measuredPeakBytes?: number;
+  /**
+   * How the worker writes prompts for this model. Undefined means the model's own chat session, which is right for the
+   * Qwen3 models. Qwen 3.5 needs 'chatml_no_think', because its chat template turns thinking on. See llm/template.ts.
+   */
+  template?: ModelTemplate;
 }
 
 export type Fit = 'good' | 'tight' | 'too_large';

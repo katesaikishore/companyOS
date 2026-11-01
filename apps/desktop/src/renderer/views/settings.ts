@@ -281,7 +281,7 @@ function agentDesktopBlock(path: string): HTMLElement {
     h(
       'p',
       { class: 'settings-note' },
-      'Optional, and not bundled with companyOS. Set the absolute path of an installed program to run focus and key steps through it. A path that is not an existing file blocks those two steps, and the run says why.',
+      'Optional, and not bundled with companyOS. With a path set, the program counts an app\'s windows before a focus on every platform, and it presses keys on macOS and Windows. A focus is blocked, and so is a key press on macOS and Windows, when the path is not an existing file, and the run says why. On Linux, focus and key presses use the built-in adapters. The program knows an app by its process name, and companyOS records the window class, so for an app whose two names differ the program cannot count its windows, and a focus is not refused for having several.',
     ),
     h(
       'div',

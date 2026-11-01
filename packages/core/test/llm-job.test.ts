@@ -58,6 +58,7 @@ interface HarnessOptions {
 function harness(options: HarnessOptions = {}) {
   const renames: Array<{ id: string; name: string }> = [];
   const opened: string[] = [];
+  const openedTemplates: string[] = [];
   const verified: string[] = [];
   const counters = { changes: 0 };
   const events: string[] = [];
@@ -81,8 +82,9 @@ function harness(options: HarnessOptions = {}) {
       verified.push(spec.id);
       return options.verified ?? true;
     },
-    openModel: path => {
+    openModel: (path, template) => {
       opened.push(path);
+      openedTemplates.push(template);
       return model;
     },
     allowed: () => state.allowed,
@@ -91,7 +93,7 @@ function harness(options: HarnessOptions = {}) {
       events.push('changed');
     },
   });
-  return { job, model, renames, opened, verified, state, counters, events };
+  return { job, model, renames, opened, openedTemplates, verified, state, counters, events };
 }
 
 describe('RoutineNamingJob', () => {
@@ -106,6 +108,8 @@ describe('RoutineNamingJob', () => {
     expect(h.renames.every(rename => rename.name === 'Monthly invoice check')).toBe(true);
     expect(h.model.warms).toBe(1);
     expect(h.opened).toEqual(['/models/Qwen3-4B-Q4_K_M.gguf']);
+    // A catalogue model without a template of its own gets the chat session.
+    expect(h.openedTemplates).toEqual(['chat']);
     expect(h.counters.changes).toBe(1);
   });
 

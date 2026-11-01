@@ -122,16 +122,18 @@ name routines. Typing, clicking and sending are not built, and no release has be
   GitHub-hosted macOS 26 and Windows Server 2025 machines, where focus, key presses and file open worked. Permission
   prompts and a non-elevated Windows user are not verified. See
   [`docs/research/adapter-smoke-results.md`](docs/research/adapter-smoke-results.md). An optional agent-desktop "hands"
-  executor can run key steps on macOS and Windows. It can run focus steps on any platform, but on Linux the program knows
-  an app by its process name while companyOS records the window class, and the two differed for both apps tried. It is off
-  by default, it needs a program path set in Settings, and the program is not bundled.
+  executor counts an app's windows before a focus on any platform, and it presses keys on macOS and Windows. On Linux the
+  program knows an app by its process name, while companyOS records the window class, so for an app whose two names differ
+  the count can miss several windows. Focus and key presses on Linux use the built-in adapters. It is off by default, it
+  needs a program path set in Settings, and the program is not bundled.
   Typing, clicking and sending are not built. A design is in
   [`docs/research/input-steps-proposal.md`](docs/research/input-steps-proposal.md). Level 5 is not built. A web site
   step focuses its browser and checks it. It does not open the site.
-- **Routine changes.** Routines with a web site step have new ids. An automation accepted from one before this version is
-  no longer linked to it, and the routine shows as a suggestion again. A dismissal from before this version no longer
-  hides it. Default names use window classes, so routines that differ only by site can share one. No migration is
-  written yet.
+- **Routine changes.** Routines with a web site step have new ids, because the site is part of the routine's key. An
+  automation accepted, or a routine dismissed, before the site was kept is moved to the new id when exactly one detected
+  routine had the old id, so it stays accepted or hidden. When two routines had the old id, neither is moved: the
+  automation is no longer linked to a routine, and the routine shows as a suggestion again. Default names use window
+  classes, so routines that differ only by site can share one.
 - **Web addresses.** A site keeps its first path segment when it is lower case and up to 12 letters, so a user name can
   show on What the twin knows. Changing that rule needs a decision.
 - **Platforms.** Wayland has no app capture. Windows has no browser capture.

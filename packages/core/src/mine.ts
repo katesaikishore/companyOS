@@ -211,6 +211,37 @@ export function routineIdOf(signature: string): string {
   return createHash('sha256').update(signature).digest('hex').slice(0, 12);
 }
 
+/**
+ * The id a routine had before a browser step kept its site. Then the key of a routine was its window classes in order,
+ * with repeats merged, and unknown apps were not mined, so a routine with one has no such id. See routineIdOf.
+ */
+export function legacyRoutineIdOf(routine: Pick<Routine, 'steps'>): string | undefined {
+  if (routine.steps.some(step => step.windowClass === 'other')) return undefined;
+  const classes: string[] = [];
+  for (const step of routine.steps) {
+    if (classes[classes.length - 1] !== step.windowClass) classes.push(step.windowClass);
+  }
+  return routineIdOf(classes.join('>'));
+}
+
+/**
+ * The legacy id of each detected routine that has exactly one routine with that id, mapped to the routine. A legacy id
+ * shared by two routines names neither, since nothing says which one a stored record meant. A routine whose legacy id
+ * is its own id needs no move, so it is left out.
+ */
+export function legacyRelinks(routines: readonly Routine[]): Map<string, Routine> {
+  const groups = new Map<string, Routine[]>();
+  for (const routine of routines) {
+    const legacy = legacyRoutineIdOf(routine);
+    if (legacy !== undefined) groups.set(legacy, [...(groups.get(legacy) ?? []), routine]);
+  }
+  const relinks = new Map<string, Routine>();
+  for (const [legacy, group] of groups) {
+    if (group.length === 1 && group[0].id !== legacy) relinks.set(legacy, group[0]);
+  }
+  return relinks;
+}
+
 function toRoutine(key: string, group: Group, weeks: number): Routine {
   const length = key.split('>').length;
   const steps: RoutineStep[] = [];

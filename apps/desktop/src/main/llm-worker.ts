@@ -7,9 +7,12 @@
 import { pathToFileURL } from 'node:url';
 import type { Llama, LlamaContext, LlamaGrammar, LlamaModel } from 'node-llama-cpp';
 import {
+  isModelTemplate,
   MAX_WORKER_TEXT_CHARS,
   modelThreads,
+  noThinkPrompt,
   resolveModelPath,
+  type ModelTemplate,
   type WorkerRequest,
   type WorkerResponse,
 } from '@companyos/twin-core';
@@ -32,6 +35,7 @@ let llama: Llama | undefined;
 let model: LlamaModel | undefined;
 let context: LlamaContext | undefined;
 let loadedPath: string | undefined;
+let loadedTemplate: ModelTemplate | undefined;
 const grammars = new Map<string, LlamaGrammar & { parse(text: string): unknown }>();
 /** Requests run one after another, so one model is never asked two things at once. */
 let chain: Promise<void> = Promise.resolve();
@@ -54,11 +58,12 @@ function parseRequest(value: unknown): WorkerRequest | undefined {
   if (!isRecord(value) || !Number.isInteger(value.id)) return undefined;
   const id = value.id as number;
   if (value.type === 'load') {
-    const { modelsDir, modelPath, contextSize } = value;
+    const { modelsDir, modelPath, contextSize, template } = value;
     if (typeof modelsDir !== 'string' || typeof modelPath !== 'string') return undefined;
     if (modelsDir.length > MAX_PATH_CHARS || modelPath.length > MAX_PATH_CHARS) return undefined;
     if (!isIntegerIn(contextSize, 512, 8192)) return undefined;
-    return { type: 'load', id, modelsDir, modelPath, contextSize };
+    if (!isModelTemplate(template)) return undefined;
+    return { type: 'load', id, modelsDir, modelPath, contextSize, template };
   }
   if (value.type === 'complete') {
     const { system, prompt, schema, maxTokens } = value;
@@ -74,11 +79,12 @@ async function load(request: LoadRequest): Promise<void> {
   // The model must be a .gguf file inside the models folder, after symbolic links are followed. Anything else is
   // refused before the runtime sees it.
   const path = await resolveModelPath(request.modelsDir, request.modelPath);
-  if (loadedPath === path && context) return;
+  if (loadedPath === path && loadedTemplate === request.template && context) return;
 
   context = undefined;
   model = undefined;
   loadedPath = undefined;
+  loadedTemplate = undefined;
   grammars.clear();
   const lib = await moduleOnce();
   llama ??= await lib.getLlama({
@@ -92,6 +98,7 @@ async function load(request: LoadRequest): Promise<void> {
   // Fewer threads than cores, so one busy program on the machine does not stall the model (see modelThreads).
   context = await model.createContext({ contextSize: request.contextSize, threads: modelThreads(llama.cpuMathCores) });
   loadedPath = path;
+  loadedTemplate = request.template;
 }
 
 async function complete(request: CompleteRequest): Promise<unknown> {
@@ -105,6 +112,20 @@ async function complete(request: CompleteRequest): Promise<unknown> {
     const schema = request.schema as Parameters<Llama['createGrammarForJsonSchema']>[0];
     grammar = await llama.createGrammarForJsonSchema(schema);
     grammars.set(key, grammar);
+  }
+  if (loadedTemplate === 'chatml_no_think') {
+    // The turn is written out with thinking off. A chat session would let the template turn thinking on.
+    const completion = new lib.LlamaCompletion({ contextSequence: context.getSequence() });
+    try {
+      const text = await completion.generateCompletion(noThinkPrompt(request.system, request.prompt), {
+        grammar,
+        maxTokens: request.maxTokens,
+        temperature: 0,
+      });
+      return grammar.parse(text);
+    } finally {
+      completion.dispose({ disposeSequence: true });
+    }
   }
   const session = new lib.LlamaChatSession({
     contextSequence: context.getSequence(),

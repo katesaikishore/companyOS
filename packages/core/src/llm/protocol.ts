@@ -1,3 +1,5 @@
+import type { ModelTemplate } from './template';
+
 /**
  * The most characters the worker accepts in the system text or the prompt of one request. The worker refuses a longer
  * one, and a refusal looks like a model failure, so the prompt builder keeps inside this limit (see prompt.ts).
@@ -16,6 +18,8 @@ export type WorkerRequest =
       modelsDir: string;
       modelPath: string;
       contextSize: number;
+      /** How the worker writes each prompt for this model. See template.ts. */
+      template: ModelTemplate;
     }
   | {
       type: 'complete';

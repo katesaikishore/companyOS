@@ -2,7 +2,7 @@ import { AutomationSchema, compileRoutine, effectsOf, fitName, type Automation }
 import { isExcludedApp, normalizeAppName } from './classify';
 import { TriggerGate, openingApps } from './triggers';
 import { addSignature, matchesDismissed, signatureOf, signaturesWithNamesIn, withoutExcludedApps, withoutRoutine } from './dismissed';
-import { DEFAULT_MINING, mineRoutines, type Routine } from './mine';
+import { DEFAULT_MINING, legacyRelinks, mineRoutines, type Routine } from './mine';
 import { hasUnknownStep, ruleKindOfSteps, type KindLabeling } from './labels';
 import { computeReadiness } from './readiness';
 import { habits as computeHabits, HABITS_WINDOW_DAYS } from './habits';
@@ -163,6 +163,7 @@ export class TwinAgent {
   analyze(): { segments: Segment[]; routines: Routine[] } {
     const segments = segment(this.minableEvents(ANALYSIS_DAYS), this.config.idleGapMs);
     const routines = mineRoutines(segments, DEFAULT_MINING);
+    this.relinkLegacyRoutines(routines);
     this.adoptLegacyDismissals(routines);
     return { segments, routines };
   }
@@ -172,9 +173,11 @@ export class TwinAgent {
    * a dismissed routine is dismissed too.
    */
   suggestions(): Suggestion[] {
+    // Analysed first, so a record moved to a new routine id is read after the move.
+    const routines = this.analyze().routines;
     const accepted = new Set(this.readAutomations().map(automation => automation.routineId));
-    return this.analyze()
-      .routines.filter(routine => !accepted.has(routine.id) && !this.isDismissed(routine))
+    return routines
+      .filter(routine => !accepted.has(routine.id) && !this.isDismissed(routine))
       .map(routine => ({ routine, preview: compileRoutine(routine, this.routineNames.get(routine.id)) }));
   }
 
@@ -183,8 +186,9 @@ export class TwinAgent {
    * rule-based name is too long to compile is skipped, so it cannot stop the routines after it from being named.
    */
   routinesToName(): Routine[] {
+    const routines = this.analyze().routines;
     const accepted = new Set(this.readAutomations().map(automation => automation.routineId));
-    return this.analyze().routines.filter(routine => {
+    return routines.filter(routine => {
       if (accepted.has(routine.id) || this.isDismissed(routine)) return false;
       try {
         compileRoutine(routine, this.routineNames.get(routine.id));
@@ -228,9 +232,10 @@ export class TwinAgent {
    * catalogue does not know. A routine made only of known apps is labelled by the rules, so it is never asked about.
    */
   routinesToLabelKind(): Array<{ routineId: string; steps: Array<{ app: string; windowClass: Routine['steps'][number]['windowClass'] }> }> {
+    const routines = this.analyze().routines;
     const accepted = new Set(this.readAutomations().map(automation => automation.routineId));
-    return this.analyze()
-      .routines.filter(
+    return routines
+      .filter(
         routine =>
           !accepted.has(routine.id) &&
           !this.isDismissed(routine) &&
@@ -674,6 +679,31 @@ export class TwinAgent {
     const stored = this.readStates().find(candidate => candidate.automationId === automation.id);
     const state = stored ? withEffects(stored, automation) : initialState(automation.id, effectsOf(automation));
     return { automation, state, promotion: promotionCheck(state, this.now(), this.autonomyConfig()) };
+  }
+
+  /**
+   * Stored automations and dismissals can name a routine by the id it had before a browser step kept its site (see
+   * legacyRoutineIdOf). Where exactly one detected routine has that id, the record moves to the routine's id, so the
+   * routine stays accepted or dismissed. A record that is already moved is not found again, so this writes only once.
+   */
+  private relinkLegacyRoutines(routines: readonly Routine[]): void {
+    const relinks = legacyRelinks(routines);
+    if (relinks.size === 0) return;
+    const moved = (id: string): string => relinks.get(id)?.id ?? id;
+
+    const records = this.store.readAll<Record<string, unknown>>('automations');
+    const automationsMove = records.some(record => typeof record.routineId === 'string' && moved(record.routineId) !== record.routineId);
+    if (automationsMove) {
+      this.store.replaceAll(
+        'automations',
+        records.map(record => (typeof record.routineId === 'string' ? { ...record, routineId: moved(record.routineId) } : record)),
+      );
+    }
+
+    const dismissed = [...new Set(this.config.dismissedRoutineIds.map(moved))];
+    if (JSON.stringify(dismissed) !== JSON.stringify(this.config.dismissedRoutineIds)) {
+      this.updateConfig({ dismissedRoutineIds: dismissed });
+    }
   }
 
   private readAutomations(): Automation[] {

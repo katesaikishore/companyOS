@@ -6,6 +6,7 @@ export * from './job';
 export * from './gate';
 export * from './select';
 export * from './protocol';
+export * from './template';
 export * from './client';
 export * from './paths';
 export * from './threads';

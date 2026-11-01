@@ -556,7 +556,7 @@ Not yet done: running the installed model (labels and names still use rules), au
 
 | Gap | Status | Not done, or changed from the brief |
 |---|---|---|
-| 1. Web sites as their own routine steps | Built | A site step focuses and checks its browser, and does not open the site. Routines with a site step have new ids, so an accepted automation or an earlier dismissal no longer matches, and no migration is written. Default names use window classes. The first path segment is kept when it is lower case and up to 12 letters, a known gap in `tests/privacy`. |
+| 1. Web sites as their own routine steps | Built | A site step focuses and checks its browser, and does not open the site. Routines with a site step have new ids. An accepted automation or an earlier dismissal is moved to the new id when exactly one detected routine had the old id (see `legacyRelinks` in `packages/core/src/mine.ts`). Default names use window classes. The first path segment is kept when it is lower case and up to 12 letters, a known gap in `tests/privacy`. |
 | 2. Unknown apps and system processes in routines | Partial | The optional per-app window class override in Settings. A recurring unknown app now breaks a known sequence it sits inside. |
 | 3. When a routine usually happens | Built | The usual time is not shown on an automation, which does not keep its routine's summary. |
 | 4. The twin remembers what the person tells it | Built | A dismissed routine that is no longer detected keeps its id only, so its near copies are not hidden. |
