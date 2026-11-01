@@ -1,3 +1,4 @@
+import type { KindLabel } from './labels';
 import type { AutomationView } from './agent';
 import type { GateRequirement } from './autonomy';
 import type { EffectClass, TwinConfig, AutonomyLevel, WindowClass } from './types';
@@ -49,6 +50,8 @@ export interface SuggestionView {
   lastSeenAt: number;
   /** When the routine usually happens, in plain words, from the start of each occurrence in local time. See describeWhen. */
   when: string;
+  /** The kind of work the routine is, and whether a decision model or the rules gave it. Display only. See labels.ts. */
+  kind: { label: KindLabel; source: 'model' | 'rule' };
   drafted: DraftStep[];
   effects: EffectClass[];
   parameters: Array<{ name: string; options: string[] }>;

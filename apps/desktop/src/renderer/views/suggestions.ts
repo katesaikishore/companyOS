@@ -159,8 +159,8 @@ function scorePill(score: number): HTMLElement {
 }
 
 /**
- * Times seen, the hand-time estimate and the usual time. The estimate is not measured from the person,
- * so it carries a tilde.
+ * Times seen, the hand-time estimate, the usual time and the kind of work. The estimate is not measured from the
+ * person, so it carries a tilde. A kind marked model was labelled by the on-device decision model; otherwise by the rules.
  */
 function figures(item: SuggestionView): HTMLElement {
   return h(
@@ -169,6 +169,7 @@ function figures(item: SuggestionView): HTMLElement {
     figure('Seen', `${item.support}× · ${plural(item.days, 'day')}`),
     figure('By hand', `~${Math.round(item.minutesPerWeek)} min / wk`),
     figure('When', item.when, true),
+    figure('Kind', item.kind.source === 'model' ? `${item.kind.label} · model` : item.kind.label),
   );
 }
 

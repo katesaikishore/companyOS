@@ -2,7 +2,7 @@
 // CPU, through the app's own worker code and client. It prints one JSON report to stdout and progress to stderr.
 //
 // Needs: npm run build  (the engine and the desktop app), and 0.64 GB of disk for the model (see fetch-models.mjs).
-// Usage: COMPANYOS_MODEL_CACHE=/path/to/cache node scripts/model-smoke/chat-naming.mjs
+// Usage: COMPANYOS_MODEL_CACHE=/path/to/cache [COMPANYOS_CHAT_MODEL=qwen3-4b] node scripts/model-smoke/chat-naming.mjs
 //
 // Six parts:
 //   A. nameRoutine() through LocalModelClient and the compiled worker, in a child process (not Electron).
@@ -36,7 +36,9 @@ const {
 const log = (...parts) => console.error(...parts);
 const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
 
-const { spec, path, dir } = await ensureModel('qwen3-0.6b', log);
+// The chat model to check. COMPANYOS_CHAT_MODEL picks another catalogue entry; the default is the smallest.
+const CHAT_MODEL = process.env.COMPANYOS_CHAT_MODEL ?? 'qwen3-0.6b';
+const { spec, path, dir } = await ensureModel(CHAT_MODEL, log);
 const { routines } = seededRoutines();
 if (routines.length !== 3) throw new Error(`Expected three seeded routines, got ${routines.length}.`);
 const describeRoutine = routine => routine.steps.map(step => step.app).join(' > ');

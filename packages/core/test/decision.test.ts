@@ -69,12 +69,23 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
-describe('the engine does not call a decision model yet', () => {
-  it('no source file other than the module and its export reads decision.ts', () => {
-    const src = join(__dirname, '..', 'src');
-    const users = sourceFiles(src)
-      .filter(file => !file.endsWith('decision.ts') && !file.endsWith('index.ts'))
-      .filter(file => /from ['"](?:\.\.?\/)+decision['"]/.test(readFileSync(file, 'utf8')));
-    expect(users).toEqual([]);
+/** The source files, by name, whose imports match a module. The module itself and the index are not counted. */
+function importersOf(module: string): string[] {
+  const src = join(__dirname, '..', 'src');
+  const pattern = new RegExp(`from ['"](?:\\.\\.?\\/)+${module}['"]`);
+  return sourceFiles(src)
+    .filter(file => !file.endsWith(`${module}.ts`) && !file.endsWith('index.ts'))
+    .filter(file => pattern.test(readFileSync(file, 'utf8')))
+    .map(file => file.slice(src.length + 1))
+    .sort();
+}
+
+describe('the decision model only advises display labels', () => {
+  it('only labels.ts reads decision.ts', () => {
+    expect(importersOf('decision')).toEqual(['labels.ts']);
+  });
+
+  it('only the agent and the contract read the labels, so no policy, runner or automation can', () => {
+    expect(importersOf('labels')).toEqual(['agent.ts', 'contract.ts']);
   });
 });

@@ -3,9 +3,11 @@ import {
   TRIGGER_RULES,
   TwinAgent,
   TwinConfigSchema,
+  KindLabelJob,
   describeWhen,
   effectOfOp,
   effectsOf,
+  modelWorkAllowed,
   planSetup,
   resolveStep,
   type Automation,
@@ -34,6 +36,7 @@ import { CaptureService } from './capture';
 import { destroyStoredSecrets, loadOrCreateDataKey } from './keys';
 import { detectHardware } from './hardware';
 import { LayaBundleManager, type LayaTestOptions } from './laya';
+import { LayaDecisionModel } from './decision-laya';
 import { ModelManager, createRoutineNamer } from './models';
 import { browserCapturePaths, installNativeHost, isBrowserCaptureSupported, removeNativeHost } from './native-host-install';
 import { handsExecutor } from './agent-desktop';
@@ -68,6 +71,14 @@ const NO_CONTROL: Executor = {
 };
 
 const DAY_MS = 86_400_000;
+/** How often the kind labeller looks for routines to label. A look reads the routines, so it is not more often. */
+const KIND_PASS_MS = 60_000;
+/** How long the Laya model stays loaded after labelling, before it is freed. */
+const LAYA_IDLE_RELEASE_MS = 5 * 60_000;
+/** When to try again to free the model while a pass still runs. */
+const KIND_RELEASE_RETRY_MS = 30_000;
+/** After a pass that labelled nothing, how long to wait before the next look. Each look reads the whole history. */
+const KIND_QUIET_MS = 10 * 60_000;
 
 /**
  * Connects the twin engine to the operating system and to the model installer. It is the only thing the IPC
@@ -86,6 +97,11 @@ export class TwinRuntime {
   /** Why browser capture could not start while its setting is on. Shown on the capture card until it works or is switched off. */
   private browserProblem: string | undefined;
   private readonly namer: RoutineNamingJob;
+  private readonly decisionModel: LayaDecisionModel;
+  private readonly kindLabels: KindLabelJob;
+  private kindLabelTimer: ReturnType<typeof setInterval> | undefined;
+  private kindReleaseTimer: ReturnType<typeof setTimeout> | undefined;
+  private kindQuietUntil = 0;
   private hardwareProfile: Promise<HardwareProfile> | undefined;
   /** Offers waiting for an answer. At most one at a time. */
   private pending: PendingRunView[] = [];
@@ -132,6 +148,15 @@ export class TwinRuntime {
       onBattery: options.onBattery,
       preferredModelId: async () => (await this.setupPlan()).chat?.spec.id,
     });
+    // The Laya bundle labels routines the catalogue does not know. It is advice shown beside a suggestion. See labels.ts.
+    this.decisionModel = new LayaDecisionModel({ runtime: () => this.laya.readyRuntime() });
+    this.kindLabels = new KindLabelJob({
+      routines: () => this.agent.routinesToLabelKind(),
+      setKind: (routineId, labeling) => this.agent.setRoutineKind(routineId, labeling),
+      model: this.decisionModel,
+      available: () => this.laya.view().status === 'installed',
+      allowed: () => modelWorkAllowed({ onBattery: options.onBattery(), idleSeconds: options.idleSeconds() }),
+    });
   }
 
   static async create(options: RuntimeOptions): Promise<TwinRuntime> {
@@ -152,6 +177,7 @@ export class TwinRuntime {
       });
     }
     this.namer.start();
+    this.startKindLabels();
     setInterval(() => this.agent.prune(), DAY_MS).unref();
   }
 
@@ -160,6 +186,7 @@ export class TwinRuntime {
     this.browserBridge?.stop();
     this.browserBridge = undefined;
     this.namer.stop();
+    this.stopKindLabels();
   }
 
   setLocked(locked: boolean): void {
@@ -521,6 +548,40 @@ export class TwinRuntime {
     if (isBrowserCaptureSupported()) removeNativeHost({ userData: this.options.userData, home: homedir() });
   }
 
+  /** Looks for unlabelled routines once a minute. A look does nothing unless the bundle is installed. */
+  private startKindLabels(): void {
+    this.kindLabelTimer = setInterval(() => void this.labelKinds(), KIND_PASS_MS);
+    this.kindLabelTimer.unref?.();
+  }
+
+  private stopKindLabels(): void {
+    clearInterval(this.kindLabelTimer);
+    clearTimeout(this.kindReleaseTimer);
+    this.kindLabelTimer = undefined;
+    this.kindReleaseTimer = undefined;
+  }
+
+  private async labelKinds(): Promise<void> {
+    if (Date.now() < this.kindQuietUntil) return;
+    const stored = await this.kindLabels.pass();
+    if (stored === 0) {
+      this.kindQuietUntil = Date.now() + KIND_QUIET_MS;
+      return;
+    }
+    // The model stays loaded for a few idle minutes after work, then is freed, so an idle app holds no model.
+    this.scheduleKindRelease(LAYA_IDLE_RELEASE_MS);
+  }
+
+  private scheduleKindRelease(delayMs: number): void {
+    clearTimeout(this.kindReleaseTimer);
+    this.kindReleaseTimer = setTimeout(() => {
+      // A pass still asking the model must finish first, because closing the session under it could crash it.
+      if (this.kindLabels.busy) return this.scheduleKindRelease(KIND_RELEASE_RETRY_MS);
+      void this.laya.release();
+    }, delayMs);
+    this.kindReleaseTimer.unref?.();
+  }
+
   private suggestionViews(): SuggestionView[] {
     return this.agent.suggestions().map(({ routine, preview }) => {
       const drafted: DraftStep[] = preview.steps.map(step => {
@@ -542,6 +603,7 @@ export class TwinRuntime {
         minutesPerWeek: preview.estimate?.minutesPerWeek ?? 0,
         lastSeenAt: routine.lastSeenAt,
         when: describeWhen(routine.when),
+        kind: this.agent.kindOfRoutine(routine),
         drafted,
         effects: effectsOf(preview),
         parameters: preview.params.map(param => ({ name: param.name, options: [...param.options] })),

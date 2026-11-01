@@ -3,9 +3,13 @@ import type { Fit, HardwareProfile, ModelFit, ModelSpec, SetupPlan } from './typ
 
 const GIB = 1024 ** 3;
 
-/** Memory a model needs to run: its weights, plus about 25% and a gigabyte for the context and runtime. */
+/**
+ * Memory a model needs to run: its weights, plus about 25% and a gigabyte for the context and runtime. Where a model was
+ * measured, the larger of the two figures is used, because the estimate alone was about a quarter short for the 1.7B and
+ * 4B models (docs/research/model-comparison.md).
+ */
 export function requiredMemoryBytes(spec: ModelSpec): number {
-  return Math.ceil(spec.sizeBytes * 1.25 + GIB);
+  return Math.max(Math.ceil(spec.sizeBytes * 1.25 + GIB), spec.measuredPeakBytes ?? 0);
 }
 
 /**
@@ -63,7 +67,10 @@ export function planSetup(hardware: HardwareProfile, catalog: readonly ModelSpec
     .sort((a, b) => a.sizeBytes - b.sizeBytes)
     .map(spec => fitFor(spec, hardware, budget));
 
-  const chat = chats.filter(entry => entry.fit === 'good').at(-1) ?? chats.filter(entry => entry.fit === 'tight').at(-1);
+  // The largest model that fits comfortably and is recommended for naming. A model not recommended for naming is still an
+  // alternative, but it is never the recommendation.
+  const recommendable = chats.filter(entry => entry.spec.recommended !== false);
+  const chat = recommendable.filter(entry => entry.fit === 'good').at(-1) ?? recommendable.filter(entry => entry.fit === 'tight').at(-1);
 
   const warnings: string[] = [...hardware.notes];
   if (hardware.cpuCores < 4) warnings.push('Few CPU cores: local models will respond slowly.');

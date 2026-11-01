@@ -370,6 +370,19 @@ export class LayaBundleManager {
     return this.runtime;
   }
 
+  /** The loaded model when it is installed and loads, otherwise undefined. Never throws. */
+  async readyRuntime(): Promise<LayaRuntime | undefined> {
+    if (this.status !== 'installed') return undefined;
+    return this.load().catch(() => undefined);
+  }
+
+  /** Frees the model's memory. The next answer loads it again from the checked files. */
+  async release(): Promise<void> {
+    const pending = this.runtime;
+    this.runtime = undefined;
+    if (pending) await pending.then(runtime => runtime.close(), () => undefined);
+  }
+
   /** Releases the loaded model, if any. */
   async unload(): Promise<void> {
     const pending = this.runtime;
