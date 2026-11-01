@@ -102,6 +102,17 @@ describe('no canary appears on any output surface', () => {
   });
 });
 
+describe('the day tasks keep no raw activity', () => {
+  it('builds the tasks and stores a decision, so the checks below read real data', () => {
+    expect(run.surfaces.find(surface => surface.name === 'tasks')?.text).toContain('Microsoft Excel');
+    expect(run.surfaces.find(surface => surface.name === 'store:decrypted:taskDecisions')?.text).toContain('confirm');
+  });
+
+  it('the task view and the decision store hold no raw canary', () => {
+    expectNoLeaks(run.surfaces, name => name === 'tasks' || name === 'store:decrypted:taskDecisions');
+  });
+});
+
 describe('the outbound guard is live', () => {
   it('records and refuses an unplanned fetch, socket or process call', async () => {
     const outbound: string[] = [];

@@ -1,4 +1,4 @@
-import { TwinAgent, describeWhen, type Automation, type Executor, type TwinEvent } from '@companyos/twin-core';
+import { TwinAgent, dayKeyOf, describeWhen, type Automation, type Executor, type TwinEvent } from '@companyos/twin-core';
 import { randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -157,6 +157,10 @@ export async function runPlantedScenario(): Promise<ScenarioRun> {
     models.install('qwen3-0.6b');
     await settle(() => models.states().every(state => state.status !== 'running'));
 
+    // Tasks for a working day, with the first one confirmed, so the task view and the decision store hold real data.
+    const taskDay = dayKeyOf(at(9, 12));
+    agent.decideTask({ day: taskDay, kind: 'confirm', taskId: agent.dayTasks(taskDay).tasks[0].id });
+
     const exported = agent.exportAll() as { events: TwinEvent[]; automations: Automation[]; config: unknown };
     const surfaces: Surface[] = [
       ...diskSurfaces(root, storeDir, key),
@@ -174,6 +178,7 @@ export async function runPlantedScenario(): Promise<ScenarioRun> {
           2,
         ),
       },
+      { name: 'tasks', text: JSON.stringify(agent.dayTasks(taskDay), null, 2) },
       { name: 'errors', text: thrown.map(errorText).join('\n') },
       { name: 'outbound:fetch', text: outbound.join('\n') },
     ];

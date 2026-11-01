@@ -19,6 +19,7 @@ export * from './dismissed';
 export * from './contract';
 export * from './readiness';
 export * from './habits';
+export * from './tasks';
 export * from './company';
 export * from './llm';
 export * from './ocel';

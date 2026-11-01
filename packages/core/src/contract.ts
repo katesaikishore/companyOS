@@ -3,6 +3,7 @@ import type { GateRequirement } from './autonomy';
 import type { EffectClass, TwinConfig, AutonomyLevel, WindowClass } from './types';
 import type { DownloadState, HardwareProfile, InstalledModel, LayaBundleView, NetworkEntry, SetupPlan } from './models/types';
 import type { RunResult } from './runner';
+import type { TaskDecision } from './tasks';
 
 /**
  * The contract between the desktop main process and its pages (the app and the tray).
@@ -195,6 +196,40 @@ export type HabitsView =
       stretchMinutes: StretchMinutesView[];
     };
 
+/** A stretch of work inside a task, from its first focus event to its last. A split refers to one by its id. */
+export interface TaskSegmentView {
+  id: string;
+  startTs: number;
+}
+
+/**
+ * One task of a day: consecutive stretches of work grouped from app names and timing, named from the two most used apps
+ * unless the person named it. Nothing in it is window text or page content.
+ */
+export interface TaskView {
+  /** The id of the task's first stretch. Decisions refer to a task by it. */
+  id: string;
+  /** The name the person gave, or the two most used apps, such as "Microsoft Excel and Slack". */
+  name: string;
+  /** True when the person named the task. */
+  renamed: boolean;
+  /** The app names in the task, most used first. Stored names are lower case. */
+  apps: string[];
+  startTs: number;
+  endTs: number;
+  /** The task's stretches in time order. A split can happen at any of them but the first. */
+  segments: TaskSegmentView[];
+  /** True once the person has confirmed the task, or has merged, split or renamed it. */
+  confirmed: boolean;
+}
+
+/** The tasks of one local day, in time order. */
+export interface DayTasksView {
+  /** The local calendar day, as YYYY-MM-DD. */
+  day: string;
+  tasks: TaskView[];
+}
+
 export interface TwinStatus {
   capture: { state: 'capturing' | 'paused' | 'idle' | 'locked' | 'unsupported'; detail: string };
   /** Whether browser capture can run on this system. The browser bridge is available on macOS and Linux only. */
@@ -222,6 +257,8 @@ export interface TwinStatus {
   readiness: AppReadinessView;
   /** How the person usually works, over the last four weeks. Rebuilt from the stored events on each read. */
   habits: HabitsView;
+  /** Today's tasks, grouped from the day's app switches with the person's decisions applied. */
+  tasks: DayTasksView;
 }
 
 /** Everything a page may ask of the main process. Each call is validated there. */
@@ -255,6 +292,9 @@ export interface TwinBridge {
   revertLast(automationId: string): Promise<AutomationView>;
   /** Answers an offer. `run: true` starts a supervised run, where each external step still asks. */
   answerPendingRun(id: string, run: boolean): Promise<void>;
+
+  /** Confirms, renames, merges or splits one of a day's tasks. The engine checks it before it is stored. */
+  decideTask(decision: TaskDecision): Promise<void>;
 
   exportData(): Promise<string>;
   deleteAll(): Promise<void>;

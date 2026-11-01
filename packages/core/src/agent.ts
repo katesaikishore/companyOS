@@ -5,7 +5,7 @@ import { addSignature, matchesDismissed, signatureOf } from './dismissed';
 import { DEFAULT_MINING, mineRoutines, type Routine } from './mine';
 import { computeReadiness } from './readiness';
 import { habits as computeHabits, HABITS_WINDOW_DAYS } from './habits';
-import type { AppReadinessView, HabitsView } from './contract';
+import type { AppReadinessView, DayTasksView, HabitsView } from './contract';
 import { normalizeSignal } from './redact';
 import {
   promotionCheck,
@@ -20,6 +20,7 @@ import {
 import { runAutomation, type Executor, type RunMode, type RunRequest, type RunResult } from './runner';
 import { segment, type Segment } from './segment';
 import { EncryptedStore } from './store';
+import { dayKeyOf, decisionFits, parseTaskDecision, TaskDecisionSchema, tasksForDay, type TaskDecision } from './tasks';
 import type { InstalledModel, NetworkEntry } from './models/types';
 import {
   DEFAULT_CONFIG,
@@ -407,6 +408,26 @@ export class TwinAgent {
     return this.store.readAll<NetworkEntry>('ledger');
   }
 
+  /**
+   * The tasks of one local day, today by default: the rule-based grouping of the day's work with the person's decisions
+   * applied. Rebuilt from the stored events on each call, so only the decisions are kept.
+   */
+  dayTasks(day: string = dayKeyOf(this.now())): DayTasksView {
+    return tasksForDay(this.unexcludedEvents(), this.readTaskDecisions(), day, this.config.idleGapMs);
+  }
+
+  /**
+   * Records one decision about a day's tasks. It is checked against the tasks as they stand, so a decision that no longer
+   * fits (a task already merged away, say) is refused and nothing is stored. The record holds ids and the action only.
+   */
+  decideTask(input: unknown): void {
+    const decision = parseTaskDecision(input);
+    if (!decisionFits(this.unexcludedEvents(), this.readTaskDecisions(), this.config.idleGapMs, decision)) {
+      throw new Error('That change no longer fits the tasks for that day. Refresh the review and try again.');
+    }
+    this.store.append('taskDecisions', decision);
+  }
+
   /** Records a model that was downloaded and verified. A model with the same id is replaced. */
   markModelInstalled(model: InstalledModel): void {
     const others = this.config.installedModels.filter(installed => installed.id !== model.id);
@@ -492,13 +513,13 @@ export class TwinAgent {
     return this.store.sizeBytes();
   }
 
-  /** Drops events and handoff records older than the retention window. Returns how many records were removed. */
+  /** Drops events, handoff records and task decisions older than the retention window. Returns how many records were removed. */
   prune(): number {
     const cutoff = this.now() - RETENTION_DAYS * DAY_MS;
     const all = this.store.readAll<TwinEvent>('events');
     const kept = all.filter(event => event.ts >= cutoff);
     if (kept.length !== all.length) this.store.replaceAll('events', kept);
-    return all.length - kept.length + this.pruneHandoffs(cutoff);
+    return all.length - kept.length + this.pruneHandoffs(cutoff) + this.pruneTaskDecisions(cutoff);
   }
 
   /**
@@ -514,6 +535,7 @@ export class TwinAgent {
       autonomy: this.readStates(),
       network: this.networkLedger(),
       handoffs: this.store.readAll<unknown>('handoffs'),
+      taskDecisions: this.readTaskDecisions(),
     };
   }
 
@@ -561,6 +583,31 @@ export class TwinAgent {
 
   private readStates(): AutonomyState[] {
     return this.store.readAll<AutonomyState>('autonomy');
+  }
+
+  /** Every stored event except those of an excluded app. Task names come only from these, as the other readings do. */
+  private unexcludedEvents(): TwinEvent[] {
+    return this.store.readAll<TwinEvent>('events').filter(event => !event.app || !isExcludedApp(event.app, this.config.excludedApps));
+  }
+
+  /** The stored task decisions that fit the schema. A row that does not parse is left out rather than failing the read. */
+  private readTaskDecisions(): TaskDecision[] {
+    return this.store.readAll<unknown>('taskDecisions').flatMap(record => {
+      const parsed = TaskDecisionSchema.safeParse(record);
+      return parsed.success ? [parsed.data] : [];
+    });
+  }
+
+  /** A decision is kept for as long as the events of its day are kept. Returns how many were removed. */
+  private pruneTaskDecisions(cutoff: number): number {
+    const cutoffDay = dayKeyOf(cutoff);
+    const rows = this.store.readAll<unknown>('taskDecisions');
+    const kept = rows.filter(row => {
+      const parsed = TaskDecisionSchema.safeParse(row);
+      return !parsed.success || parsed.data.day >= cutoffDay;
+    });
+    if (kept.length !== rows.length) this.store.replaceAll('taskDecisions', kept);
+    return rows.length - kept.length;
   }
 
   /**

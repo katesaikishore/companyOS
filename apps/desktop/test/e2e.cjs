@@ -469,9 +469,14 @@ async function main() {
 
     // 11. The window has one fixed size. Every main route holds the checks in responsiveProblems at 900x600, and the
     // window still reports that it cannot be resized, maximised or made full screen.
-    const ROUTES = ['overview', 'suggestions', 'automations', 'readiness', 'ledger', 'settings'];
+    const ROUTES = ['overview', 'suggestions', 'automations', 'readiness', 'review', 'ledger', 'settings'];
     for (const route of ROUTES) {
-      await page.click(`[data-testid="nav-${route}"]`);
+      if (route === 'review') {
+        // The review has no sidebar link. It opens from the Overview, and its route still has to lay out.
+        await page.evaluate(name => { location.hash = `#/${name}`; }, route);
+      } else {
+        await page.click(`[data-testid="nav-${route}"]`);
+      }
       await page.waitForTimeout(250);
       await noDocumentScroll(page, `${route} route`);
       const problems = await responsiveProblems(page);

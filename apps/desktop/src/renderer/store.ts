@@ -8,6 +8,8 @@ export type Route =
   | { name: 'ledger' }
   /** The app readiness list, or one app's detail when the route names an app. */
   | { name: 'readiness'; app?: string }
+  /** Today's tasks, for the end-of-day review. It is opened from the Overview. */
+  | { name: 'review' }
   | { name: 'settings' };
 
 export interface Notice {
@@ -118,7 +120,7 @@ export function saveConfig(key: string, patch: Partial<TwinConfig>): Promise<voi
 }
 
 export function confirmDeleteAll(): void {
-  if (!window.confirm('Delete everything the twin knows about you? This removes all events, automations, any handoff records saved by an earlier version, and installed models on this device, including the optional decision model. It cannot be undone.')) {
+  if (!window.confirm('Delete everything the twin knows about you? This removes all events, automations, any handoff records saved by an earlier version, task decisions, and installed models on this device, including the optional decision model. It cannot be undone.')) {
     return;
   }
   void call('delete', twin => twin.deleteAll());
@@ -148,6 +150,8 @@ export function routeFromHash(hash: string): Route {
       return { name: 'ledger' };
     case 'readiness':
       return parts[1] ? { name: 'readiness', app: safeDecode(parts[1]) } : { name: 'readiness' };
+    case 'review':
+      return { name: 'review' };
     case 'settings':
       return { name: 'settings' };
     default:

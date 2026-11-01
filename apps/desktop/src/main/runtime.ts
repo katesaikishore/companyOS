@@ -235,6 +235,7 @@ export class TwinRuntime {
       retentionDays: RETENTION_DAYS,
       readiness: this.agent.readiness(),
       habits: this.agent.habits(),
+      tasks: this.agent.dayTasks(),
       stats: {
         routinesLearned: suggestions.length + automations.length,
         waiting: suggestions.length + drafts,
@@ -281,6 +282,11 @@ export class TwinRuntime {
 
   renameAutomation(automationId: string, name: string): AutomationView {
     return this.agent.renameAutomation(automationId, name);
+  }
+
+  /** Confirms, renames, merges or splits one of a day's tasks. The engine checks the decision before it is stored. */
+  decideTask(input: unknown): void {
+    this.agent.decideTask(input);
   }
 
   setLevel(automationId: string, level: AutonomyLevel): AutomationView {
