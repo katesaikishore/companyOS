@@ -55,12 +55,10 @@ function fitFor(spec: ModelSpec, hardware: HardwareProfile, budget: number): Mod
 
 /**
  * Chooses models for this device. The recommendation is the largest chat model that fits comfortably, falling back
- * to the largest that fits tightly. An embedding model is always included. Pure: the same hardware always gives the same plan.
+ * to the largest that fits tightly. Only chat models are planned. The embedding model is in the catalogue but setup does not
+ * offer it, because nothing uses it yet. Pure: the same hardware always gives the same plan.
  */
 export function planSetup(hardware: HardwareProfile, catalog: readonly ModelSpec[] = CATALOG): SetupPlan {
-  const embedding = catalog.find(model => model.role === 'embedding');
-  if (!embedding) throw new Error('The catalog has no embedding model.');
-
   const budget = memoryBudgetBytes(hardware);
   const chats = catalog
     .filter(model => model.role === 'chat')
@@ -78,5 +76,5 @@ export function planSetup(hardware: HardwareProfile, catalog: readonly ModelSpec
   if (!chat) {
     warnings.push('This device does not have enough memory for a local model. The twin will use simple rule-based labels.');
   }
-  return { hardware, memoryBudgetBytes: budget, chat, alternatives: chats, embedding, warnings };
+  return { hardware, memoryBudgetBytes: budget, chat, alternatives: chats, warnings };
 }

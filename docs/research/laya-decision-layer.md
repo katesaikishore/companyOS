@@ -118,8 +118,7 @@ idle minutes. Its memory while loaded was not measured in the app.
 limit is abandoned for that call, and it finishes in the background, so the next call finds the model ready.
 
 **Not built.** The decision model is not used for locator repair, for scoring candidate steps, or for flagging untrusted
-text, which the design also allows. Those would need their own checks. The embedding model is still downloaded and never
-loaded.
+text, which the design also allows. Those would need their own checks. The embedding model is in the catalogue, but setup does not offer it, and nothing loads it.
 
 ## Not done
 

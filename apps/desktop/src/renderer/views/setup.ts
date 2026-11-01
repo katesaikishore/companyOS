@@ -209,7 +209,7 @@ function devices(status: TwinStatus): Child[] {
     }
     const models: Child[] = [];
     if (plan.chat) {
-      models.push(modelCard('chat', plan.chat.spec, plan.chat, status));
+      models.push(modelCard(plan.chat.spec, plan.chat, status));
     } else {
       models.push(
         h(
@@ -219,7 +219,6 @@ function devices(status: TwinStatus): Child[] {
         ),
       );
     }
-    models.push(modelCard('embedding', plan.embedding, undefined, status));
     parts.push(h('div', { class: 'model-grid' }, ...models));
     parts.push(alternativesBlock(plan, status));
   }
@@ -237,7 +236,7 @@ function needsInstall(status: TwinStatus, modelId: string): boolean {
   return current === 'not_installed' || current === 'cancelled' || current === 'failed';
 }
 
-function modelCard(kind: 'chat' | 'embedding', spec: ModelSpec, fit: ModelFit | undefined, status: TwinStatus): HTMLElement {
+function modelCard(spec: ModelSpec, fit: ModelFit, status: TwinStatus): HTMLElement {
   const current = modelState(status, spec.id);
   const downloading = current === 'downloading';
   const installKey = `install:${spec.id}`;
@@ -245,7 +244,7 @@ function modelCard(kind: 'chat' | 'embedding', spec: ModelSpec, fit: ModelFit | 
     'article',
     {
       class: 'model-card',
-      'data-testid': kind === 'chat' ? 'setup-plan-chat' : 'setup-plan-embedding',
+      'data-testid': 'setup-plan-chat',
       'data-model-id': spec.id,
       'data-state': current,
     },
@@ -255,15 +254,13 @@ function modelCard(kind: 'chat' | 'embedding', spec: ModelSpec, fit: ModelFit | 
       h(
         'div',
         null,
-        h('span', { class: 'eyebrow' }, kind === 'chat' ? 'Chat model' : 'Embedding model'),
+        h('span', { class: 'eyebrow' }, 'Chat model'),
         h('h3', { class: 'model-name' }, spec.name),
       ),
       h('span', { class: 'model-status mono small', 'data-label-model': spec.id }, modelStateLabel(status, spec.id)),
     ),
     h('p', { class: 'mono small muted' }, `${spec.params} · ${spec.quantization} · ${formatBytes(spec.sizeBytes)}`),
-    kind === 'chat' && fit
-      ? h('p', { class: 'model-fit' }, h('strong', null, 'Fits your device. '), fit.reason)
-      : h('p', { class: 'muted small' }, spec.summary),
+    h('p', { class: 'model-fit' }, h('strong', null, 'Fits your device. '), fit.reason),
     h('dl', { class: 'facts' }, fact('Licence', spec.license), fact('Source', 'huggingface.co')),
     downloading
       ? progressBar(modelFraction(status, spec.id), {
@@ -295,7 +292,7 @@ function modelCard(kind: 'chat' | 'embedding', spec: ModelSpec, fit: ModelFit | 
 }
 
 function installRecommendedButton(plan: SetupPlan, status: TwinStatus): HTMLElement {
-  const ids = [plan.chat?.spec.id, plan.embedding.id].filter((id): id is string => id !== undefined);
+  const ids = [plan.chat?.spec.id].filter((id): id is string => id !== undefined);
   const pendingIds = (current: TwinStatus): string[] => ids.filter(id => needsInstall(current, id));
   return button('Install recommended', {
     variant: 'primary',
@@ -303,7 +300,7 @@ function installRecommendedButton(plan: SetupPlan, status: TwinStatus): HTMLElem
     disabled: pendingIds(status).length === 0 || pending('install-recommended'),
     onClick: () =>
       void call('install-recommended', async twin => {
-        // One after the other, so the chat model finishes before the embedding model starts.
+        // One after the other, in case the plan holds more than one model.
         for (const id of pendingIds(state.status ?? status)) {
           await twin.installModel(id);
         }

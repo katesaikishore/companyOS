@@ -523,8 +523,8 @@ receives any data. The rules that follow:
 
 - Catalogue: Apache-2.0 or MIT, not gated, pinned SHA-256 from the Hugging Face file index. Gemma and Llama are excluded
   because their licences are custom, not OSI-approved.
-- Setup recommends a chat model from the device's measured memory and disk, plus an embedding model, and installs them
-  with checksum verification.
+- Setup recommends a chat model from the device's measured memory and disk and installs it with checksum verification.
+  The embedding model is in the catalogue, but setup does not offer it, because nothing uses it yet.
 - The Claude naming path is removed from the app. The network ledger replaces the cloud ledger and lists model downloads.
 - Downloads: HTTPS only, from `huggingface.co` and `*.hf.co`, with every redirect hop checked.
 
