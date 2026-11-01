@@ -1,7 +1,6 @@
 import {
   RETENTION_DAYS,
   TRIGGER_RULES,
-  TriggerGate,
   TwinAgent,
   TwinConfigSchema,
   describeWhen,
@@ -88,7 +87,6 @@ export class TwinRuntime {
   private browserProblem: string | undefined;
   private readonly namer: RoutineNamingJob;
   private hardwareProfile: Promise<HardwareProfile> | undefined;
-  private readonly gate = new TriggerGate();
   /** Offers waiting for an answer. At most one at a time. */
   private pending: PendingRunView[] = [];
   /** Runs in progress. No offers are made while one runs, so the run's own app switches cannot trigger one. */
@@ -281,6 +279,10 @@ export class TwinRuntime {
     this.agent.dismissRoutine(routineId);
   }
 
+  renameAutomation(automationId: string, name: string): AutomationView {
+    return this.agent.renameAutomation(automationId, name);
+  }
+
   setLevel(automationId: string, level: AutonomyLevel): AutomationView {
     return this.agent.setLevel(automationId, level);
   }
@@ -339,16 +341,15 @@ export class TwinRuntime {
     this.expireOffers();
     if (this.pending.length > 0) return;
     const config = this.agent.configuration;
-    const pick = this.agent
-      .triggerCandidates(app)
-      .find(view => view.state.level <= config.maxAutonomyLevel && this.gate.eligible(view.automation.id));
+    // The agent keeps the offer gate, so the candidates it returns have already passed the cooldowns.
+    const pick = this.agent.triggerCandidates(app).find(view => view.state.level <= config.maxAutonomyLevel);
     if (!pick) return;
 
     // Level 4 only runs without a prompt after the owner enabled it. The core re-checks the live policy
     // before every step. Counting it in the same cooldown prevents repeats from the run's own app switches.
     const unattendedSafe = effectsOf(pick.automation).every(effect => effect === 'read_only' || effect === 'local_reversible');
     if (pick.state.level === 4 && config.allowUnattended && unattendedSafe) {
-      this.gate.recordOffer(pick.automation.id);
+      this.agent.recordOffer(pick.automation.id);
       void this.runUnattended(pick.automation.id);
       return;
     }
@@ -363,7 +364,7 @@ export class TwinRuntime {
       expiresAt: createdAt + TRIGGER_RULES.offerTtlMs,
     };
     this.pending = [...this.pending, offer];
-    this.gate.recordOffer(pick.automation.id);
+    this.agent.recordOffer(pick.automation.id);
     this.options.onOffer(offer);
   }
 
@@ -394,7 +395,7 @@ export class TwinRuntime {
     if (!offer) throw new Error('That request has expired.');
     this.pending = this.pending.filter(candidate => candidate !== offer);
     if (!run) {
-      this.gate.recordDecline(offer.automationId);
+      this.agent.recordDecline(offer.automationId);
       return;
     }
     await this.supervisedRun(offer.automationId);
@@ -406,7 +407,7 @@ export class TwinRuntime {
       return await task();
     } finally {
       this.activeRuns--;
-      this.gate.quietAfterRun();
+      this.agent.quietAfterRun();
     }
   }
 

@@ -156,6 +156,23 @@
   overflow-wrap: anywhere;
 }
 
+/* The name and its Rename control. The rename form takes the same row while the person edits the name. */
+.auto-name-row,
+.auto-name-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+}
+
+.auto-name-form .input {
+  flex: 1 1 180px;
+  max-width: 320px;
+  min-height: 36px;
+  font-size: 14px;
+}
+
 .auto-detail-sub {
   font-size: 12px;
   color: var(--muted);

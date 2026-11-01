@@ -1,6 +1,7 @@
-import { AutomationSchema, compileRoutine, effectsOf, type Automation } from './automation';
+import { AutomationSchema, compileRoutine, effectsOf, fitName, type Automation } from './automation';
 import { isExcludedApp, normalizeAppName } from './classify';
-import { openingApps } from './triggers';
+import { TriggerGate, openingApps } from './triggers';
+import { addSignature, matchesDismissed, signatureOf } from './dismissed';
 import { DEFAULT_MINING, mineRoutines, type Routine } from './mine';
 import { computeReadiness } from './readiness';
 import { habits as computeHabits, HABITS_WINDOW_DAYS } from './habits';
@@ -100,12 +101,15 @@ export class TwinAgent {
   private readonly running = new Set<string>();
   /** Names from the local model for detected routines. Memory only: a restart names them again. */
   private readonly routineNames = new Map<string, string>();
+  /** Offers and declines. The declines are loaded from the config when the agent starts, and written back when they change. */
+  private readonly gate: TriggerGate;
 
   constructor(options: AgentOptions) {
     this.store = new EncryptedStore(options.dataDir, options.dataKey);
     this.now = options.now ?? (() => Date.now());
     const saved = this.store.readAll<unknown>('settings').at(-1);
     this.config = saved ? TwinConfigSchema.parse(withoutRetiredKeys(saved)) : { ...DEFAULT_CONFIG };
+    this.gate = new TriggerGate(this.now, this.config.declinedRoutines);
   }
 
   /** Closes the encrypted store. Windows will not delete the store's files while it is open, so tests close before cleanup. */
@@ -151,12 +155,14 @@ export class TwinAgent {
     return { segments, routines: mineRoutines(segments, DEFAULT_MINING) };
   }
 
-  /** Detected routines that are neither accepted nor dismissed, each with the automation it would become. */
+  /**
+   * Detected routines that are neither accepted nor dismissed, each with the automation it would become. A near copy of
+   * a dismissed routine is dismissed too.
+   */
   suggestions(): Suggestion[] {
     const accepted = new Set(this.readAutomations().map(automation => automation.routineId));
-    const dismissed = new Set(this.config.dismissedRoutineIds);
     return this.analyze()
-      .routines.filter(routine => !accepted.has(routine.id) && !dismissed.has(routine.id))
+      .routines.filter(routine => !accepted.has(routine.id) && !this.isDismissed(routine))
       .map(routine => ({ routine, preview: compileRoutine(routine, this.routineNames.get(routine.id)) }));
   }
 
@@ -166,9 +172,8 @@ export class TwinAgent {
    */
   routinesToName(): Routine[] {
     const accepted = new Set(this.readAutomations().map(automation => automation.routineId));
-    const dismissed = new Set(this.config.dismissedRoutineIds);
     return this.analyze().routines.filter(routine => {
-      if (accepted.has(routine.id) || dismissed.has(routine.id)) return false;
+      if (accepted.has(routine.id) || this.isDismissed(routine)) return false;
       try {
         compileRoutine(routine, this.routineNames.get(routine.id));
         return true;
@@ -193,20 +198,51 @@ export class TwinAgent {
 
   /**
    * Routines that may be offered when this app comes into focus. Only routines the person set to level 3 or
-   * above are eligible, so an offer always follows a deliberate decision. Stopped automations offer nothing.
+   * above are eligible, so an offer always follows a deliberate decision. Stopped automations offer nothing, and so
+   * does a routine the person declined too recently.
    */
   triggerCandidates(app: string): AutomationView[] {
     if (!this.config.automationsEnabled) return [];
     const normalized = normalizeAppName(app);
     return this.automations().filter(
-      view => view.state.level >= 3 && openingApps(view.automation).includes(normalized),
+      view =>
+        view.state.level >= 3 &&
+        openingApps(view.automation).includes(normalized) &&
+        this.gate.eligible(view.automation.routineId),
     );
   }
 
-  /** "Not a routine". The routine is not suggested again. */
+  /** An offer was made for this automation. It is not offered again until the offer cooldown ends. */
+  recordOffer(automationId: string): void {
+    this.gate.recordOffer(this.requireAutomation(automationId).routineId);
+  }
+
+  /** "Not now" on an offer. The routine waits, and waits longer each time the person declines it in a row. */
+  recordDecline(automationId: string): void {
+    this.gate.recordDecline(this.requireAutomation(automationId).routineId);
+    this.updateConfig({ declinedRoutines: this.gate.declineRecords() });
+  }
+
+  /** After a run, the twin stays quiet for a short time, so the run's own app switches do not trigger an offer. */
+  quietAfterRun(): void {
+    this.gate.quietAfterRun();
+  }
+
+  /**
+   * "Not a routine". The routine is not suggested again, and neither is one that differs from it by a single step. A
+   * dismissal counts as a decline, so it lengthens the routine's wait the same way.
+   */
   dismissRoutine(routineId: string): void {
     if (this.config.dismissedRoutineIds.includes(routineId)) return;
-    this.updateConfig({ dismissedRoutineIds: [...this.config.dismissedRoutineIds, routineId].slice(-500) });
+    const routine = this.analyze().routines.find(candidate => candidate.id === routineId);
+    if (routine) this.gate.recordDecline(routineId);
+    this.updateConfig({
+      dismissedRoutineIds: [...this.config.dismissedRoutineIds, routineId].slice(-500),
+      dismissedRoutineSignatures: routine
+        ? addSignature(this.config.dismissedRoutineSignatures, signatureOf(routine))
+        : this.config.dismissedRoutineSignatures,
+      declinedRoutines: this.gate.declineRecords(),
+    });
   }
 
   /** Accepting a routine creates a draft automation at level 2. Nothing runs yet. */
@@ -220,7 +256,20 @@ export class TwinAgent {
     const automation = compileRoutine(routine, name ?? this.routineNames.get(routineId));
     this.writeAutomation(automation);
     this.writeState(initialState(automation.id, effectsOf(automation)));
+    this.clearDeclines(routineId);
     return this.view(automation);
+  }
+
+  /**
+   * Changes an automation's name. A longer name is cut to fit, as an accepted routine's name is. Only the name changes:
+   * the level, the steps, the runs and the ids stay as they are.
+   */
+  renameAutomation(automationId: string, name: string): AutomationView {
+    const next = name.trim();
+    if (!next) throw new Error('Give the automation a name.');
+    const renamed = AutomationSchema.parse({ ...this.requireAutomation(automationId), name: fitName(next) });
+    this.writeAutomation(renamed);
+    return this.view(renamed);
   }
 
   automations(): AutomationView[] {
@@ -315,6 +364,8 @@ export class TwinAgent {
         };
         // Written from the latest state, not the snapshot taken before the run, so no change made meanwhile is lost.
         this.writeState(recordRun(this.requireState(automationId), record));
+        // A completed run shows the routine is wanted, so its declines start again. A failed run does not.
+        if (result.status === 'completed') this.clearDeclines(automation.routineId);
       }
       return result;
     } finally {
@@ -327,13 +378,15 @@ export class TwinAgent {
    * Suggestions shows, mined from the same events, so the page and the suggestions agree.
    */
   readiness(): AppReadinessView {
+    const routines = this.analyze().routines;
     return computeReadiness({
       now: this.now(),
       events: this.minableEvents(ANALYSIS_DAYS),
       idleGapMs: this.config.idleGapMs,
-      routines: this.analyze().routines,
+      routines,
       automations: this.automations(),
-      dismissedRoutineIds: this.config.dismissedRoutineIds,
+      // A near copy of a dismissed routine is shown as dismissed too, the way the routine list shows it.
+      dismissedRoutineIds: routines.filter(routine => this.isDismissed(routine)).map(routine => routine.id),
     });
   }
 
@@ -467,6 +520,16 @@ export class TwinAgent {
   /** Removes all stored data. The caller must also destroy the data key to make recovery impossible. */
   wipe(): void {
     this.store.wipe();
+  }
+
+  /** Dismissed by id, or a near copy of a dismissed routine (see matchesDismissed). */
+  private isDismissed(routine: Routine): boolean {
+    return matchesDismissed(routine, this.config.dismissedRoutineIds, this.config.dismissedRoutineSignatures);
+  }
+
+  /** An accept or a completed run starts the routine's count again. The config is written only when there was a count. */
+  private clearDeclines(routineId: string): void {
+    if (this.gate.resetDeclines(routineId)) this.updateConfig({ declinedRoutines: this.gate.declineRecords() });
   }
 
   private recentEvents(days: number): TwinEvent[] {

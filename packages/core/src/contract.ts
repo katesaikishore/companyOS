@@ -91,7 +91,7 @@ export interface AppReadinessRoutineView {
   switches: number;
   /** Automatable when every step is local and reversible. Approval when a step is not. */
   kind: 'automatable' | 'approval';
-  /** Suggested, accepted as an automation, or dismissed by the person. */
+  /** Suggested, accepted as an automation, or dismissed by the person. A near copy of a dismissed routine is dismissed too. */
   status: 'suggested' | 'accepted' | 'dismissed';
   automationId?: string;
   automationName?: string;
@@ -246,6 +246,8 @@ export interface TwinBridge {
 
   acceptRoutine(routineId: string, name?: string): Promise<AutomationView>;
   dismissRoutine(routineId: string): Promise<void>;
+  /** Changes the name of an automation. Nothing else about it changes. */
+  renameAutomation(automationId: string, name: string): Promise<AutomationView>;
   setLevel(automationId: string, level: AutonomyLevel): Promise<AutomationView>;
   promote(automationId: string): Promise<AutomationView>;
   dryRun(automationId: string): Promise<RunResult>;

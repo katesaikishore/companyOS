@@ -45,7 +45,7 @@ export interface ReadinessInput {
   routines: readonly Routine[];
   /** Automations accepted from routines, with their autonomy state and promotion result. */
   automations: readonly AutomationView[];
-  /** Routines the person dismissed. They still count in the figures, and the routine list marks them. */
+  /** Routines the person dismissed, or that are near a dismissed one. They still count in the figures, and the list marks them. */
   dismissedRoutineIds: readonly string[];
 }
 
