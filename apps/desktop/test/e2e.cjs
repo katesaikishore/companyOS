@@ -5,7 +5,7 @@
 //
 // Needs network access to huggingface.co for the embedding-model download test.
 const { createHash } = require('node:crypto');
-const { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } = require('node:fs');
+const { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const assert = require('node:assert/strict');
@@ -222,9 +222,7 @@ async function layaFixture(dir) {
   return { server, file, spec, files };
 }
 
-async function main() {
-  const userDataDir = mkdtempSync(path.join(tmpdir(), 'companyos-e2e-'));
-  const fixtureDir = mkdtempSync(path.join(tmpdir(), 'companyos-e2e-laya-'));
+async function main(userDataDir, fixtureDir) {
   const laya = await layaFixture(fixtureDir);
   const layaDir = path.join(userDataDir, 'models', 'laya', 'receptron--laya-onnx', LAYA_REVISION);
   const app = await launch(userDataDir, laya.file);
@@ -558,9 +556,34 @@ async function main() {
   }
 }
 
-main()
-  .then(() => process.exit(0))
+// The folders are made inside run(), so a failure to make them is reported like any other failed run.
+let userDataDir;
+let fixtureDir;
+
+async function run() {
+  userDataDir = mkdtempSync(path.join(tmpdir(), 'companyos-e2e-'));
+  fixtureDir = mkdtempSync(path.join(tmpdir(), 'companyos-e2e-laya-'));
+  await main(userDataDir, fixtureDir);
+}
+
+/** Removes a folder the run made. A failure is reported, but it does not fail a run that passed. */
+function removeFolder(folder) {
+  try {
+    rmSync(folder, { recursive: true, force: true });
+  } catch (error) {
+    console.warn('[e2e] could not remove', folder, error.message);
+  }
+}
+
+run()
+  .then(() => {
+    removeFolder(userDataDir);
+    removeFolder(fixtureDir);
+    process.exit(0);
+  })
   .catch(error => {
+    // The folders stay after a failed run, so the profile and the fixture can be looked at.
     console.error('[e2e] FAILED:', error.message);
+    if (userDataDir) console.error('[e2e] kept for debugging:', userDataDir, fixtureDir);
     process.exit(1);
   });

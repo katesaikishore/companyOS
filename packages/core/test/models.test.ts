@@ -1,8 +1,6 @@
 import { createHash } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
-import { mkdtempSync, existsSync, readdirSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { readdirSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   CATALOG,
@@ -23,6 +21,9 @@ import {
   vendorFromName,
   verifyModelFile,
 } from '../src';
+import { tempFolders } from './temp-folders';
+
+const temps = tempFolders();
 
 const GIB = 1024 ** 3;
 
@@ -217,7 +218,7 @@ describe('downloadModel', () => {
   const origin = 'https://huggingface.co';
 
   it('downloads, verifies the digest, and moves the file into place', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'twin-model-'));
+    const dir = temps.folder('twin-model-');
     const { fetchImpl } = fakeNetwork({ [`${origin}${modelPath}`]: serve(payload) });
     const progress: number[] = [];
     const result = await downloadModel({
@@ -235,7 +236,7 @@ describe('downloadModel', () => {
   });
 
   it('discards a file whose digest does not match', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'twin-model-'));
+    const dir = temps.folder('twin-model-');
     const { fetchImpl } = fakeNetwork({ [`${origin}${modelPath}`]: serve(payload) });
     await expect(
       downloadModel({ spec: spec({ sha256: '0'.repeat(64) }), destinationDir: dir, allowedHosts: ['huggingface.co'], fetchImpl }),
@@ -244,14 +245,14 @@ describe('downloadModel', () => {
   });
 
   it('discards a file that ends early', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'twin-model-'));
+    const dir = temps.folder('twin-model-');
     const { fetchImpl } = fakeNetwork({ [`${origin}${modelPath}`]: serve(payload.subarray(0, 1000), payload.length) });
     await expect(downloadModel({ spec: spec(), destinationDir: dir, allowedHosts: ['huggingface.co'], fetchImpl })).rejects.toThrow(/ended early/);
     expect(readdirSync(dir)).toEqual([]);
   });
 
   it('refuses a redirect to a host that is not on the allowlist, and never contacts it', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'twin-model-'));
+    const dir = temps.folder('twin-model-');
     const { fetchImpl, contacted } = fakeNetwork({
       [`${origin}${modelPath}`]: redirect('https://evil.example.com/payload.gguf'),
       'https://evil.example.com/payload.gguf': serve(payload),
@@ -262,7 +263,7 @@ describe('downloadModel', () => {
   });
 
   it('follows a redirect that stays on an allowed host', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'twin-model-'));
+    const dir = temps.folder('twin-model-');
     const cdn = 'https://cas-bridge.xethub.hf.co/blob';
     const { fetchImpl, contacted } = fakeNetwork({
       [`${origin}${modelPath}`]: redirect(`${cdn}`),
@@ -274,14 +275,14 @@ describe('downloadModel', () => {
   });
 
   it('refuses a redirect down to plain http', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'twin-model-'));
+    const dir = temps.folder('twin-model-');
     const { fetchImpl, contacted } = fakeNetwork({ [`${origin}${modelPath}`]: redirect('http://huggingface.co/insecure.gguf') });
     await expect(downloadModel({ spec: spec(), destinationDir: dir, allowedHosts: ['huggingface.co'], fetchImpl })).rejects.toThrow(/https/);
     expect(contacted).toEqual([origin]);
   });
 
   it('cancels cleanly between chunks and leaves no partial file', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'twin-model-'));
+    const dir = temps.folder('twin-model-');
     const chunked = () => {
       const chunk = payload.subarray(0, Math.floor(payload.length / 4));
       const stream = new ReadableStream({
@@ -311,7 +312,7 @@ describe('downloadModel', () => {
   });
 
   it('reports a server error as a failure with its HTTP status', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'twin-model-'));
+    const dir = temps.folder('twin-model-');
     const { fetchImpl } = fakeNetwork({});
     const error = await downloadModel({ spec: spec(), destinationDir: dir, allowedHosts: ['huggingface.co'], fetchImpl }).catch(e => e);
     expect(error).toBeInstanceOf(DownloadError);
@@ -319,7 +320,7 @@ describe('downloadModel', () => {
   });
 
   it('refuses hosts that are not on the allowlist before any request', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'twin-model-'));
+    const dir = temps.folder('twin-model-');
     const { fetchImpl, contacted } = fakeNetwork({});
     await expect(downloadModel({ spec: spec(), destinationDir: dir, allowedHosts: ['127.0.0.1'], fetchImpl })).rejects.toThrow(/allowlist/);
     expect(contacted).toEqual([]);

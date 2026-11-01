@@ -1,7 +1,6 @@
 import {
   copyFileSync,
   existsSync,
-  mkdtempSync,
   readFileSync,
   readdirSync,
   statSync,
@@ -9,16 +8,18 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { EncryptedStore } from '../src';
+import { tempFolders } from './temp-folders';
+
+const temps = tempFolders();
 
 const PAGE_BYTES = 4096;
 const CANARY = 'plaintext-canary-7731';
 
 function freshDir(): string {
-  return mkdtempSync(join(tmpdir(), 'twin-store-'));
+  return temps.folder('twin-store-');
 }
 
 /** Raw bytes of every file in the store folder: the database, its WAL and shared memory. */
@@ -36,17 +37,17 @@ describe('EncryptedStore', () => {
   it('round-trips records, in order, across a reopen', () => {
     const dir = freshDir();
     const key = randomBytes(32);
-    const store = new EncryptedStore(dir, key);
+    const store = temps.track(new EncryptedStore(dir, key));
     store.append('events', { a: 1 });
     store.append('events', { a: 2 });
     expect(store.readAll('events')).toEqual([{ a: 1 }, { a: 2 }]);
     store.close();
-    expect(new EncryptedStore(dir, key).readAll('events')).toEqual([{ a: 1 }, { a: 2 }]);
+    expect(temps.track(new EncryptedStore(dir, key)).readAll('events')).toEqual([{ a: 1 }, { a: 2 }]);
   });
 
   it('never writes plaintext to disk, including the WAL', () => {
     const dir = freshDir();
-    const store = new EncryptedStore(dir, randomBytes(32));
+    const store = temps.track(new EncryptedStore(dir, randomBytes(32)));
     store.append('events', { secret: CANARY });
     const open = rawFiles(dir);
     // The WAL exists while the store is open, so the check covers it as well as the main file.
@@ -63,16 +64,16 @@ describe('EncryptedStore', () => {
   it('cannot be read with another key', () => {
     const dir = freshDir();
     const key = randomBytes(32);
-    new EncryptedStore(dir, key).append('events', { a: 1 });
+    temps.track(new EncryptedStore(dir, key)).append('events', { a: 1 });
     expect(() => new EncryptedStore(dir, randomBytes(32))).toThrow(/cannot be read/);
-    const store = new EncryptedStore(dir, key);
+    const store = temps.track(new EncryptedStore(dir, key));
     expect(store.readAll('events')).toEqual([{ a: 1 }]);
     store.close();
   });
 
   it('is unreadable once the only copy of its key is gone (crypto-shredding)', () => {
     const dir = freshDir();
-    const store = new EncryptedStore(dir, randomBytes(32));
+    const store = temps.track(new EncryptedStore(dir, randomBytes(32)));
     store.append('events', { secret: CANARY });
     store.close();
     // Crypto-shredding: once the key is gone, nothing can reopen the file. A test cannot remove the keychain entry,
@@ -84,7 +85,7 @@ describe('EncryptedStore', () => {
   it('detects a changed byte in any data page', () => {
     const dir = freshDir();
     const key = randomBytes(32);
-    const store = new EncryptedStore(dir, key);
+    const store = temps.track(new EncryptedStore(dir, key));
     for (let i = 0; i < 100; i++) store.append('events', { i, pad: 'x'.repeat(200) });
     store.close();
     const path = join(dir, 'twin.db');
@@ -95,7 +96,7 @@ describe('EncryptedStore', () => {
       const tampered = Buffer.from(original);
       tampered[(page - 1) * PAGE_BYTES + 100] ^= 0x01;
       writeFileSync(path, tampered);
-      const reopened = new EncryptedStore(dir, key);
+      const reopened = temps.track(new EncryptedStore(dir, key));
       try {
         expect(() => reopened.readAll('events'), `page ${page}`).toThrow(/cannot be read/);
       } finally {
@@ -107,7 +108,7 @@ describe('EncryptedStore', () => {
   it('detects a changed byte in the schema page when the store opens', () => {
     const dir = freshDir();
     const key = randomBytes(32);
-    new EncryptedStore(dir, key).close();
+    temps.track(new EncryptedStore(dir, key)).close();
     const path = join(dir, 'twin.db');
     const original = readFileSync(path);
     const tampered = Buffer.from(original);
@@ -121,30 +122,30 @@ describe('EncryptedStore', () => {
     const intact = freshDir();
     const torn = freshDir();
     const key = randomBytes(32);
-    const store = new EncryptedStore(dir, key);
+    const store = temps.track(new EncryptedStore(dir, key));
     store.append('events', { a: 1 });
     store.append('events', { a: 2 });
     // Both commits are still in the WAL, so the copies are taken while the store is open.
     copyOpenStore(dir, intact);
     copyOpenStore(dir, torn);
     store.close();
-    expect(new EncryptedStore(intact, key).readAll('events')).toEqual([{ a: 1 }, { a: 2 }]);
+    expect(temps.track(new EncryptedStore(intact, key)).readAll('events')).toEqual([{ a: 1 }, { a: 2 }]);
     // Cut the last transaction's commit frame in half, as a crash in the middle of its write would.
     const wal = join(torn, 'twin.db-wal');
     truncateSync(wal, statSync(wal).size - PAGE_BYTES / 2);
-    const recovered = new EncryptedStore(torn, key);
+    const recovered = temps.track(new EncryptedStore(torn, key));
     expect(recovered.readAll('events')).toEqual([{ a: 1 }]);
     // A later write must not be lost behind the damaged frame.
     recovered.append('events', { a: 3 });
     recovered.close();
-    expect(new EncryptedStore(torn, key).readAll('events')).toEqual([{ a: 1 }, { a: 3 }]);
+    expect(temps.track(new EncryptedStore(torn, key)).readAll('events')).toEqual([{ a: 1 }, { a: 3 }]);
   });
 
   it('shares one database between two engine instances on the same folder', () => {
     const dir = freshDir();
     const key = randomBytes(32);
-    const first = new EncryptedStore(dir, key);
-    const second = new EncryptedStore(dir, key);
+    const first = temps.track(new EncryptedStore(dir, key));
+    const second = temps.track(new EncryptedStore(dir, key));
     first.append('events', { n: 1 });
     second.append('events', { n: 2 });
     expect(first.readAll('events')).toEqual([{ n: 1 }, { n: 2 }]);
@@ -154,7 +155,7 @@ describe('EncryptedStore', () => {
   });
 
   it('replaces a whole collection atomically', () => {
-    const store = new EncryptedStore(freshDir(), randomBytes(32));
+    const store = temps.track(new EncryptedStore(freshDir(), randomBytes(32)));
     store.append('settings', { v: 1 });
     store.replaceAll('settings', [{ v: 2 }]);
     expect(store.readAll('settings')).toEqual([{ v: 2 }]);
@@ -162,7 +163,7 @@ describe('EncryptedStore', () => {
   });
 
   it('keeps the old contents when a replacement fails part way', () => {
-    const store = new EncryptedStore(freshDir(), randomBytes(32));
+    const store = temps.track(new EncryptedStore(freshDir(), randomBytes(32)));
     store.append('settings', { v: 1 });
     // BigInt cannot be serialised, so the second record fails after the first has been written.
     expect(() => store.replaceAll('settings', [{ v: 2 }, { v: 3n }])).toThrow();
@@ -173,13 +174,13 @@ describe('EncryptedStore', () => {
   it('wipe removes the database and its side files, and leaves the store closed', () => {
     const dir = freshDir();
     const key = randomBytes(32);
-    const store = new EncryptedStore(dir, key);
+    const store = temps.track(new EncryptedStore(dir, key));
     store.append('events', { a: 1 });
     store.wipe();
     expect(readdirSync(dir)).toEqual([]);
     expect(() => store.readAll('events')).toThrow(/closed/);
     expect(existsSync(join(dir, 'twin.db'))).toBe(false);
-    expect(new EncryptedStore(dir, key).readAll('events')).toEqual([]);
+    expect(temps.track(new EncryptedStore(dir, key)).readAll('events')).toEqual([]);
   });
 
   it('requires a 32-byte key', () => {

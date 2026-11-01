@@ -1,20 +1,20 @@
-import { mkdtempSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { TwinAgent, describeWhen, routineIdOf, signatureOf, type Routine } from '../src';
 import { at, workdays } from './fixtures';
+import { tempFolders } from './temp-folders';
+
+const temps = tempFolders();
 
 const DAY = 86_400_000;
 
 function openAgent(dir: string, key: Buffer, now: number): TwinAgent {
-  return new TwinAgent({ dataDir: dir, dataKey: key, now: () => now });
+  return temps.track(new TwinAgent({ dataDir: dir, dataKey: key, now: () => now }));
 }
 
 /** Ten working days seen through the browser, so the four-step routine is detected with its site. */
 function seeded(days = 10) {
-  const dir = mkdtempSync(join(tmpdir(), 'twin-known-'));
+  const dir = temps.folder('twin-known-');
   const key = randomBytes(32);
   const now = at(days, 0);
   const agent = openAgent(dir, key, now);

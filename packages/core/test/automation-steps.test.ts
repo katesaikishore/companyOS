@@ -28,6 +28,9 @@ import {
   type RunRecord,
   type Step,
 } from '../src';
+import { tempFolders } from './temp-folders';
+
+const temps = tempFolders();
 
 describe('parseWebAddress', () => {
   it('accepts http and https addresses and returns the canonical form', () => {
@@ -256,13 +259,13 @@ describe('version 1 automations', () => {
   });
 
   it('is read back from the store by the agent with its state intact', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'twin-steps-'));
+    const dir = temps.folder('twin-steps-');
     const key = randomBytes(32);
-    const store = new EncryptedStore(dir, key);
+    const store = temps.track(new EncryptedStore(dir, key));
     store.replaceAll('automations', [legacy]);
     store.replaceAll('autonomy', [{ automationId: legacy.id, level: 3, effects: ['read_only'], runs: [] }]);
 
-    const views = new TwinAgent({ dataDir: dir, dataKey: key }).automations();
+    const views = temps.track(new TwinAgent({ dataDir: dir, dataKey: key })).automations();
     expect(views).toHaveLength(1);
     expect(views[0].automation).toEqual(legacy);
     expect(views[0].state.level).toBe(3);
@@ -508,11 +511,11 @@ describe('promotion gate for the new steps', () => {
       });
       // Saved before open_file was classified as an external effect, so the stored list still says read_only.
       const stored: AutonomyState = { ...earned(automation), effects: ['read_only'] };
-      store = new EncryptedStore(dir, key);
+      store = temps.track(new EncryptedStore(dir, key));
       store.replaceAll('automations', [automation]);
       store.replaceAll('autonomy', [stored]);
 
-      agent = new TwinAgent({ dataDir: dir, dataKey: key, now: () => NOW });
+      agent = temps.track(new TwinAgent({ dataDir: dir, dataKey: key, now: () => NOW }));
       agent.updateConfig({ maxAutonomyLevel: 4, allowUnattended: true });
       const [view] = agent.automations();
       expect(view.state.effects).toEqual(['external_effect']);

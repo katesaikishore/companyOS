@@ -1,7 +1,4 @@
-import { mkdtempSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_CONFIG,
@@ -18,15 +15,18 @@ import {
   type TwinEvent,
 } from '../src';
 import { SECRET_QUERY, at, workdays } from './fixtures';
+import { tempFolders } from './temp-folders';
+
+const temps = tempFolders();
 
 const DAY = 86_400_000;
 
 function openAgent(dir: string, key: Buffer, now: number, claude?: MessagesClient): TwinAgent {
-  return new TwinAgent({ dataDir: dir, dataKey: key, now: () => now, ...(claude ? { claude } : {}) });
+  return temps.track(new TwinAgent({ dataDir: dir, dataKey: key, now: () => now, ...(claude ? { claude } : {}) }));
 }
 
 function seeded(days = 10): { agent: TwinAgent; dir: string; key: Buffer; now: number } {
-  const dir = mkdtempSync(join(tmpdir(), 'twin-agent-'));
+  const dir = temps.folder('twin-agent-');
   const key = randomBytes(32);
   const now = at(days, 0);
   const agent = openAgent(dir, key, now);
@@ -138,7 +138,7 @@ describe('persistence and retention', () => {
   });
 
   it('prunes handoff records from earlier versions past 90 days, and keeps the newer one as stored in the export', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'twin-handoff-retention-'));
+    const dir = temps.folder('twin-handoff-retention-');
     const key = randomBytes(32);
     const now = at(0, 9);
     const handoff = (id: string, sentAt: number) => ({
@@ -155,7 +155,7 @@ describe('persistence and retention', () => {
     });
     const old = handoff('old', now - (RETENTION_DAYS + 1) * DAY);
     const recent = handoff('recent', now - 2 * DAY);
-    const store = new EncryptedStore(dir, key);
+    const store = temps.track(new EncryptedStore(dir, key));
     store.append('handoffs', old);
     store.append('handoffs', recent);
     store.close();
@@ -167,11 +167,11 @@ describe('persistence and retention', () => {
   });
 
   it('removes a handoff row with no readable send time, since it cannot be aged past the window', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'twin-handoff-undated-'));
+    const dir = temps.folder('twin-handoff-undated-');
     const key = randomBytes(32);
     const now = at(0, 9);
     const undated = { id: 'undated', summary: 'Done.' };
-    const store = new EncryptedStore(dir, key);
+    const store = temps.track(new EncryptedStore(dir, key));
     store.append('handoffs', undated);
     store.close();
 
@@ -182,9 +182,9 @@ describe('persistence and retention', () => {
   });
 
   it('drops the retired OpenMausBot keys from a saved config on the next save', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'twin-config-retired-'));
+    const dir = temps.folder('twin-config-retired-');
     const key = randomBytes(32);
-    const store = new EncryptedStore(dir, key);
+    const store = temps.track(new EncryptedStore(dir, key));
     store.replaceAll('settings', [{ ...DEFAULT_CONFIG, openMausBotCommand: 'openmausbot', openMausBotTarget: 'Lead Bot' }]);
     store.close();
 
@@ -194,7 +194,7 @@ describe('persistence and retention', () => {
     agent.updateConfig({ theme: 'dark' });
     agent.close();
 
-    const reread = new EncryptedStore(dir, key);
+    const reread = temps.track(new EncryptedStore(dir, key));
     const saved = reread.readAll<Record<string, unknown>>('settings');
     reread.close();
     expect(saved).toHaveLength(1);
@@ -206,7 +206,7 @@ describe('persistence and retention', () => {
 
 describe('review fixes', () => {
   function plain(): { agent: TwinAgent; dir: string; key: Buffer; now: number } {
-    const dir = mkdtempSync(join(tmpdir(), 'twin-review-'));
+    const dir = temps.folder('twin-review-');
     const key = randomBytes(32);
     const now = at(10, 0);
     return { agent: openAgent(dir, key, now), dir, key, now };
@@ -263,7 +263,7 @@ describe('review fixes', () => {
 
 describe('dismissals, the automations switch, the ledger and the overview', () => {
   function seededAgent(days = 10) {
-    const dir = mkdtempSync(join(tmpdir(), 'twin-overview-'));
+    const dir = temps.folder('twin-overview-');
     const key = randomBytes(32);
     const now = at(days, 0);
     const agent = openAgent(dir, key, now);
@@ -357,7 +357,7 @@ describe('near copies of a dismissed routine', () => {
 
   /** Six days of one routine, four days of its near copy (one app changed), and an unrelated routine on every day. */
   function nearCopies() {
-    const dir = mkdtempSync(join(tmpdir(), 'twin-near-'));
+    const dir = temps.folder('twin-near-');
     const key = randomBytes(32);
     const now = at(10, 0);
     const agent = openAgent(dir, key, now);
@@ -474,7 +474,7 @@ describe('dismissed signatures and the apps they name', () => {
   }
 
   it('forgets a browser site once a browser is excluded, and keeps the other dismissals', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'twin-exclude-site-'));
+    const dir = temps.folder('twin-exclude-site-');
     const agent = openAgent(dir, randomBytes(32), at(10, 0));
     siteAndClasses(agent, 'docs.example.com/doc');
     dismiss(agent, SITE_FLOW);
@@ -490,7 +490,7 @@ describe('dismissed signatures and the apps they name', () => {
   });
 
   it('forgets a dismissed routine that names an unknown app once that app is excluded', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'twin-exclude-other-'));
+    const dir = temps.folder('twin-exclude-other-');
     const agent = openAgent(dir, randomBytes(32), at(10, 0));
     for (let day = 0; day < 10; day++) {
       agent.ingest({ kind: 'focus', ts: at(day, 9), app: 'Acme Planner' });
@@ -510,7 +510,7 @@ describe('dismissed signatures and the apps they name', () => {
   });
 
   it('drops a dismissed site once no stored event holds it, and keeps the signatures whose sites are still there', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'twin-prune-site-'));
+    const dir = temps.folder('twin-prune-site-');
     const key = randomBytes(32);
     const first = openAgent(dir, key, at(9, 12));
     first.updateConfig({
@@ -532,9 +532,9 @@ describe('dismissed signatures and the apps they name', () => {
 
   it('drops a signature that names an app excluded before the exclusion was forgotten, at the next prune', () => {
     // A config saved by an earlier version: Chrome is excluded, and its site is still among the dismissed signatures.
-    const dir = mkdtempSync(join(tmpdir(), 'twin-legacy-exclusion-'));
+    const dir = temps.folder('twin-legacy-exclusion-');
     const key = randomBytes(32);
-    const store = new EncryptedStore(dir, key);
+    const store = temps.track(new EncryptedStore(dir, key));
     store.replaceAll('settings', [
       { ...DEFAULT_CONFIG, excludedApps: [...DEFAULT_CONFIG.excludedApps, 'Google Chrome'], dismissedRoutineSignatures: [SITE_FLOW, CLASSES_FLOW] },
     ]);
@@ -597,12 +597,12 @@ describe('renaming an automation', () => {
 
 describe('settings saved by an earlier version', () => {
   it('opens with no declines and no dismissed signatures', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'twin-old-settings-'));
+    const dir = temps.folder('twin-old-settings-');
     const key = randomBytes(32);
     const earlier: Record<string, unknown> = { ...DEFAULT_CONFIG };
     delete earlier.dismissedRoutineSignatures;
     delete earlier.declinedRoutines;
-    const store = new EncryptedStore(dir, key);
+    const store = temps.track(new EncryptedStore(dir, key));
     store.replaceAll('settings', [earlier]);
     store.close();
     const agent = openAgent(dir, key, at(0, 9));

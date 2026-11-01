@@ -1,10 +1,10 @@
-import { mkdtempSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { FrontAppTracker, TwinAgent, urlTemplate, type TwinEvent } from '../src';
 import { at } from './fixtures';
+import { tempFolders } from './temp-folders';
+
+const temps = tempFolders();
 
 const CHROME = 'Google Chrome';
 const SLACK = 'Slack';
@@ -16,7 +16,7 @@ function at9(seconds: number): number {
 }
 
 function openAgent(): TwinAgent {
-  const agent = new TwinAgent({ dataDir: mkdtempSync(join(tmpdir(), 'twin-front-app-')), dataKey: randomBytes(32), now: () => at(0, 13) });
+  const agent = temps.track(new TwinAgent({ dataDir: temps.folder('twin-front-app-'), dataKey: randomBytes(32), now: () => at(0, 13) }));
   agent.updateConfig({ watchBrowsers: true });
   return agent;
 }

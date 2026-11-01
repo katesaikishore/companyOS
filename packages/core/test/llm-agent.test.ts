@@ -1,16 +1,16 @@
-import { mkdtempSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { RoutineNamingJob, TwinAgent, type InstalledModel, type NamingModel } from '../src';
 import { at, workdays } from './fixtures';
+import { tempFolders } from './temp-folders';
+
+const temps = tempFolders();
 
 function seeded(days = 10): { agent: TwinAgent; dir: string; key: Buffer; now: number } {
-  const dir = mkdtempSync(join(tmpdir(), 'twin-names-'));
+  const dir = temps.folder('twin-names-');
   const key = randomBytes(32);
   const now = at(days, 0);
-  const agent = new TwinAgent({ dataDir: dir, dataKey: key, now: () => now });
+  const agent = temps.track(new TwinAgent({ dataDir: dir, dataKey: key, now: () => now }));
   agent.updateConfig({ watchBrowsers: true });
   for (const signal of workdays(days)) agent.ingest(signal);
   return { agent, dir, key, now };
@@ -59,7 +59,7 @@ describe('routine names from the local model', () => {
     const id = fourStepRoutineId(agent);
     agent.setRoutineName(id, 'Morning spreadsheet triage');
 
-    const reopened = new TwinAgent({ dataDir: dir, dataKey: key, now: () => now });
+    const reopened = temps.track(new TwinAgent({ dataDir: dir, dataKey: key, now: () => now }));
     expect(reopened.suggestions().find(suggestion => suggestion.routine.id === id)?.preview.name).toMatch(/^Routine: /);
     expect(JSON.stringify(agent.exportAll())).not.toContain('Morning spreadsheet triage');
   });
@@ -90,9 +90,9 @@ describe('routine names from the local model', () => {
  * The other is a normal three-step routine.
  */
 function longAndNormal(): TwinAgent {
-  const dir = mkdtempSync(join(tmpdir(), 'twin-long-names-'));
+  const dir = temps.folder('twin-long-names-');
   const now = at(5, 0);
-  const agent = new TwinAgent({ dataDir: dir, dataKey: randomBytes(32), now: () => now });
+  const agent = temps.track(new TwinAgent({ dataDir: dir, dataKey: randomBytes(32), now: () => now }));
   for (let day = 0; day < 5; day++) {
     const long = ['Microsoft Excel', 'Microsoft Word', 'Microsoft Excel', 'Microsoft Word', 'Microsoft Excel', 'Microsoft Word'];
     long.forEach((app, index) => agent.ingest({ kind: 'focus', ts: at(day, 9, index * 5), app }));

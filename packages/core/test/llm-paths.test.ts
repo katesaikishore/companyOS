@@ -1,13 +1,15 @@
-import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { realpath } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { resolveModelPath } from '../src';
+import { tempFolders } from './temp-folders';
+
+const temps = tempFolders();
 
 /** A models folder with one model inside it, one model outside it, and one file that is not a model. */
 function layout() {
-  const base = mkdtempSync(join(tmpdir(), 'twin-models-'));
+  const base = temps.folder('twin-models-');
   const modelsDir = join(base, 'models');
   mkdirSync(modelsDir);
   const inside = join(modelsDir, 'Qwen3-4B-Q4_K_M.gguf');
