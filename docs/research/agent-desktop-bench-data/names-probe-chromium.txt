@@ -1,0 +1,10 @@
+--- browser: Google Chrome for Testing 153.0.8010.12  (/opt/pw-browsers/chromium-1243/chrome-linux64/chrome)
+--- X11 windows (instance, class)
+id=4194307 WM_CLASS(STRING) = "chromium-browser (<profile>)", "Chromium-browser"
+--- program: list-apps
+{"version":"2.5","ok":true,"command":"list-apps","data":{"apps":[{"name":"chrome","pid":16728,"presentation":"foreground","process_instance":"9c8d98bb:488828"},{"bundle_id":"gcr-prompter","name":"gcr-prompter","pid":16858,"presentation":"foreground","process_instance":"9c8d98bb:488896"}]}}
+focus-window --app chromium -> APP_NOT_FOUND
+focus-window --app Chromium -> APP_NOT_FOUND
+focus-window --app chrome -> ok
+focus-window --app Chrome -> ok
+focus-window --app Chromium-browser -> APP_NOT_FOUND
