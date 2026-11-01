@@ -259,8 +259,11 @@ async function main(userDataDir, fixtureDir) {
     await page.waitForSelector('[data-testid="setup-step"][data-step="2"]');
     await shot(page, '02-setup-permissions');
     await page.click('[data-testid="setup-next"]');
+    await page.waitForSelector('[data-testid="setup-step"][data-step="3"]');
+    // Recall is off by default, so this step is passed without turning anything on.
+    await page.click('[data-testid="setup-next"]');
 
-    // 2. Step three detects the device and recommends models from the open catalogue.
+    // 2. Step four detects the device and recommends models from the open catalogue.
     await page.waitForSelector('[data-testid="setup-plan-chat"]', { timeout: 30_000 });
     const chatModel = await page.getAttribute('[data-testid="setup-plan-chat"]', 'data-model-id');
     assert.ok(['qwen3-0.6b', 'qwen3-1.7b', 'qwen3-4b', 'qwen3-8b', 'qwen3-14b'].includes(chatModel), `chat model ${chatModel}`);
@@ -299,7 +302,7 @@ async function main(userDataDir, fixtureDir) {
 
     // 3b. The optional decision-model step. Nothing is requested until the person chooses to download.
     await page.click('[data-testid="setup-next"]');
-    await page.waitForSelector('[data-testid="setup-step"][data-step="4"]');
+    await page.waitForSelector('[data-testid="setup-step"][data-step="5"]');
     await page.waitForSelector('[data-testid="setup-laya"][data-state="not_installed"]');
     assert.match(await page.textContent('[data-testid="setup-laya-note"]'), /keeps the rule-based labels/);
     // The page states the size of the bundle it will fetch. Here that is the 3 MB test bundle. The real one reads "about 1.7 GB" (laya-labels.test.ts).
@@ -343,7 +346,7 @@ async function main(userDataDir, fixtureDir) {
     log('decision-model download resumed, verified and installed');
 
     await page.click('[data-testid="setup-next"]');
-    await page.waitForSelector('[data-testid="setup-step"][data-step="5"]');
+    await page.waitForSelector('[data-testid="setup-step"][data-step="6"]');
     assert.match(await page.textContent('[data-testid="setup-step"]'), /Decision modelInstalled\. It labels routines with unknown apps\./);
     await page.click('[data-testid="setup-start-observing"]');
     await page.waitForSelector('[data-testid="app-shell"]', { timeout: 15_000 });
@@ -378,10 +381,10 @@ async function main(userDataDir, fixtureDir) {
     assert.equal(existsSync(path.join(userDataDir, 'models', 'laya')), false, 'Remove deletes the whole decision-model folder');
     const requestsBefore = laya.server.requests.length;
     await page.click('[data-testid="settings-laya-setup"]');
-    await page.waitForSelector('[data-testid="setup-step"][data-step="4"]');
+    await page.waitForSelector('[data-testid="setup-step"][data-step="5"]');
     await page.waitForSelector('[data-testid="setup-laya"][data-state="not_installed"]');
     await page.click('[data-testid="setup-laya-skip"]');
-    await page.waitForSelector('[data-testid="setup-step"][data-step="5"]');
+    await page.waitForSelector('[data-testid="setup-step"][data-step="6"]');
     assert.match(await page.textContent('[data-testid="setup-step"]'), /Decision modelNot installed, rules are used/);
     await page.click('[data-testid="setup-close"]');
     await page.waitForSelector('[data-testid="settings-laya"]');
