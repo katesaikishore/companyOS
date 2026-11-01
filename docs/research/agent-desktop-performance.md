@@ -1,62 +1,71 @@
 # agent-desktop: measured behaviour and performance
 
-Recorded 2026-11-01 with the executor code from `main` (commit `dd830ce`) and the scripts added in the same change as this
-record. Scope: Linux on X11 only, one machine. macOS and Windows were not measured here. What the hosted macOS and Windows
-runners showed is in [`adapter-smoke-results.md`](adapter-smoke-results.md).
+Recorded 2026-11-01 with the executor code from `main` (commit `dd830ce`) and the scripts committed with this record. Scope:
+Linux on X11 only, one machine. macOS and Windows were not measured here. What the hosted macOS and Windows runners showed
+is in [`adapter-smoke-results.md`](adapter-smoke-results.md).
 
-**Status: current for the Linux X11 setup described. It supersedes the record made on 2026-10-31.** That record flagged its
-own press timings as unreliable, because they came only from runs that did not crash, and it gave no rate for how often a
-window dies. This one keeps every trial of every run, including the ones where the test window died. The failure paths,
-Finding 2 and the provenance check are carried over from the first record and were not repeated. The raw data is in
-[`agent-desktop-bench-data/`](agent-desktop-bench-data).
+**Status: current as of 2026-11-01 for agent-desktop 1.0.2 on the Linux X11 setup described.** It replaces the press and
+timing results of the record made on 2026-10-31, which is still readable with
+`git show dd830ce:docs/research/agent-desktop-performance.md`. That record flagged its own press timings as unreliable,
+because they came only from runs that did not crash, and its stress table gave only died or alive for three trials per
+loop, so it had no usable rate for how often a window dies. This one keeps every trial of the recorded runs, including the
+ones where the test window died. The failure paths, Finding 2 and the provenance check are carried over from the first
+record and were not repeated. The raw data is in [`agent-desktop-bench-data/`](agent-desktop-bench-data).
 
 ## Summary
 
-- **No window was lost to the program's other commands.** None was lost in the `cli` stage (155 calls per run, no key sent)
-  or in the 1,200 focus calls of the production stage, where each program call started at least 150 ms after the previous
-  key. Whether a call that ends within a few milliseconds of a key can kill a window was not measured.
-- **The program's own `press` killed the GTK 3 test window in 36 of 40 trials.** Across the three ways of pressing it (with
-  its own focus, headless after one focus, and `--headed`) the window died of a segmentation fault, after a median of 12 to
-  20 presses among the trials that lost it, and after as few as 1. The window had the AT-SPI bridge forced on, no other
-  AT-SPI client was on the bus, and each trial started after the previous window was gone (killed or crashed), so the rate
-  on a real desktop is not known.
-- **The press that kills the window reports success.** All 838 press calls reported `ok`, including the 36 that killed the
-  window. In 34 of those 36, no key was logged.
-- **The Linux X11 path with the program enabled lost no window in the production stage.** That stage calls the executor's
-  focus, which goes through the program, and its key press, the built-in `xdotool` adapter, in a loop 150 ms apart, without
-  the runner. In 20 trials of 60 presses (1,200 presses) no window was lost, every press reported `ok`, and every press
-  logged exactly one key. One of the 1,200 focus calls took 875 ms and returned failure, and the benchmark pressed anyway.
-- **The two mechanisms name apps differently.** For the two apps tried, the program accepted the process name and rejected
-  the window class and the title. companyOS stores the window class, lower-cased, and the built-in press matches it against
-  the window class. See "App names".
+- **No window was lost in the stages that ran the program's other commands.** None was lost in the `cli` stage
+  (155 calls per run, no key sent) or in the 600 focus calls of the `production` stage,
+  each of which started at least 150 ms after an `xdotool` key. A program call that ends within a few milliseconds of a key
+  was not tried.
+- **The program's own `press` killed the GTK 3 test window in 26 of 30 trials.** Across its
+  three ways of pressing (with its own focus, headless after one focus, and `--headed`), the window died of a segmentation
+  fault at a median call of 17 to 20 among the trials that lost it, and as early as
+  call 1. The window had the AT-SPI bridge forced on. `run.sh` starts no other program that uses AT-SPI,
+  though the bus's clients were not listed. Each trial started after the previous window was gone (killed or crashed). The
+  rate on a real desktop is not known. 36 of 40 trials in four earlier runs lost the
+  window too.
+- **The press that kills the window reports success.** All 818 calls of the program's `press` (three stages)
+  reported `ok`, including the 26 that killed the window. In 22 of those 26, no key
+  was logged.
+- **The program-enabled Linux X11 path lost no window in the `production` stage.** That stage calls the executor's focus,
+  which goes through the program, then its key press, the built-in `xdotool` adapter. It waits 150 ms and repeats, about
+  385 ms between presses, and it does not use the runner. In 10 trials of 60 presses
+  (600 presses) no window was lost, every press reported `ok`, and every press logged exactly one key.
+  The window had a class equal to its process name. With the names companyOS stores, the program's focus failed for both
+  apps tried (see "App names").
+- **The two mechanisms name apps differently.** For the two apps tried, the program accepted the process name. It rejected
+  the window class for both, and the window title for the test window (the title was not tried on Chromium). companyOS stores
+  the window class, normalised, and the built-in press matches it against the window class.
 
-## What was wrong with the first record
+## What was wrong or out of date in the first record
 
 1. **Press timings came only from runs that finished without a crash.** The record said so and marked them unreliable, but
-   they could not say how often a window dies, and its stress table gave only died or alive for three trials per loop. This
-   record keeps every trial and the call at which each window died.
+   they could not say how often a window dies. This record keeps every trial and the call at which each window died.
 2. **The test window logged keys to a fixed path and ignored `KEY_LOG`,** which the other scripts set. A run that used any
    other log path would have reported that no key was delivered. `KEY_LOG` is now required, and the driver sets it.
-3. **Two findings had gone stale.** It said Linux had no built-in press adapter, and that window-ID targeting was not
+3. **Two findings went stale.** It said Linux had no built-in press adapter, and that window-ID targeting was not
    implemented. The adapter exists now. The executor's functions accept a window ID now, though nothing in the app passes
    one yet.
-4. **It said the crash cause was unknown.** A cause has since been proposed upstream (see "Crash in the press path").
+4. **It said the crash cause was unknown.** That was true then. A cause has since been proposed upstream (see "Crash in the
+   press path").
 
 ## What was tested
 
 - **Binary.** `agent-desktop` 1.0.2 from npm (`agent-desktop@1.0.2`, Apache-2.0, source repository
-  `vercel-labs/agent-desktop`), installed into a scratch folder and not vendored into the product. The Linux x64 binary's
-  SHA-256 is `05427281a6746489bc0e15c16698a70a86322125c76c7a9e2f4c2d7a12bf7c5b`, the digest checked under "Provenance".
-  npm's latest version was still 1.0.2 on the day of the recording.
-- **Environment.** Ubuntu 24.04.5 on a virtual machine (a cloud sandbox) with Linux 6.18.44, an Intel Xeon at 2.1 GHz,
-  4 logical CPUs and 15.7 GiB of memory. Xvfb 21.1.12 on a private display, openbox 3.6.1 as the window manager, an AT-SPI
-  bus (at-spi2-core 2.52.0) under a private D-Bus session, xdotool 3.20160805, Node 22.23.4, and a GTK 3.24.41 test window
-  (`ADTestApp`) written in Python 3.12.3. The window logs every key it receives to a file, so delivery is checked on the
-  app side. The Ubuntu and Xvfb versions were read from the machine. Every other version is in the `environment` block of
-  each data file.
-- **Load.** The guest's one-minute load average was 0.2 to 0.4 when each run started, and 0.1 to 0.8 at the start of
-  individual stages (the benchmark itself raises it). No other workload was started on the machine. Load on the host and on
-  other guests could not be seen.
+  `vercel-labs/agent-desktop`), installed into a scratch folder and not vendored into the product. The SHA-256 of the Linux
+  x64 binary checked on 2026-10-31 is `05427281a6746489bc0e15c16698a70a86322125c76c7a9e2f4c2d7a12bf7c5b` (see
+  "Provenance"). The benchmark data records only the version string `agent-desktop 1.0.2`, not a hash. npm's latest
+  version was 1.0.2 on 2026-11-01.
+- **Environment.** Ubuntu 24.04.5 LTS on a virtual machine, kernel Linux 6.18.44-fc-v185, an Intel Xeon at 2.10GHz with 4 logical
+  CPUs and 15.7 GiB of memory (16,091 MiB). Xvfb 2:21.1.12-1ubuntu1.9 on a private display, openbox
+  3.6.1-12build5 as the window manager, an AT-SPI bus (at-spi2-core 2.52.0-1build1) under a private D-Bus session,
+  xdotool 1:3.20160805.1-5build1, Node v22.23.4, and a GTK 3.24.41 test window (`ADTestApp`) written in
+  Python 3.12.3. The window logs every key it receives to a file, so delivery is checked on the app side. All of these are
+  in the `environment` block of each of the final data files.
+- **Load.** The guest's one-minute load average was 0.1 to 0.4 when each of the 6 main runs started, and
+  0.0 for the names-only run. At the start of individual stages of the final pair it was 0.2 to 0.5. No
+  other workload was started on the machine, in the recorder's account. Load on the host could not be seen.
 - **Executor.** The built `apps/desktop/src/main/agent-desktop.ts` and `platform.ts` from `main`, called from Node against
   the real binary. No fake program.
 
@@ -82,10 +91,14 @@ Percentiles are nearest-rank. The first call of each trial is left out of them a
 so both the program and the built-in adapter accept one name. The `names` and `cli` stages leave the class as GTK derives
 it.
 
-Two sets of runs are kept. The "earlier" pair ran the first four stages with an earlier version of `bench.mjs` that was not
-kept. Its settings and output format are the same as the final pair's (`config` in each data file). The "final" pair ran
-all six stages. Percentiles for `production` and `agent-desktop-press` pool all four runs. The raw press stages come from
-the final pair only. A few short test runs of a few seconds were made while the script was written and were not kept.
+**Which runs are which.** The tables below come from the **final pair**, `run-1.json` and `run-2.json`, two runs of all six
+stages (started at 06:20 and 06:25 UTC) with the `bench.mjs` committed with this record. Four **earlier runs** were made
+with earlier revisions of the script, which were not kept: `earlier-run-1.json` and `earlier-run-2.json` ran the first four
+stages, and `earlier-run-3.json` and `earlier-run-4.json` ran all six. After the earlier runs, three things changed in the
+script, none in the press logic: the program's error code is kept, the `names` rows record it, and the `environment` block
+records more fields. The earlier runs are reported separately, under "Earlier runs". `names-with-error-codes.json` is a run of
+the `names` stage alone from the committed script, made before the final pair. A few short test runs of a few seconds were
+made while the script was written and were not kept.
 
 ## Commands the CLI actually has
 
@@ -93,9 +106,9 @@ The executor originally assumed `focus --app` and `press --app --shortcut`. Neit
 here are:
 
 - `focus-window --app <name>`: bring the app's window to the front and confirm focus.
-- `press <chord> --app <name>`: send a key chord. From the first record, not re-measured here: headless by default, which
+- `press <chord> --app <name>`: send a key chord. From the first record, measured on Linux only: headless by default, which
   refuses to send keys to a window that is not in front (`STALE_REF`), while `--headed` brings the window forward and sends
-  the key through the pointer and keyboard input path.
+  the key through the pointer and keyboard input path. The hosted macOS and Windows runs behaved differently (see Finding 2).
 - `list-apps`, `list-windows`, `status`, `snapshot --app <name> -i`.
 
 Every call prints one JSON envelope with `ok`. Errors exit with status 1.
@@ -105,118 +118,140 @@ Every call prints one JSON envelope with `ok`. Errors exit with status 1.
 ### The program's commands
 
 Median / 90th percentile in milliseconds, 30 calls per command per run, final pair. All 30 calls of every command were `ok`
-in both runs, and the window survived the stage in both, and in both earlier runs.
+in both runs, and the window survived the stage in both runs and in all four earlier runs.
 
 | Command | Run 1 | Run 2 |
 |---|---|---|
-| `status` | 8.2 / 9.5 | 7.8 / 9.5 |
-| `list-apps --app` | 21.0 / 27.3 | 21.1 / 22.8 |
-| `list-windows --app` | 20.2 / 22.3 | 21.4 / 26.4 |
-| `snapshot --app -i` | 27.8 / 30.4 | 30.5 / 38.9 |
-| `focus-window --app` | 107.8 / 115.3 | 108.4 / 115.3 |
+| `status` | 7.6 / 8.5 | 8.7 / 11.7 |
+| `list-apps --app` | 21.8 / 28.2 | 22.1 / 25.2 |
+| `list-windows --app` | 21.8 / 24.9 | 22.1 / 25.7 |
+| `snapshot --app -i` | 28.8 / 31.0 | 30.9 / 34.2 |
+| `focus-window --app` | 106.2 / 113.4 | 112.4 / 117.7 |
 
 ### Pressing a key
 
+Final pair. "Lost at call" counts the press after which the window was gone.
+
 | Path | Trials | Window lost | Calls | Press reported `ok` | Keys logged | Lost at call (range, median among those lost) | Per call, median / p90 (ms) |
 |---|---|---|---|---|---|---|---|
-| Production: executor focus, then built-in xdotool press | 20 | 0 | 1,200 | 1,200 (focus failed once) | 1,200 | not lost | focus 132.8 / 143.4, press 97.2 / 104.2, together 230.4 / 244.5 |
-| Program press with its own focus (`pressWithAgentDesktop`) | 20 | 19 | 328 | 328 | 310 | 3 to 43, median 12 | 178.1 / 191.2 |
-| `press`, headless, after one focus | 10 | 9 | 231 | 231 | 222 | 9 to 34, median 20 | 48.9 / 55.2 |
-| `press --headed` | 10 | 8 | 279 | 279 | 272 | 1 to 48, median 16.5 | 83.3 / 92.6 |
+| Production: executor focus, then built-in xdotool press | 10 | 0 | 600 | 600 | 600 | not lost | focus 135.3 / 146.4, press 98.4 / 106.3, together 234.6 / 249.2 |
+| Program press with its own focus (`pressWithAgentDesktop`) | 10 | 9 | 288 | 288 | 281 | 2 to 52, median 20 | 184.9 / 195.8 |
+| `press`, headless, after one focus | 10 | 8 | 322 | 322 | 314 | 1 to 60, median 17.5 | 50.4 / 57.2 |
+| `press --headed` | 10 | 9 | 208 | 208 | 201 | 1 to 32, median 17 | 84.1 / 92.6 |
 
 How to read the table:
 
-- **Window lost** means the test window's process exited. In all 36 cases it exited on SIGSEGV.
-- **Calls and keys.** The key count falls short of the call count by the number of calls that killed the window without a
-  key being logged: 18 of 19, 9 of 9 and 7 of 8. The other two fatal presses logged their key and then the window died.
+- **Window lost** means the test window's process exited. In all 26 cases it exited on SIGSEGV
+  (26 of 26), and Python's fault handler reported a fatal error in 26
+  of them.
+- **Calls and keys.** For the program's press, the key count falls short of the call count by the number of calls that
+  killed the window without a key being logged: 7 of 9,
+  8 of 8 and 7 of 9. The other
+  4 fatal presses logged their key and then the window died.
 - **Per-call times** exclude each trial's first call. "Together" is the focus time plus the press time of the same call, so
-  it is not the sum of the two medians. The production focus time includes the executor's `list-windows` check, which is
-  why it is above the `focus-window` median in the first table. The program press with its own focus includes the same
-  check. The slowest single press in the production stage was 147.7 ms, and the slowest focus was 874.6 ms.
-- **By run, for the program press with its own focus.** Earlier pair: 5 of 5 trials lost the window, at calls 22, 10, 4, 5,
-  4 in run 1 and 43, 3, 5, 12, 15 in run 2. Final pair: 5 of 5 in run 1 (calls 19, 3, 36, 17, 18), and 4 of 5 in run 2
-  (trials 2 to 5, at calls 14, 8, 20, 10; trial 1 made all 60 presses).
-- **The one focus failure.** In the production stage's final run 2, trial 3, call 21, the executor's focus step (the
-  `list-windows` check and `focus-window`) took 874.6 ms and returned failure. The benchmark pressed anyway, and the key was
-  logged. In the product a failed focus ends the run as failed. The cause was not looked into.
-- **Production press time.** The press is the built-in adapter's: it activates the window, checks the active window's class,
-  and sends the key with `xdotool key`.
+  it is not the sum of the two medians. The production focus time includes the executor's `list-windows` check, which
+  accounts for most of its difference from the `focus-window` median in the first table (a `list-windows` call takes about
+  21 ms). The program press with its own focus includes the same check. The slowest single press in the production stage
+  was 125.0 ms, and the slowest focus was 365.0 ms.
+- **By run.** Program press with its own focus: run 1: 4 of 5 lost the window (trial 2, 3, 4, 5 at call 48, 44, 52, 13); trial 1 made all 60 presses; run 2: 5 of 5 lost the window (trial 1, 2, 3, 4, 5 at call 2, 17, 24, 8, 20). Headless: run 1: 4 of 5 lost the window (trial 1, 2, 3, 5 at call 28, 2, 48, 60); trial 4 made all 60 presses; run 2: 4 of 5 lost the window (trial 1, 3, 4, 5 at call 52, 1, 4, 7); trial 2 made all 60 presses. Headed: run 1: 4 of 5 lost the window (trial 1, 3, 4, 5 at call 1, 29, 16, 17); trial 2 made all 60 presses; run 2: 5 of 5 lost the window (trial 1, 2, 3, 4, 5 at call 21, 22, 4, 6, 32).
+- **Focus failures in the production stage:** 0. none. The benchmark presses even
+  after a failed focus. In the product a failed focus ends the run as failed.
+- **What the production press does.** The press is the built-in adapter's: it activates the window, checks that the active
+  window is one of the app's windows, and sends the key with `xdotool key`.
+
+### Earlier runs
+
+The four earlier runs agree with the final pair. Production: 0 of 20 trials lost a
+window, in 1,200 presses, of which 1,200 reported `ok` and 1,200 logged a key
+(1 focus calls failed). Program press with its own focus: 19 of
+20 lost the window (earlier run 1: all 5 lost, at calls 22, 10, 4, 5, 4; earlier run 2: all 5 lost, at calls 43, 3, 5, 12, 15; earlier run 3: all 5 lost, at calls 19, 3, 36, 17, 18; earlier run 4: 4 of 5 lost, at calls none (60 presses made), 14, 8, 20, 10). Headless: 9 of
+10. Headed: 8 of 10. The two raw press stages ran in
+earlier runs 3 and 4 only.
 
 ### App names
 
-companyOS reads the X11 window class (`WM_CLASS`) of the active window and stores it lower-cased
-(`normalizeAppName` in `packages/core/src/classify.ts`), for example `testapp.py`. A focus step on Linux with the program
-path set passes that stored name to `focus-window --app`, and the built-in press matches it against the window class
-without regard to case. The program matches an app by the name of its process. With the test window's class left as GTK
-derives it (`Testapp.py`, process `python3.12`), the `names` stage gave the same ok-or-failed result in all four runs. A
-fifth run of that stage alone, with the program's error code kept, is in `names-with-error-codes.json`:
+companyOS reads the X11 window class (`WM_CLASS`) of the active window and stores it normalised (`normalizeAppName` in
+`packages/core/src/classify.ts`: lower-cased, trimmed, a trailing `.app` or `.exe` removed, spaces collapsed), for example
+`testapp.py`. A focus step on Linux with the program path set passes that stored name to `focus-window --app`. The built-in
+press matches it against the window class, and in one test it accepted `testapp.py` for the class `Testapp.py`. The program
+matched the name of the process in both apps tried. With the test window's class left as GTK derives it (`Testapp.py`,
+process `python3.12`), the `names` stage gave the same ok-or-failed result in all 6 main runs, and the final pair's
+rows carry the program's error code:
 
 | Name given | Program `focus-window` | Built-in press | Keys logged |
 |---|---|---|---|
 | `python3.12` (process name) | ok | refused | 0 |
 | `Testapp.py` (window class, as the adapter reports it) | `APP_NOT_FOUND` | ok | 1 |
-| `testapp.py` (class in lower case, as companyOS stores it) | `APP_NOT_FOUND` | ok | 1 |
+| `testapp.py` (class as companyOS stores it) | `APP_NOT_FOUND` | ok | 1 |
 | `ADTestApp` (window title) | `APP_NOT_FOUND` | refused | 0 |
 
-A second app gave the same split. One Chromium build (Chrome for Testing, Playwright's `chromium-1243`, started with
-`--force-renderer-accessibility`) has the class `Chromium-browser` by `xprop`, and the program's app list names its process
-`chrome`. `scripts/agent-desktop-bench/names-probe-chromium.sh` tried five spellings with `focus-window --app`, and its
-output is in `names-probe-chromium.txt`: `Chromium-browser`, `chromium` and `Chromium` returned `APP_NOT_FOUND`, and
-`chrome` and `Chrome` succeeded, so for that one name the match was not case-sensitive. The built-in press was not tried on
-Chromium.
+A second app also had a class that the program did not accept. One Chromium build (Google Chrome for Testing 153.0.8010.12,
+Playwright's `chromium-1243`, started with `--force-renderer-accessibility`) has the class `Chromium-browser` by `xprop`, and the
+program's app list names its process `chrome`. `scripts/agent-desktop-bench/names-probe-chromium.sh` tried five spellings with
+`focus-window --app`, and its output, with the temporary profile path replaced by `<profile>`, is in `names-probe-chromium.txt`: `Chromium-browser`, `chromium` and `Chromium`
+returned `APP_NOT_FOUND`, and `chrome` and `Chrome` succeeded, so for that one name the match was not case-sensitive. The
+stored form, `chromium-browser`, and the window title were not tried on Chromium, and the built-in press was not tried on it.
 
-What this means: for both apps tried, the program rejected the stored class name, so the executor's focus step, which passes
-that name, would return failure. The production numbers above were taken with a window whose class equals its process name,
-so they show speed and survival, not how often the names line up. Two apps is too few to say how common the mismatch is.
-Two ways to close it, neither built: fall back to the built-in focus when the program answers `APP_NOT_FOUND`, or find the
-process name from the window's `_NET_WM_PID`.
+What this means: for the test window the program rejected the stored name `testapp.py`. For Chromium it rejected
+`Chromium-browser`, and the stored form was not tried. In both cases the executor's focus step, which passes the stored name,
+would return failure. The production numbers above were taken with a window whose class equals its process name, so they
+show speed and survival, not how often the names line up. Two apps is too few to say how common the mismatch is. Two ways to
+close it, neither built: fall back to the built-in focus when the program answers `APP_NOT_FOUND`, or find the process name
+from the window's `_NET_WM_PID`.
 
 Failure paths measured in the first record, and not re-measured here: a chord that fails the executor's check is refused with
 nothing started, a missing app exits with status 1 in about 17 ms, an empty path is reported as `blocked` with nothing
-started, and a headless press to a window that is not in front is refused with `STALE_REF` and sends no key.
+started, and a headless press to a window that is not in front is refused with `STALE_REF` and sends no key (on Linux).
 
 ## Crash in the press path
 
-In all 36 cases the test window's process exited on SIGSEGV, and Python's fault handler reported a fatal error. The earlier
-`gdb` run (see the upstream note below) put the fault at `gtk_main_do_event` in libgtk-3. The stack text was not kept for
-these runs. It happened only in the press paths: the `status`, `list-*`, `snapshot` and `focus-window` calls did not lose a
-window, in the `cli` stage (155 calls per run, four runs, no key sent) or in the 1,200 focus calls of the production stage.
-The 1,200 `xdotool` presses of the production stage did not lose one either.
+Every loss happened in a stage that called the program's `press`. The `status`, `list-*`, `snapshot` and `focus-window`
+calls lost no window in the `cli` stage (155 calls per run, no key sent) or in the 600
+focus calls of the production stage, and the 600 `xdotool` presses of the production stage lost none
+either. In all 26 losses of the final pair the process exited on SIGSEGV. The first record reported, from a
+`gdb` run, a fault at `gtk_main_do_event` in libgtk-3. That output was not saved in the repository, and no stack was
+captured for these runs.
 
 A cause has been proposed upstream in
 [vercel-labs/agent-desktop#384](https://github.com/vercel-labs/agent-desktop/pull/384), an open pull request with a proposed
 fix. Its author attributes the crash to the short-lived `agent-desktop` process: when the last AT-SPI client leaves the bus
 right after a key, at-spi2's ATK bridge in the app removes its key listener while the app may still be inside it. The author
-reached this by reading the at-spi2-core source and by timing tests, and did not capture the crash inside that call. Two of
-our earlier results, a Python replay that did not crash and a higher rate after killing an earlier window, are not explained
-by it. This record did not test the cause. The evidence from the earlier investigation, and our alternative change,
-[vercel-labs/agent-desktop#408](https://github.com/vercel-labs/agent-desktop/pull/408) (open; not built or run here), are in
-[`agent-desktop-press-crash-upstream-issue.md`](agent-desktop-press-crash-upstream-issue.md). No release has the fix yet, so
-none was benchmarked.
+reached this by reading the at-spi2-core source and by timing tests, and did not capture the crash inside that call. A Python
+replay of our AT-SPI calls that did not crash would be explained if it kept one bus connection, which cannot be checked
+because its script was not kept. The higher rate after killing an earlier window (3 of 3 against 1 of 3, a small sample) is
+not explained by the proposed cause. This record did not test the cause. The evidence from the first investigation, and our
+alternative change, [vercel-labs/agent-desktop#408](https://github.com/vercel-labs/agent-desktop/pull/408) (open; it has not
+been run against a live X11 session), are in
+[`agent-desktop-press-crash-upstream-issue.md`](agent-desktop-press-crash-upstream-issue.md). npm's latest release was 1.0.2
+on 2026-11-01, the version tested, so no release with a fix was benchmarked.
 
 ## Decision (made 2026-10-31; the choice stands after this re-recording)
 
 - Linux key presses do not go through agent-desktop. They use `xdotool` on X11, which the Linux platform already
-  requires, after a check that the app is in front. The supporting numbers are new: 1,200 presses in 20 trials with no
-  window lost, instead of 360 presses in six trials, and 36 of 40 trials lost for the program's press, instead of 3 of 3.
-  The production path costs about 230 ms for focus and press together (median), against about 178 ms for the program's own
-  focus and press, which killed the window in 19 of 20 trials.
+  requires, after a check that the app is in front. The supporting numbers are new: 600 presses in
+  10 trials with no window lost, instead of 360 presses in six trials, and 26 of
+  30 trials lost for the program's press, instead of 3 of 3. With the program path set, focus and press
+  together cost about 235 ms (median), measured with the class set equal to the process name. The default
+  path, with the program off, was not timed here.
 - agent-desktop stays optional and off by default. Focus and press on macOS and Windows already have built-in adapters.
-  The program is not needed for them and is not enabled by default until it is measured there and its binary is verified.
+  The program is not needed for them and is not enabled by default until it is measured on those systems over repeated
+  presses and the checks still open under "Provenance" (release attestation, source review, re-signing) are done.
 
 ## Findings
 
 1. **The executor's command shape was wrong in the first version.** It called commands the CLI does not have. This was
    fixed. The unit tests used a fake program, so they could not catch it, and `bench.mjs` now runs the executor against the
    real binary.
-2. **Headless press needs focus first.** From the first record: a press to a background window fails, so the executor runs
-   `focus-window` before every `press`, which matches the built-in adapters.
+2. **A headless press to a background window does not work, and fails differently on each system.** On Linux, from the first
+   record, it is refused with `STALE_REF`. On the hosted macOS runner the same call reports success and delivers nothing,
+   and on Windows it fails with `ACTION_FAILED` ([`adapter-smoke-results.md`](adapter-smoke-results.md)). The executor
+   therefore runs `focus-window` before every program press, which matches the built-in adapters.
 3. **Two windows of one app are ambiguous.** Not re-measured. Since the first record the executor refuses a name that
    matches several windows, and its functions accept a window ID (`apps/desktop/src/main/agent-desktop.ts`), though nothing
    in the app passes one yet.
-4. **The program's press killed the GTK 3 test window, and returned `ok` for every press that did.** 36 of 40 trials. What
-   the runner records for a step like that, through its front-app check, was not tested, because the Linux path does not
-   use the program's press.
+4. **The program's press killed the GTK 3 test window, and returned `ok` for every press that did.** 26 of
+   30 trials. Not tested: what the runner would record if the app died during a press. The Linux path does
+   not call the program's press, and the runner's check of the front app after a press was not run against a dead window.
 5. **Linux has a built-in press adapter.** The first record said it did not. Pressing a shortcut on X11 through `xdotool`
    was merged in PR #4.
 6. **The two mechanisms name apps differently.** See "App names". With the program path set, a Linux focus step can fail
@@ -224,20 +259,21 @@ none was benchmarked.
 
 ## Limits
 
-- Linux on X11, one machine, one GTK 3 test window, and one Chromium name check. Not GNOME, KDE or Wayland. Wayland is the
-  newer Linux display system that is replacing X11 on many desktops. companyOS offers no app capture, focus or key press
-  there (`platform.ts`), so nothing in this record covers it, and agent-desktop was not tried under it.
-- The test window is a plain Python GTK 3 window with the AT-SPI bridge forced on (`GTK_A11Y=atspi`), and no other AT-SPI
-  client was on the bus. Other toolkits and real applications may behave differently, and a real desktop has other clients.
-  Only the press paths were found to lose it.
-- Only the chord `ctrl+a`, 150 ms after each call. The medians of the call at which the window is lost hold for that
-  cadence. Trials ran one after another on one bus, each after the previous window was killed or had crashed, which the
-  upstream note says raised the crash rate.
-- The four runs came from one machine within about 16 minutes, so they are not independent samples. Each press path has 10 to
-  20 trials of up to 60 presses, so the medians of the call at which the window is lost are rough.
+- Linux on X11, one machine, one GTK 3 test window, and one Chromium name check. Not GNOME, KDE or Wayland. Wayland sessions
+  are out of scope: `platform.ts` offers no capture, focus or key press there, and agent-desktop was not tried under it.
+- The test window is a plain Python GTK 3 window with the AT-SPI bridge forced on (`GTK_A11Y=atspi`). `run.sh` starts no other
+  program that uses AT-SPI, and the bus's clients were not listed. Other toolkits and real applications may behave
+  differently, and a real desktop has other clients. Only the program's `press` was found to lose a window.
+- Only the chord `ctrl+a`, with a 150 ms wait after each call. The medians were measured at that cadence and may differ at
+  others. Trials ran one after another on one bus, each after the previous window was killed or had crashed, which raised the
+  crash rate in the first record (3 of 3 against 1 of 3, a small sample that the proposed cause does not explain).
+- The 6 main runs were made on one machine between 05:32 and 06:25 UTC, so they are not independent
+  samples. Each press path has 10 trials in the final pair and up to 30 in all, of up to 60 presses, so the medians of the call
+  at which the window is lost are rough.
 - The production stage called the executor in a loop, without the runner. The runner, steps closer together than 150 ms, and
   a press followed at once by a program call were not tested. The runner stops at a failed focus, and the loop did not.
-- Timings are from a shared virtual machine with a low guest load. They show relative cost, not what a user's machine does.
+- Timings are from a virtual machine whose host load could not be seen. The guest's own load was low. They show relative
+  cost, not what a user's machine does.
 - `xdotool` is version 3.20160805, the version in Ubuntu 24.04. A newer one was not tried.
 - The crash cause was not re-tested. Neither upstream proposal was built or run here.
 - The end-to-end suite uses a fake front-app source, so it does not exercise this executor.
@@ -247,8 +283,8 @@ none was benchmarked.
 
 The scripts are in `scripts/agent-desktop-bench/`. They need the Linux packages `at-spi2-core`, `openbox`, `xvfb`,
 `dbus-daemon` (for `dbus-run-session`), `python3-gi`, `gir1.2-gtk-3.0`, `xdotool` and `x11-utils`, plus Node 22 and a built
-checkout (`npm run build`). The driver defaults to `/usr/bin/python3.12` for the test window (set `PYTHON`, and `APP_NAME`
-if the file's name is not the process name). If you run from a Wayland session, unset `XDG_SESSION_TYPE` first, because
+checkout (`npm run build`). The driver defaults to `/usr/bin/python3.12` for the test window (set `PYTHON`, and `APP_NAME` if
+the file's name is not the process name). If you run from a Wayland session, unset `XDG_SESSION_TYPE` first, because
 `choosePlatform` offers no Linux adapter when it says `wayland`.
 
 - `run.sh` starts the AT-SPI bus and the window manager and runs `bench.mjs`. Set `AGENT_DESKTOP_BIN` to the binary's path
@@ -258,9 +294,9 @@ if the file's name is not the process name). If you run from a Wayland session, 
 - `testapp.py` is the test window. It needs `KEY_LOG`, the file it logs keys to, which `bench.mjs` sets.
 - `names-probe-chromium.sh` is the Chromium name check. It starts its own bus and window manager, needs a Chromium (set
   `CHROMIUM`), and does not need the build.
-- The raw results are in `docs/research/agent-desktop-bench-data/`: the four runs with every call (`earlier-run-1.json`,
-  `earlier-run-2.json`, `run-1.json`, `run-2.json`), the names stage with error codes (`names-with-error-codes.json`) and
-  the Chromium probe output (`names-probe-chromium.txt`).
+- The raw results are in `docs/research/agent-desktop-bench-data/`: the final pair with every call (`run-1.json`,
+  `run-2.json`), the four earlier runs (`earlier-run-1.json` to `earlier-run-4.json`), the names stage with error codes
+  (`names-with-error-codes.json`) and the Chromium probe output (`names-probe-chromium.txt`).
 
 ## Provenance
 
@@ -312,12 +348,16 @@ the package's own postinstall script (during `npm install`) and `agent-desktop -
   `.exe` files carry no signature. With no Developer ID signature, none can be notarised. A copy placed inside companyOS's
   own signed and notarised macOS app would have to be re-signed with our certificate, and Windows would treat it as an
   unsigned program.
-- **macOS and Windows binaries were not run.** They were compared by hash only. Only the Linux x64 binary was started.
+- **Not run in this check.** The provenance check compared the macOS and Windows binaries by hash only and started only the
+  Linux x64 binary. The hosted-runner smoke run did start the macOS arm64 and Windows x64 binaries
+  ([`adapter-smoke-results.md`](adapter-smoke-results.md)).
 - **Later versions.** All of this applies to 1.0.2. A new version needs the same checks.
 
 ### What this means for enabling it
 
 The package is traceable to a public workflow and commit, and the binaries we would use match the published release. That
 is enough to use it as an optional, user-installed program, which is how companyOS treats it today. It is not enough to
-bundle a copy: that needs the release attestation check above, a source review, and a decision on re-signing. Performance
-on macOS and Windows is still unmeasured (see Limits).
+bundle a copy: that needs the release attestation check above, a source review, and a decision on re-signing. Repeated-press
+behaviour and timings on macOS and Windows have not been measured (see the scope line at the top, and
+[`adapter-smoke-results.md`](adapter-smoke-results.md) for the hosted-runner smoke run, which made only a few calls per
+command).

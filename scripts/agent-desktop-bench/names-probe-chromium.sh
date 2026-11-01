@@ -18,6 +18,7 @@ sleep 3
 "$CHROMIUM" --no-sandbox --force-renderer-accessibility --user-data-dir="$PROFILE" --no-first-run --disable-gpu about:blank >/dev/null 2>&1 &
 BROWSER=$!
 sleep 8
+echo "--- browser: $("$CHROMIUM" --version 2>/dev/null | head -1) ($(readlink -f "$CHROMIUM"))"
 echo "--- X11 windows (instance, class)"
 for id in $(xdotool search --onlyvisible --name 'about:blank' 2>/dev/null | head -3); do
   echo "id=$id $(xprop -id "$id" WM_CLASS 2>/dev/null | cut -c1-100)"

@@ -13,9 +13,10 @@ of presses pays the wait once. It has not been run against a live X11 session.
 
 ## The crash
 
-On Linux/X11, repeated `agent-desktop press <chord> --app <name>` calls make a GTK 3 window die with a segmentation
-fault inside `gtk_main`. Focus, `status`, `snapshot` and `list-apps` do not reproduce it. Key injection with
-`xdotool key` does not reproduce it either.
+On Linux/X11, repeated `agent-desktop press <chord> --app <name>` calls made our GTK 3 test window die with a
+segmentation fault inside `gtk_main`, in 26 of 30 trials of the re-recorded final pair and in 36 of 40 earlier ones.
+Focus, `status`, `snapshot` and `list-apps` do not reproduce it. Key injection with `xdotool key` does not reproduce it
+either.
 
 ## Cause given upstream
 
@@ -36,8 +37,8 @@ From #384 and its follow-up comment:
 - **Backtrace.** Our `gdb` backtrace shows SIGSEGV at `gtk_main_do_event+3488` in libgtk-3, with no libatspi or
   libatk-bridge frame on the stack. That fits GTK touching the removed listener after the bridge code has returned,
   rather than a crash inside the bridge.
-- **Press only.** Only `press` sends a key, so only `press` can leave the bus while the app is inside the key
-  listener. Focus, snapshot and status send no key.
+- **Press only.** On the proposed cause, only `press` can leave the bus while the app is inside the key listener,
+  because only `press` sends a key. Focus, snapshot and status send no key.
 - **xdotool control.** `xdotool key` is not an AT-SPI client, so nothing leaves the bus after the key.
 - **Python replay.** Our replay of the same AT-SPI calls did not crash in 3 trials of 60 presses, and we could not
   explain it. The replay script is not in the repo, so we cannot check whether it kept one bus connection across
@@ -47,8 +48,8 @@ From #384 and its follow-up comment:
 
 Stress results from the first record (2026-10-31), 60 calls per trial, fresh window each trial (Ubuntu 24.04, Xvfb, openbox,
 at-spi2-core 2.52.0, GTK 3.24.41, agent-desktop 1.0.2). They came from a stress script that has since been replaced by
-`scripts/agent-desktop-bench/bench.mjs`. The re-recorded results, 36 of 40 press trials losing the window, are in the
-performance record:
+`scripts/agent-desktop-bench/bench.mjs`. The re-recorded results are in the performance record: the program's own `press` killed the
+test window in 26 of 30 trials of the final pair and in 36 of 40 earlier ones. The first record's table follows:
 
 | Loop | Trial 1 | Trial 2 | Trial 3 |
 |---|---|---|---|

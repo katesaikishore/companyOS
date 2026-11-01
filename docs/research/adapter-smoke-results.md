@@ -261,7 +261,8 @@ These need a real machine, or a different setup. None of them can be tested on a
   Stage Manager, virtual desktops, a locked screen and several monitors are untested.
 - **`openUrl` on both systems**, and `openFile` for a file that was not already open on macOS.
 - **Binary provenance of `agent-desktop`.** The SHA-256 values above are for the npm package. They were not compared with
-  the upstream release files or signatures.
+  the upstream release files or signatures. That was checked later for the Linux x64 package: see
+  [`agent-desktop-performance.md`](agent-desktop-performance.md), "Provenance".
 - **Behavior over time.** One run of each job per code version, a few calls per row. Times varied by up to a factor of two
   between runs of the same code. Treat them as a rough scale.
 
