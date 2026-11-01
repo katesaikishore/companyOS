@@ -117,9 +117,9 @@ linux:
     # npm install fetches these two GPU providers (about 285 MB) for linux/x64. The decision model runs on the CPU, so they stay out.
     - "!**/node_modules/onnxruntime-node/bin/napi-v6/linux/*/libonnxruntime_providers_cuda.so"
     - "!**/node_modules/onnxruntime-node/bin/napi-v6/linux/*/libonnxruntime_providers_tensorrt.so"
-    # npm install also fetches llama.cpp builds for the Arm chips and for the CUDA and Vulkan GPUs, about 0.6 GB in all. The
-    # chat model runs on the x64 CPU build, which stays in, so these stay out.
-    - "!**/node_modules/@node-llama-cpp/linux-{arm64,armv7l,x64-cuda,x64-cuda-ext,x64-vulkan}/**"
+    # npm install also fetches llama.cpp builds for the other chips and for the CUDA and Vulkan GPUs, about 0.6 GB in all.
+    # Keep only this app's own build: the x64 CPU build for x64, the Arm build for arm64.
+    - "!**/node_modules/@node-llama-cpp/linux-!(${arch})/**"
   icon: build/icons
   category: Utility
   maintainer: companyOS <packages@companyos.invalid>
