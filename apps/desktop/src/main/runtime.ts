@@ -155,6 +155,8 @@ export class TwinRuntime {
   private counts = { screen: 0, audio: 0 };
   private mediaBytes = 0;
   private mediaSizedAt = 0;
+  /** Image ids whose file could not be removed. The agent has already forgotten them, so every sweep tries them again. */
+  private readonly unremovedImages = new Set<string>();
   private apiState: LocalApiState = 'off';
   private localApi: LocalApi | undefined;
   private apiToken: string | undefined;
@@ -172,9 +174,9 @@ export class TwinRuntime {
     this.agent = new TwinAgent({
       dataDir: join(options.userData, 'twin'),
       dataKey,
-      // Expired and excluded images are deleted through the media store. The delete is not awaited. A file it misses is
-      // removed by the next sweep, which finds every image file no stored item names.
-      deleteMedia: mediaIds => void this.media.remove(mediaIds).catch(() => undefined),
+      // Expired and excluded images are deleted through removeImages. The delete is not awaited. An image that cannot be
+      // removed is kept in unremovedImages, and the next sweep tries it again.
+      deleteMedia: mediaIds => void this.removeImages(mediaIds),
     });
     this.capture = new CaptureService(
       {
@@ -835,7 +837,7 @@ export class TwinRuntime {
   private async sweepMedia(): Promise<void> {
     try {
       const { mediaIds } = this.agent.pruneWithMedia();
-      await this.media.remove(mediaIds);
+      await this.removeImages([...this.unremovedImages, ...mediaIds]);
       await this.enforceMediaCap();
       this.refreshCaptureCounts();
     } catch {
@@ -862,6 +864,23 @@ export class TwinRuntime {
     if (now - this.lastSweepAt < SWEEP_MIN_INTERVAL_MS) return;
     this.lastSweepAt = now;
     void this.sweepMedia();
+  }
+
+  /**
+   * Deletes images one at a time. A file that cannot be removed, such as one another program holds open, stays in
+   * unremovedImages, so the agent forgetting its reference does not leave the file behind. Never throws.
+   */
+  private async removeImages(mediaIds: string[]): Promise<void> {
+    await Promise.all(
+      mediaIds.map(async mediaId => {
+        try {
+          await this.media.remove([mediaId]);
+          this.unremovedImages.delete(mediaId);
+        } catch {
+          this.unremovedImages.add(mediaId);
+        }
+      }),
+    );
   }
 
   /** Removes the oldest images while the folder is over its cap. Their text stays. */
