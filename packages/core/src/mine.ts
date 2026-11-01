@@ -26,6 +26,17 @@ export interface RoutineStep {
   options: string[];
 }
 
+/**
+ * When a routine's occurrences began, in local time. Each occurrence counts once, by the start of its first step.
+ * weekdays holds seven counts, Monday first. The hours cover the 10th to the 90th percentile of the start hour, in
+ * whole hours: fromHour is the first of them, and toHour is the hour after the last, so 9 and 10 give 9 to 11.
+ */
+export interface RoutineWhen {
+  weekdays: number[];
+  fromHour: number;
+  toHour: number;
+}
+
 export interface Routine {
   id: string;
   steps: RoutineStep[];
@@ -39,6 +50,8 @@ export interface Routine {
   occurrencesPerWeek: number;
   /** When the latest occurrence began, in ms. */
   lastSeenAt: number;
+  /** When the occurrences began, in local time. See RoutineWhen. */
+  when: RoutineWhen;
 }
 
 interface Step {
@@ -222,7 +235,143 @@ function toRoutine(key: string, group: Group, weeks: number): Routine {
     durationMs: Math.round(durationMs),
     occurrencesPerWeek: Number((support / Math.max(1, weeks)).toFixed(2)),
     lastSeenAt: group.occurrences.reduce((latest, occurrence) => Math.max(latest, occurrence[0].startTs), 0),
+    when: whenOf(group.occurrences),
   };
+}
+
+/** The weekday counts and the usual hours of the occurrences. Local time, so a Monday is a Monday for the person. */
+function whenOf(occurrences: readonly Step[][]): RoutineWhen {
+  const weekdays = [0, 0, 0, 0, 0, 0, 0];
+  const hours: number[] = [];
+  for (const occurrence of occurrences) {
+    const start = new Date(occurrence[0].startTs);
+    weekdays[(start.getDay() + 6) % 7] += 1;
+    hours.push(start.getHours());
+  }
+  hours.sort((a, b) => a - b);
+  return { weekdays, fromHour: nearestRank(hours, 10), toHour: nearestRank(hours, 90) + 1 };
+}
+
+/** The value at a percentile, by nearest rank: the smallest value that at least that share of the sorted values reach. */
+function nearestRank(sorted: readonly number[], percent: number): number {
+  return sorted[Math.ceil((percent * sorted.length) / 100) - 1];
+}
+
+/** A range of hours at most this wide is named as a time of day. Wider, the hours spread too far to name one. */
+const MAX_BAND_HOURS = 6;
+/** A range of hours at most this wide is also given exactly, as in "around 9 to 11 am". */
+const MAX_EXACT_HOURS = 3;
+/** The share of occurrences a weekday group needs before the routine is said to fall on it. */
+const GROUP_SHARE = 80;
+/** The share of occurrences that the named days must cover. */
+const NAMED_SHARE = 70;
+
+const WEEKDAY_NAMES = ['Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays', 'Sundays'];
+const GROUPS = {
+  weekdays: { adjective: 'weekday', plural: 'weekdays' },
+  weekends: { adjective: 'weekend', plural: 'weekends' },
+} as const;
+const BANDS = {
+  morning: { plural: 'mornings', phrase: 'in the morning' },
+  afternoon: { plural: 'afternoons', phrase: 'in the afternoon' },
+  evening: { plural: 'evenings', phrase: 'in the evening' },
+  night: { plural: 'nights', phrase: 'at night' },
+} as const;
+
+/**
+ * Plain text for when a routine usually happens, such as "Usually weekday mornings, around 9 to 11 am" or "Mostly
+ * Mondays and Wednesdays, in the afternoon". The days are named as a group when most occurrences fall in it. Hours
+ * that spread too wide are left out, rather than named loosely.
+ */
+export function describeWhen(when: RoutineWhen): string {
+  if (sum(when.weekdays) === 0) return 'No usual time yet.';
+  const width = when.toHour - when.fromHour;
+  const band = width <= MAX_BAND_HOURS ? bandOf(when.fromHour, when.toHour) : undefined;
+  const exact = width <= MAX_EXACT_HOURS ? `around ${clockRange(when.fromHour, when.toHour)}` : undefined;
+  const group = weekdayGroup(when.weekdays);
+  if (group) {
+    const subject = band ? `${GROUPS[group].adjective} ${BANDS[band].plural}` : GROUPS[group].plural;
+    return `Usually ${subject}${exact ? `, ${exact}` : ''}`;
+  }
+  const days = namedDays(when.weekdays);
+  const lead = days ? `Mostly ${days}` : 'Spread across the week';
+  const time = exact ?? (band ? BANDS[band].phrase : undefined);
+  return time ? `${lead}, ${time}` : lead;
+}
+
+/** The weekday group the routine falls on: most occurrences in it, and four or more weekdays or both weekend days seen. */
+function weekdayGroup(counts: readonly number[]): 'weekdays' | 'weekends' | undefined {
+  const total = sum(counts);
+  const weekdays = counts.slice(0, 5);
+  const weekend = counts.slice(5);
+  if (isShare(sum(weekdays), total, GROUP_SHARE) && weekdays.filter(count => count > 0).length >= 4) return 'weekdays';
+  if (isShare(sum(weekend), total, GROUP_SHARE) && weekend.every(count => count > 0)) return 'weekends';
+  return undefined;
+}
+
+/** The days that cover most occurrences, in week order. Undefined when four or more are needed, so the week is spread. */
+function namedDays(counts: readonly number[]): string | undefined {
+  const chosen = coveringDays(counts);
+  return chosen.length >= 4 ? undefined : joinNames(chosen.map(day => WEEKDAY_NAMES[day]));
+}
+
+/** The fewest days, busiest first, whose occurrences reach NAMED_SHARE of the total. Returned in week order. */
+function coveringDays(counts: readonly number[]): number[] {
+  const total = sum(counts);
+  const ranked = counts
+    .map((count, day) => ({ day, count }))
+    .filter(item => item.count > 0)
+    .sort((a, b) => b.count - a.count || a.day - b.day);
+  const chosen: number[] = [];
+  let covered = 0;
+  for (const item of ranked) {
+    if (isShare(covered, total, NAMED_SHARE)) break;
+    chosen.push(item.day);
+    covered += item.count;
+  }
+  return chosen.sort((a, b) => a - b);
+}
+
+/** "Mondays", "Mondays and Wednesdays", "Mondays, Wednesdays and Fridays". */
+function joinNames(names: readonly string[]): string {
+  return names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
+/** The time of day a range of hours falls in, judged by its middle. Night is what the other bands leave. */
+function bandOf(fromHour: number, toHour: number): keyof typeof BANDS {
+  const middle = (fromHour + toHour) / 2;
+  if (middle >= 5 && middle < 12) return 'morning';
+  if (middle >= 12 && middle < 17) return 'afternoon';
+  if (middle >= 17 && middle < 21) return 'evening';
+  return 'night';
+}
+
+/**
+ * The hours of a range in words, such as "9 to 11 am", or "11 am to 1 pm" when the range crosses a period. The period is
+ * said once when both ends share it. toHour is the hour after the range, so 9 to 11 covers 9:00 to 11:00.
+ */
+function clockRange(fromHour: number, toHour: number): string {
+  const end = toHour % 24;
+  const samePeriod = (fromHour < 12) === (end < 12);
+  const plain = fromHour % 12 !== 0 && end % 12 !== 0 && samePeriod;
+  if (plain) return `${fromHour % 12} to ${end % 12} ${end < 12 ? 'am' : 'pm'}`;
+  return `${clockWord(fromHour)} to ${clockWord(toHour)}`;
+}
+
+/** A clock hour in words: "9 am", "2 pm", "noon" or "midnight". */
+function clockWord(hour: number): string {
+  if (hour % 24 === 0) return 'midnight';
+  if (hour === 12) return 'noon';
+  return `${hour % 12} ${hour % 24 < 12 ? 'am' : 'pm'}`;
+}
+
+/** True when part is at least the given percentage of whole. Integers only, so rounding never decides a boundary. */
+function isShare(part: number, whole: number, percent: number): boolean {
+  return part * 100 >= whole * percent;
+}
+
+function sum(values: readonly number[]): number {
+  return values.reduce((total, value) => total + value, 0);
 }
 
 /**

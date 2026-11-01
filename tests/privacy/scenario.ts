@@ -1,4 +1,4 @@
-import { TwinAgent, type Automation, type Executor, type TwinEvent } from '@companyos/twin-core';
+import { TwinAgent, describeWhen, type Automation, type Executor, type TwinEvent } from '@companyos/twin-core';
 import { randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -129,7 +129,8 @@ export async function runPlantedScenario(): Promise<ScenarioRun> {
       outcomes[planted.label] = ingestOutcome(agent, planted.signal(at(0, 11, index)), thrown);
     });
 
-    const suggestion = agent.suggestions().find(candidate => candidate.routine.steps.length === 4);
+    const detected = agent.suggestions();
+    const suggestion = detected.find(candidate => candidate.routine.steps.length === 4);
     if (!suggestion) throw new Error('The scenario should detect a four-step routine.');
     const view = agent.acceptRoutine(suggestion.routine.id, 'Invoice follow-up');
     agent.setLevel(view.automation.id, 3);
@@ -162,6 +163,14 @@ export async function runPlantedScenario(): Promise<ScenarioRun> {
       { name: 'export', text: JSON.stringify(exported, null, 2) },
       { name: 'export:automations', text: JSON.stringify(exported.automations, null, 2) },
       { name: 'habits', text: JSON.stringify(agent.habits(), null, 2) },
+      {
+        name: 'suggestions',
+        text: JSON.stringify(
+          detected.map(item => ({ when: describeWhen(item.routine.when) })),
+          null,
+          2,
+        ),
+      },
       { name: 'errors', text: thrown.map(errorText).join('\n') },
       { name: 'outbound:fetch', text: outbound.join('\n') },
     ];

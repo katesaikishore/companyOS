@@ -81,6 +81,10 @@ describe('no canary appears on any output surface', () => {
     expectNoLeaks(run.surfaces, name => name === 'habits');
   });
 
+  it('the usual time shown on each suggestion', () => {
+    expectNoLeaks(run.surfaces, name => name === 'suggestions');
+  });
+
   it('thrown error messages, with their causes and hidden properties', () => {
     expectNoLeaks(run.surfaces, name => name === 'errors');
   });
