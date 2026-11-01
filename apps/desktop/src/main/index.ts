@@ -388,6 +388,9 @@ function createTrayWindow(): void {
     // An open offer stays on screen until it is answered or expires.
     if (!runtime?.hasPendingOffers()) hideTray();
   });
+  // The tray page holds the same bridge as the main window, so it gets the same guards: no new windows, no navigation.
+  trayWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  trayWindow.webContents.on('will-navigate', event => event.preventDefault());
   void trayWindow.loadURL(`${APP_ORIGIN}/tray.html`);
 }
 
@@ -496,7 +499,7 @@ async function boot(): Promise<void> {
       laya: !app.isPackaged && process.env.COMPANYOS_TEST_LAYA_FIXTURE ? readLayaFixture(process.env.COMPANYOS_TEST_LAYA_FIXTURE) : undefined,
       approve: approveStep,
       // The test platform has no real input device, so idle time is pinned to zero for it.
-      idleSeconds: () => (process.env.COMPANYOS_TEST_FAKE_PLATFORM ? 0 : powerMonitor.getSystemIdleTime()),
+      idleSeconds: () => (!app.isPackaged && process.env.COMPANYOS_TEST_FAKE_PLATFORM ? 0 : powerMonitor.getSystemIdleTime()),
       onBattery: () => powerMonitor.onBatteryPower,
       onChange: () => undefined,
       onOffer: showOffer,

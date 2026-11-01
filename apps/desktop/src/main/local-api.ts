@@ -61,6 +61,9 @@ export function createLocalApi(options: LocalApiOptions): LocalApi {
             else json(response, 500, { error: 'Server error.' });
           });
         });
+        // A client that stalls on its headers or its request is dropped, so it cannot hold a connection open for long.
+        created.headersTimeout = 10_000;
+        created.requestTimeout = 15_000;
         const onError = () => reject(new Error(START_FAILED));
         created.once('error', onError);
         created.listen(options.port, options.host, () => {
@@ -83,9 +86,18 @@ export function createLocalApi(options: LocalApiOptions): LocalApi {
   };
 }
 
+/** The most of a refused request's body that is read. Past it, the connection is closed. */
+const MAX_DRAINED_BYTES = 64 * 1024;
+
 /** Checks the Host and Origin, then the method, then the token, then the route. Each refusal is a fixed sentence. */
 async function respond(options: LocalApiOptions, request: IncomingMessage, response: ServerResponse): Promise<void> {
-  // The body of a refused request is drained, so the client receives the answer rather than a reset connection.
+  // The body of a refused request is drained, so the client receives the answer rather than a reset connection. The drain
+  // stops at MAX_DRAINED_BYTES, and the connection is closed past it, so a large body cannot hold the server.
+  let drained = 0;
+  request.on('data', (chunk: Buffer) => {
+    drained += chunk.length;
+    if (drained > MAX_DRAINED_BYTES) request.destroy();
+  });
   request.resume();
   if (!hostAllowed(request.headers.host) || request.headers.origin !== undefined) {
     return json(response, 403, { error: 'Forbidden.' });

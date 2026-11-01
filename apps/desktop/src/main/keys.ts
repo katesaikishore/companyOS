@@ -1,6 +1,6 @@
-import { safeStorage } from 'electron';
+import { app, safeStorage } from 'electron';
 import { randomBytes } from 'node:crypto';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export class SecureStorageUnavailableError extends Error {
@@ -17,9 +17,10 @@ export class SecureStorageUnavailableError extends Error {
 async function requireSecureStorage(): Promise<void> {
   if (!(await safeStorage.isAsyncEncryptionAvailable())) throw new SecureStorageUnavailableError();
   // Without a keyring, Electron on Linux falls back to a fixed key built into Chromium. That is obfuscation, not protection.
-  // COMPANYOS_TEST_BASIC_STORE=1 exists only so the headless smoke test can run; never set it for real data.
+  // COMPANYOS_TEST_BASIC_STORE=1 exists only so the headless smoke test can run. A packaged app never honours it.
   const basic = process.platform === 'linux' && safeStorage.getSelectedStorageBackend() === 'basic_text';
-  if (basic && process.env.COMPANYOS_TEST_BASIC_STORE !== '1') throw new SecureStorageUnavailableError();
+  const allowBasic = !app.isPackaged && process.env.COMPANYOS_TEST_BASIC_STORE === '1';
+  if (basic && !allowBasic) throw new SecureStorageUnavailableError();
 }
 
 async function readSealed(path: string): Promise<Buffer | undefined> {
@@ -31,7 +32,11 @@ async function readSealed(path: string): Promise<Buffer | undefined> {
 
 async function writeSealed(path: string, value: Buffer): Promise<void> {
   await requireSecureStorage();
-  writeFileSync(path, await safeStorage.encryptStringAsync(value.toString('base64')), { mode: 0o600 });
+  const sealed = await safeStorage.encryptStringAsync(value.toString('base64'));
+  // Written beside the target and then renamed, so a failed write leaves the previous file in place.
+  const temporary = `${path}.tmp`;
+  writeFileSync(temporary, sealed, { mode: 0o600 });
+  renameSync(temporary, path);
 }
 
 /** The 32-byte data key that encrypts the twin on this device. Created on first run. */
