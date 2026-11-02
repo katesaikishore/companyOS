@@ -199,17 +199,42 @@ export async function runAutomation(automation: Automation, request: RunRequest,
       level: request.currentLevel ? request.currentLevel() : request.policy.level,
     };
 
+  const recordAt = (index: number, step: Step, outcome: StepOutcome, reason: string, failureReason?: string): void => {
+    steps.push({
+      index,
+      op: step.op,
+      app: step.app,
+      outcome,
+      reason,
+      ...(failureReason === undefined ? {} : { failureReason }),
+    });
+  };
+
+  /** The check that the expected app is in front, recorded under the check step's own index. */
+  const checkInFront = async (index: number, step: Step): Promise<RunResult['status'] | undefined> => {
+    let front: string | undefined;
+    try {
+      front = await executor.frontmostApp();
+    } catch {
+      front = undefined;
+    }
+    if (sameApp(front, step.app)) {
+      passed++;
+      recordAt(index, step, 'passed', 'Expected app is in front.');
+      return undefined;
+    }
+    failed++;
+    recordAt(index, step, 'check_failed', 'A different app is in front.');
+    return 'failed';
+  };
+
+  /** Set when a focus step ran the check that follows it in the same turn, so the loop does not run that check again. */
+  let checkedWithFocus = -1;
+
   for (const [index, step] of resolved.entries()) {
-    const record = (outcome: StepOutcome, reason: string, failureReason?: string): void => {
-      steps.push({
-        index,
-        op: step.op,
-        app: step.app,
-        outcome,
-        reason,
-        ...(failureReason === undefined ? {} : { failureReason }),
-      });
-    };
+    if (index === checkedWithFocus) continue;
+    const record = (outcome: StepOutcome, reason: string, failureReason?: string): void =>
+      recordAt(index, step, outcome, reason, failureReason);
 
     if (request.mode === 'dry_run') {
       // Shown as if the owner had raised the level to run it, so the preview names every approval it would need.
@@ -284,6 +309,19 @@ export async function runAutomation(automation: Automation, request: RunRequest,
           return 'failed';
         }
         record('executed', decision.reason);
+        // The check that follows a focus runs in the same turn, so another run cannot move focus between the two. It is
+        // folded in only when the policy allows it outright now; otherwise it takes its own turn as any other step.
+        const next = resolved[index + 1];
+        if (
+          next?.op === 'check_focus' &&
+          sameApp(next.app, step.app) &&
+          !request.shouldStop?.() &&
+          evaluateStep(next, { ...livePolicy(), unattended: request.mode === 'unattended' }).decision === 'allow' &&
+          unsupportedReason(next, executor) === undefined
+        ) {
+          checkedWithFocus = index + 1;
+          return checkInFront(index + 1, next);
+        }
         return undefined;
       }
 
@@ -339,21 +377,7 @@ export async function runAutomation(automation: Automation, request: RunRequest,
         return 'failed';
       }
 
-      let front: string | undefined;
-      try {
-        front = await executor.frontmostApp();
-      } catch {
-        front = undefined;
-      }
-      if (sameApp(front, step.app)) {
-        passed++;
-        record('passed', 'Expected app is in front.');
-      } else {
-        failed++;
-        record('check_failed', 'A different app is in front.');
-        return 'failed';
-      }
-      return undefined;
+      return checkInFront(index, step);
     };
 
     const outcome = executor.exclusive ? await executor.exclusive(act) : await act();
