@@ -532,8 +532,13 @@ async function main(userDataDir, fixtureDir) {
         // Connectors opens Settings at its own section, and a status refresh does not pull the page back to the top.
         const connectorsTop = () => page.$eval('#settings-connectors', element => element.getBoundingClientRect().top);
         assert.ok(Math.abs(await connectorsTop()) < 200, `Connectors opens at its section: top ${await connectorsTop()}px`);
-        await page.waitForTimeout(2500);
-        assert.ok(Math.abs(await connectorsTop()) < 200, 'a refresh keeps the place on the Connectors page');
+        // A theme change rebuilds the page column. The mark on the old column shows when the new one is in place.
+        const theme = await page.evaluate(async () => (await window.twin.status()).config.theme);
+        await page.$eval('main.main', column => { column.dataset.before = '1'; });
+        await page.evaluate(next => window.twin.updateConfig({ theme: next }), theme === 'dark' ? 'light' : 'dark');
+        await page.waitForFunction(() => !document.querySelector('main.main')?.dataset.before, null, { timeout: 10_000 });
+        assert.ok(Math.abs(await connectorsTop()) < 200, 'a rebuild keeps the place on the Connectors page');
+        await page.evaluate(previous => window.twin.updateConfig({ theme: previous }), theme);
       }
       // The Recall page is reached from its sidebar link, and its view must render at this size.
       if (route === 'recall') await page.waitForSelector('[data-testid="view-recall"]', { timeout: 15_000 });
