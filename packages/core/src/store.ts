@@ -222,6 +222,17 @@ export class EncryptedStore {
    * Searches captured text, newest first. Terms are matched as phrases, so search syntax typed by the person is never
    * parsed. With no terms, every item in range is returned.
    */
+  /** Screen and audio observations per app since a time: how many, and when the newest was. Holds no text. */
+  captureEvidence(sinceTs: number): Array<{ app: string; count: number; latest: number }> {
+    if (!this.hasCaptureIndex()) return [];
+    return this.conn()
+      .prepare(
+        `SELECT app, COUNT(*) AS count, MAX(ts) AS latest FROM capture_fts
+         WHERE app IS NOT NULL AND ts >= ? AND kind IN ('screen', 'audio') GROUP BY app`,
+      )
+      .all(sinceTs) as Array<{ app: string; count: number; latest: number }>;
+  }
+
   searchCapture(query: CaptureQuery): CaptureHit[] {
     const limit = captureLimit(query.limit);
     const terms = query.terms.map(term => term.trim()).filter(term => term.length > 0);

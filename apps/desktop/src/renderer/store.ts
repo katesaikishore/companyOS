@@ -9,6 +9,10 @@ export type Route =
   | { name: 'ledger' }
   /** The app readiness list, or one app's detail when the route names an app. */
   | { name: 'readiness'; app?: string }
+  /** The tasks Recall has assigned, ranked by priority. */
+  | { name: 'tasks' }
+  /** The local sources the twin reads from. It opens the Connectors section of Settings. */
+  | { name: 'connectors' }
   /** Today's tasks, for the end-of-day review. It is opened from the Overview. */
   | { name: 'review' }
   /** What the twin knows: its routines, its habits, what the person said no to, and today's tasks. */
@@ -172,6 +176,10 @@ export function routeFromHash(hash: string): Route {
       return parts[1] ? { name: 'readiness', app: safeDecode(parts[1]) } : { name: 'readiness' };
     case 'review':
       return { name: 'review' };
+    case 'tasks':
+      return { name: 'tasks' };
+    case 'connectors':
+      return { name: 'connectors' };
     case 'knows':
       return { name: 'knows' };
     case 'recall':

@@ -10,9 +10,10 @@ import { readinessView } from './views/readiness.js';
 import { overviewView } from './views/overview.js';
 import { forgetRecall, recallView } from './views/recall.js';
 import { reviewView } from './views/review.js';
-import { settingsView } from './views/settings.js';
+import { openConnectorsSection, settingsView } from './views/settings.js';
 import { setupView } from './views/setup.js';
 import { suggestionsView } from './views/suggestions.js';
+import { tasksView } from './views/tasks.js';
 import {
   bridge,
   go,
@@ -143,6 +144,11 @@ function viewFor(status: TwinStatus, route: Route): HTMLElement {
       return readinessView(status, route.app);
     case 'review':
       return reviewView(status);
+    case 'tasks':
+      return tasksView(status);
+    case 'connectors':
+      openConnectorsSection();
+      return settingsView(status);
     case 'settings':
       return settingsView(status);
     default:

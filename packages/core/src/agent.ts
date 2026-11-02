@@ -12,6 +12,7 @@ import type {
   AppReadinessView,
   CaptureHitView,
   CaptureSearchRequest,
+  AssignedTaskView,
   DayTasksView,
   HabitsView,
   KnownRoutinesView,
@@ -31,6 +32,7 @@ import {
 } from './autonomy';
 import { runAutomation, type Executor, type RunMode, type RunRequest, type RunResult } from './runner';
 import { segment, type Segment } from './segment';
+import { assignRecallTasks, RECALL_TASK_WINDOW_DAYS, taskRunsByDay } from './recall-tasks';
 import { EncryptedStore, type CaptureRecord } from './store';
 import { PIPE_ID, PipeOutputSchema, type PipeOutput } from './pipes';
 import {
@@ -832,12 +834,16 @@ export class TwinAgent {
   triggerCandidates(app: string): AutomationView[] {
     if (!this.config.automationsEnabled) return [];
     const normalized = normalizeAppName(app);
-    return this.automations().filter(
-      view =>
-        view.state.level >= 3 &&
-        openingApps(view.automation).includes(normalized) &&
-        this.gate.eligible(view.automation.routineId),
-    );
+    // Recall's ranking decides which routine is offered or run first when several open on this app.
+    const priority = new Map(this.assignedTasks().map(task => [task.automationId, task.priority]));
+    return this.automations()
+      .filter(
+        view =>
+          view.state.level >= 3 &&
+          openingApps(view.automation).includes(normalized) &&
+          this.gate.eligible(view.automation.routineId),
+      )
+      .sort((a, b) => (priority.get(b.automation.id) ?? 0) - (priority.get(a.automation.id) ?? 0));
   }
 
   /** An offer was made for this automation. It is not offered again until the offer cooldown ends. */
@@ -1108,6 +1114,21 @@ export class TwinAgent {
   }
 
   /** Focus switches by weekday (0 = Monday) and hour, over the last four weeks. */
+  /**
+   * The automations ranked by what Recall saw of their apps over the window, highest priority first. Rebuilt on each read
+   * from the stored observations and the run history, so nothing is kept for it.
+   */
+  assignedTasks(now = this.now()): AssignedTaskView[] {
+    const ranked = this.automations().map(view => ({ automation: view.automation, level: view.state.level }));
+    const evidence = this.store.captureEvidence(now - RECALL_TASK_WINDOW_DAYS * DAY_MS);
+    return assignRecallTasks(ranked, evidence, now);
+  }
+
+  /** Completed and failed runs per local day over the last fourteen days, oldest first. */
+  taskRuns(now = this.now()): number[] {
+    return taskRunsByDay(this.automations(), now);
+  }
+
   activityGrid(days = 28): number[][] {
     const grid = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => 0));
     for (const event of this.recentEvents(days)) {

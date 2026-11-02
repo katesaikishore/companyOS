@@ -29,14 +29,21 @@ export const AUTOMATE: Shape[] = [
   ['path', { d: 'M20 12a8 8 0 0 1-13.7 5.6L4 15' }],
   ['path', { d: 'M4 20v-5h5' }],
 ];
-const READINESS: Shape[] = [
-  ['path', { d: 'M12 3a9 9 0 1 0 9 9h-9z' }],
-  ['path', { d: 'M15 3.5A9 9 0 0 1 20.5 9H15z' }],
+/** A checklist: the tasks Recall has assigned, and today's tasks. */
+export const TASKS: Shape[] = [
+  ['path', { d: 'M10 6h10' }],
+  ['path', { d: 'M10 12h10' }],
+  ['path', { d: 'M10 18h10' }],
+  ['path', { d: 'M4 6l1.6 1.6L8 5' }],
+  ['path', { d: 'M4 12l1.6 1.6L8 11' }],
+  ['path', { d: 'M4 18l1.6 1.6L8 17' }],
 ];
-/** An open book: what the twin has learned is kept in the pages. */
-const KNOWS: Shape[] = [
-  ['path', { d: 'M3 6.5c2.5-1.2 5.5-1.2 9 .9v12.1c-3.5-2.1-6.5-2.1-9-.9z' }],
-  ['path', { d: 'M21 6.5c-2.5-1.2-5.5-1.2-9 .9v12.1c3.5-2.1 6.5-2.1 9-.9z' }],
+/** A plug: the sources the twin reads from, such as folders, Git, calendar and mail. */
+const CONNECTORS: Shape[] = [
+  ['path', { d: 'M9 3v5' }],
+  ['path', { d: 'M15 3v5' }],
+  ['path', { d: 'M6 8h12v3a6 6 0 0 1-12 0z' }],
+  ['path', { d: 'M12 17v4' }],
 ];
 const LEDGER: Shape[] = [
   ['circle', { cx: '12', cy: '12', r: '9' }],
@@ -98,22 +105,21 @@ export function shell(status: TwinStatus, route: Route, content: Child): HTMLEle
       active: route.name === 'overview' || route.name === 'review',
     },
     {
+      label: 'Tasks',
+      href: '#/tasks',
+      testid: 'nav-tasks',
+      icon: TASKS,
+      tone: 'blue',
+      count: status.assignedTasks?.length ?? 0,
+      active: route.name === 'tasks',
+    },
+    {
       label: 'Recall',
       href: '#/recall',
       testid: 'nav-recall',
       icon: RECALL,
       tone: 'blue',
       active: route.name === 'recall',
-    },
-    {
-      label: 'Suggestions',
-      href: '#/suggestions',
-      testid: 'nav-suggestions',
-      icon: SUGGEST,
-      tone: 'orange',
-      count: status.suggestions.length,
-      pill: true,
-      active: route.name === 'suggestions',
     },
     {
       label: 'Automations',
@@ -125,21 +131,13 @@ export function shell(status: TwinStatus, route: Route, content: Child): HTMLEle
       active: route.name === 'automations' || route.name === 'automation',
     },
     {
-      label: 'App readiness',
-      href: '#/readiness',
-      testid: 'nav-readiness',
-      icon: READINESS,
-      tone: 'purple',
-      badge: `${status.readiness.automatablePct}%`,
-      active: route.name === 'readiness',
-    },
-    {
-      label: 'What the twin knows',
-      href: '#/knows',
-      testid: 'nav-knows',
-      icon: KNOWS,
-      tone: 'blue',
-      active: route.name === 'knows',
+      label: 'Connectors',
+      href: '#/connectors',
+      testid: 'nav-connectors',
+      icon: CONNECTORS,
+      tone: 'orange',
+      count: status.connectorItems,
+      active: route.name === 'connectors',
     },
     {
       label: 'Network ledger',

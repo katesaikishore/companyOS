@@ -459,6 +459,8 @@ export class TwinRuntime {
       connectorItems: this.agent.connectorCount(),
       connectorCounts: this.connectors.lastCounts(),
       pipeOutputs: this.pipeOutputSummaries(config.pipes),
+      assignedTasks: this.agent.assignedTasks(),
+      taskRuns: this.agent.taskRuns(),
       stats: {
         routinesLearned: suggestions.length + automations.length,
         waiting: suggestions.length + drafts,

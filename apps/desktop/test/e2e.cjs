@@ -400,7 +400,10 @@ async function main(userDataDir, fixtureDir) {
     log('speech model shows as not installed, and the microphone switch is disabled until it is');
 
     // 7. Suggestions: accept one, then dismiss another.
-    await page.click('[data-testid="nav-suggestions"]');
+    // Suggestions left the sidebar, so the test opens it by its route, as the Overview's "Review all" link does.
+    await page.evaluate(() => {
+      location.hash = '#/suggestions';
+    });
     await page.waitForSelector('[data-testid="suggestion-card"]');
     await shot(page, '06-suggestions-light');
     await page.click('[data-testid="suggestion-accept"]');

@@ -70,6 +70,11 @@ const LEVELS: Array<{ value: 3 | 4; label: string; note?: string }> = [
 const READING_LINE_PX = 120;
 
 let activeSection: SectionId = 'capture';
+
+/** Opens Settings at its Connectors section. The Connectors page in the sidebar uses it. */
+export function openConnectorsSection(): void {
+  activeSection = 'connectors';
+}
 let followingScroll = false;
 
 export function settingsView(status: TwinStatus): HTMLElement {

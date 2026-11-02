@@ -370,6 +370,23 @@ export interface TwinStatus {
   cloudAccounts?: CloudAccountView[];
   /** The newest kept run of each write pipe, by pipe id. A pipe with no entry has no kept run. Holds no text. */
   pipeOutputs?: Record<string, PipeOutputSummaryView>;
+  /** Automations ranked by the Recall observations of their apps over the last seven days, highest priority first. */
+  assignedTasks?: AssignedTaskView[];
+  /** Completed and failed runs per local day over the last fourteen days, oldest first and today last. */
+  taskRuns?: number[];
+}
+
+/** One automation ranked by what Recall saw of its apps. Holds no text: only counts, a time and the routine's name. */
+export interface AssignedTaskView {
+  automationId: string;
+  name: string;
+  /** Stored screen and audio observations of the routine's apps in the window. */
+  observations: number;
+  /** The newest of those observations, in ms. */
+  latest: number;
+  /** Observations weighted by recency, times the estimated minutes a week the routine saves. Higher runs first. */
+  priority: number;
+  level: AutonomyLevel;
 }
 
 /** When a write pipe's newest kept run was read, and how many matches it kept. Holds no text. */

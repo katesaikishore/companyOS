@@ -477,6 +477,10 @@
   background: var(--purple-hi);
 }
 
+.ov-strip-seg.is-run {
+  background: var(--green);
+}
+
 .ov-strip-axis {
   display: flex;
   justify-content: space-between;
