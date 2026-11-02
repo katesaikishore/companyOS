@@ -36,11 +36,18 @@ export interface Executor {
    */
   pressShortcut?(app: string, shortcut: string): Promise<boolean>;
   /**
+   * Chooses one menu path in the named application: the menu bar item, each submenu, then the item. The adapter returns true
+   * only when each click that opens a menu was confirmed, the last click was delivered, and the menu closed afterwards, so
+   * true is the step's postcondition. The last click cannot be confirmed from the menu, since the menu closes as the item
+   * runs. It may throw a StepRefusedError to say why it refused, when nothing was chosen.
+   */
+  chooseMenu?(app: string, menu: readonly string[]): Promise<boolean>;
+  /**
    * Why this executor cannot carry out a focus or key step right now, or undefined when it can. The runner asks only for
    * those two steps, before anyone is asked, and a reason blocks the step. The desktop app uses it when its optional
    * agent-desktop program is set but unusable.
    */
-  blockedReason?(op: 'focus_app' | 'press_shortcut'): string | undefined;
+  blockedReason?(op: 'focus_app' | 'press_shortcut' | 'choose_menu'): string | undefined;
 }
 
 export type RunMode = 'dry_run' | 'supervised' | 'unattended';
@@ -90,6 +97,7 @@ const FAILED_REASON = {
   open_url: 'The address could not be opened.',
   open_file: 'The file could not be opened.',
   press_shortcut: 'The shortcut could not be pressed.',
+  choose_menu: 'The menu item could not be chosen.',
 } as const;
 
 function sameApp(observed: string | undefined, expected: string): boolean {
@@ -98,13 +106,16 @@ function sameApp(observed: string | undefined, expected: string): boolean {
 
 /** Why this system cannot carry out a step at all, or undefined when it can. */
 function unsupportedReason(step: Step, executor: Executor): string | undefined {
-  if (step.op === 'focus_app' || step.op === 'press_shortcut') {
+  if (step.op === 'focus_app' || step.op === 'press_shortcut' || step.op === 'choose_menu') {
     const blocked = executor.blockedReason?.(step.op);
     if (blocked) return blocked;
   }
   if (step.op === 'open_url' && !executor.openUrl) return 'This system cannot open web addresses yet.';
   if (step.op === 'open_file' && !executor.openFile) return 'This system cannot open files yet.';
   if (step.op === 'press_shortcut' && !executor.pressShortcut) return 'This system cannot press shortcuts yet.';
+  if (step.op === 'choose_menu' && !executor.chooseMenu) {
+    return 'Menu items are chosen through the agent-desktop program. Set its path in Settings.';
+  }
   return undefined;
 }
 
@@ -131,6 +142,8 @@ async function perform(step: Step, executor: Executor): Promise<Performed> {
         return { ok: (await executor.openFile?.(step.app, step.path)) === true };
       case 'press_shortcut':
         return { ok: (await executor.pressShortcut?.(step.app, step.shortcut)) === true };
+      case 'choose_menu':
+        return { ok: (await executor.chooseMenu?.(step.app, step.menu)) === true };
       default:
         return { ok: false };
     }
@@ -248,6 +261,24 @@ export async function runAutomation(automation: Automation, request: RunRequest,
       }
       record('executed', decision.reason);
       continue;
+    }
+
+    if (step.op === 'choose_menu') {
+      // A headless menu click does not need the app in front, so the postcondition is the adapter's own: the menu opened,
+      // the item's click was delivered, and the menu closed. A refusal blocks the run, and any other failure fails it, as
+      // for the open and key steps.
+      const performed = await perform(step, executor);
+      if (performed.ok) {
+        passed++;
+        record('passed', 'Done. The menu item was chosen and the menu closed.');
+        continue;
+      }
+      if (performed.failureReason !== undefined) {
+        record('blocked', FAILED_REASON[step.op], performed.failureReason);
+        return finish('blocked');
+      }
+      record('failed', FAILED_REASON[step.op]);
+      return finish('failed');
     }
 
     if (step.op === 'open_url' || step.op === 'open_file' || step.op === 'press_shortcut') {

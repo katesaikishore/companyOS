@@ -4,6 +4,7 @@ import { button, emptyState, levelMeter, pageHeader, panel } from '../components
 import { formatRate, formatWhen, noticedPerWeek, plural, titleCase } from '../format.js';
 import { LEVEL_NAMES, levelLabel, paramFor, runOutcomeLabel, stepDetail, stepTitle } from '../labels.js';
 import { call, go, pending, requestRender, state, type StoredRun } from '../store.js';
+import { menuAutomationPanel } from './menu-automation.js';
 
 type AutomationTab = 'workflow' | 'autonomy';
 
@@ -42,6 +43,7 @@ export function automationsView(status: TwinStatus): HTMLElement {
           h('div', { class: 'actions' }, button('Review suggestions', { variant: 'primary', onClick: () => go('#/suggestions') })),
         ),
       ),
+      menuAutomationPanel(),
     );
   }
   // The list route selects the first routine, as the design does, so the page is never blank.
@@ -69,6 +71,7 @@ function routinesScreen(status: TwinStatus, selectedId: string | undefined, test
       routineList(status.automations, selected?.automation.id),
       selected ? routineDetail(selected) : missingDetail(),
     ),
+    menuAutomationPanel(),
   );
 }
 

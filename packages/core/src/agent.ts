@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AutomationSchema, compileRoutine, effectsOf, fitName, type Automation } from './automation';
+import { AutomationSchema, compileMenuAutomation, compileRoutine, effectsOf, fitName, MenuAutomationInputSchema, type Automation } from './automation';
 import { isBrowserApp, isExcludedApp, normalizeAppName } from './classify';
 import { newId, normaliseOcr, normaliseTranscript, searchTerms } from './capture-text';
 import { TriggerGate, openingApps } from './triggers';
@@ -913,6 +913,21 @@ export class TwinAgent {
     this.writeAutomation(automation);
     this.writeState(initialState(automation.id, effectsOf(automation)));
     this.clearDeclines(routineId);
+    return this.view(automation);
+  }
+
+  /**
+   * Makes an automation by hand that chooses one menu path in one app. It starts as a draft at level 2, as an accepted
+   * routine does, so nothing runs until the person raises its level, and every run asks before the menu is chosen.
+   */
+  createMenuAutomation(input: unknown): AutomationView {
+    const parsed = MenuAutomationInputSchema.safeParse(input);
+    if (!parsed.success) throw new Error('That menu automation is not valid. Check the app name and each menu label.');
+    const automation = compileMenuAutomation(parsed.data, `menu-${newId()}`);
+    // The name was typed by the person, so the plain-text export leaves it out, as it does a renamed automation's name.
+    this.markRenamed(automation.id);
+    this.writeAutomation(automation);
+    this.writeState(initialState(automation.id, effectsOf(automation)));
     return this.view(automation);
   }
 

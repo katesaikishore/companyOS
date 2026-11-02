@@ -94,6 +94,8 @@ export function stepTitle(step: Step, params: readonly Param[]): string {
       return `Open ${fileNameOf(step.path)}`;
     case 'press_shortcut':
       return `Press ${step.shortcut}`;
+    case 'choose_menu':
+      return `Choose ${step.menu.join(' → ')}`;
   }
 }
 

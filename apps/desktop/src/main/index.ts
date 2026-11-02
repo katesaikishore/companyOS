@@ -215,6 +215,8 @@ function registerIpc(): void {
     if (!value) throw new Error('Give the automation a name.');
     return requireRuntime().renameAutomation(automationId(id), value);
   });
+  // The agent checks the input against a strict schema, so the page cannot add a field or a step of its own.
+  handle(IPC.createMenuAutomation, input => requireRuntime().createMenuAutomation(input));
   handle(IPC.setLevel, (id, level) => requireRuntime().setLevel(automationId(id), AutonomyLevelSchema.parse(level)));
   handle(IPC.promote, id => requireRuntime().promote(automationId(id)));
   handle(IPC.dryRun, id => requireRuntime().dryRun(automationId(id)));

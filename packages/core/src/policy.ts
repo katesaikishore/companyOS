@@ -1,5 +1,5 @@
 import { classifyApp, effectOfOp, isExcludedApp, isShellApp } from './classify';
-import { isSafeFilePath, parseKeyChord, parseWebAddress, type Step } from './automation';
+import { isAllowedMenuPath, isSafeFilePath, parseKeyChord, parseWebAddress, type Step } from './automation';
 import { FLOOR_EFFECTS, type AutonomyLevel, type EffectClass } from './types';
 
 export type DecisionKind = 'allow' | 'ask' | 'deny';
@@ -64,6 +64,9 @@ function malformedReason(step: Step): string | undefined {
       return isShellApp(step.app) ? shellReason : undefined;
     case 'press_shortcut':
       if (parseKeyChord(step.shortcut) !== step.shortcut) return 'Only a key chord with a modifier and one key can be pressed.';
+      return isShellApp(step.app) ? shellReason : undefined;
+    case 'choose_menu':
+      if (!isAllowedMenuPath(step.menu)) return 'Only a menu path of two to four labels, as the app shows them, can be chosen.';
       return isShellApp(step.app) ? shellReason : undefined;
     default:
       return undefined;

@@ -69,7 +69,7 @@ import { LayaBundleManager, type LayaTestOptions } from './laya';
 import { LayaDecisionModel } from './decision-laya';
 import { ModelManager, createRoutineNamer } from './models';
 import { browserCapturePaths, installNativeHost, isBrowserCaptureSupported, removeNativeHost } from './native-host-install';
-import { handsExecutor } from './agent-desktop';
+import { AgentDesktopSession, cursorFor, handsExecutor } from './agent-desktop';
 import { choosePlatform, executorFor, type Platform } from './platform';
 import { PipeScheduler, removeLegacyPipeFiles } from './pipes';
 import { LocalConnectorService } from './connectors-scheduler';
@@ -157,6 +157,8 @@ export class TwinRuntime {
   private pending: PendingRunView[] = [];
   /** Runs in progress. No offers are made while one runs, so the run's own app switches cannot trigger one. */
   private activeRuns = 0;
+  /** The one agent-desktop session the menu clicks share, so each automation keeps its own named cursor across runs. */
+  private readonly handsSession = new AgentDesktopSession(() => ({ binary: this.agent.configuration.agentDesktopPath.trim() }));
   /** Screen and microphone capture. Each starts only while its setting is on. */
   private readonly screen: ScreenCaptureService;
   private readonly audio: AudioCaptureService;
@@ -366,6 +368,7 @@ export class TwinRuntime {
     this.pipeScheduler.stop();
     this.connectors.stop();
     this.stopKindLabels();
+    void this.handsSession.end();
   }
 
   setLocked(locked: boolean): void {
@@ -544,6 +547,10 @@ export class TwinRuntime {
     return this.agent.renameAutomation(automationId, name);
   }
 
+  createMenuAutomation(input: unknown): AutomationView {
+    return this.agent.createMenuAutomation(input);
+  }
+
   /** Confirms, renames, merges or splits one of a day's tasks. The engine checks the decision before it is stored. */
   decideTask(input: unknown): void {
     this.agent.decideTask(input);
@@ -578,7 +585,7 @@ export class TwinRuntime {
           mode: 'supervised',
           approve: (step, decision) => this.options.approve(automation, step, decision),
         },
-        this.runExecutor(platform),
+        this.runExecutor(platform, automation),
       );
     });
   }
@@ -589,12 +596,15 @@ export class TwinRuntime {
    * program's exit status, the CLI's error code when it gave one, and the duration are logged. Nothing it was given, and
    * no error message, is.
    */
-  private runExecutor(platform: Platform): Executor {
+  private runExecutor(platform: Platform, automation?: { id: string; name: string }): Executor {
     const native = executorFor(platform);
     const binary = this.agent.configuration.agentDesktopPath.trim();
     if (binary === '') return native;
     return handsExecutor(native, {
       binary,
+      // The automation's own cursor, named after it, so several runs can be told apart on screen.
+      ...(automation ? { cursor: cursorFor(automation.id, automation.name) } : {}),
+      session: this.handsSession,
       record: entry => {
         const code = entry.code === undefined ? '' : ` code=${entry.code}`;
         console.info(`[agent-desktop] ${entry.step} exit=${entry.exit}${code} duration=${entry.durationMs}ms`);
@@ -643,12 +653,13 @@ export class TwinRuntime {
   private async runUnattended(automationId: string): Promise<void> {
     const platform = this.platform;
     if (!platform) return;
+    const automation = this.agent.automations().find(view => view.automation.id === automationId)?.automation;
     try {
       const result = await this.withRun(() =>
         this.agent.run(
           automationId,
           { mode: 'unattended' },
-          this.runExecutor(platform),
+          this.runExecutor(platform, automation),
         ),
       );
       this.options.onUnattendedRun?.(result);

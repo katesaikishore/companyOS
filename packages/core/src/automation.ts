@@ -56,6 +56,21 @@ const KeyChord = z
   .refine(value => parseKeyChord(value) === value, 'Use one or more modifiers and one key, such as cmd+shift+k.');
 
 /**
+ * One label in a menu path, as the app shows it, such as "View", "Clean Up By" or "Save As…". A letter or digit first, then
+ * letters, digits, spaces and a few marks. No quotes, control characters or leading dash, so it cannot read as a flag.
+ */
+export const MENU_LABEL = /^[\p{L}\p{N}][\p{L}\p{N} .,…&()’'+:/-]{0,79}$/u;
+const MenuLabel = z.string().min(1).max(80).regex(MENU_LABEL, 'Use the menu label as the app shows it.');
+/** A menu path: the menu bar item first, then each submenu, then the item to choose. */
+export const MENU_PATH_MIN = 2;
+export const MENU_PATH_MAX = 4;
+
+/** True for a menu path the twin may choose: two to four labels, each one allowed. */
+export function isAllowedMenuPath(menu: readonly string[]): boolean {
+  return menu.length >= MENU_PATH_MIN && menu.length <= MENU_PATH_MAX && menu.every(label => MENU_LABEL.test(label));
+}
+
+/**
  * The steps an automation may contain. Focus and check are the original vocabulary. Open URL, open file and press
  * shortcut each name what they act on, are classified in classify.ts, and have a postcondition the runner checks.
  * Every step is strict, so a stored step with an unknown field fails to load instead of being guessed at.
@@ -66,6 +81,7 @@ export const StepSchema = z.discriminatedUnion('op', [
   z.object({ op: z.literal('open_url'), app: AppRef, url: UrlRef }).strict(),
   z.object({ op: z.literal('open_file'), app: TargetAppRef, path: FilePath }).strict(),
   z.object({ op: z.literal('press_shortcut'), app: TargetAppRef, shortcut: KeyChord }).strict(),
+  z.object({ op: z.literal('choose_menu'), app: TargetAppRef, menu: z.array(MenuLabel).min(MENU_PATH_MIN).max(MENU_PATH_MAX) }).strict(),
 ]);
 
 export const AutomationSchema = z
@@ -81,6 +97,42 @@ export const AutomationSchema = z
     estimate: z.object({ minutesPerWeek: z.number().nonnegative(), occurrencesPerWeek: z.number().nonnegative() }).strict().optional(),
   })
   .strict();
+
+/**
+ * What a person gives to make a menu automation by hand: its name, the app, and the menu path to choose. The app is a plain
+ * name, never a parameter, a shell or a script runner. The schema is strict, so a field the page should not send is refused.
+ */
+export const MenuAutomationInputSchema = z
+  .object({
+    name: z.string().trim().min(1).max(NAME_MAX),
+    app: z
+      .string()
+      .trim()
+      .min(1)
+      .max(200)
+      .refine(value => PLAIN_APP_NAME.test(value) && !isShellApp(value), 'Choose an application, not a shell or script runner.'),
+    menu: z.array(z.string().trim().pipe(MenuLabel)).min(MENU_PATH_MIN).max(MENU_PATH_MAX),
+  })
+  .strict();
+export type MenuAutomationInput = z.infer<typeof MenuAutomationInputSchema>;
+
+/**
+ * A hand-made automation that chooses one menu path: it brings the app forward, then chooses the path. Its routine id says
+ * it was made by hand, so no learned routine is ever matched to it.
+ */
+export function compileMenuAutomation(input: MenuAutomationInput, id: string): Automation {
+  return AutomationSchema.parse({
+    id,
+    name: fitName(input.name),
+    version: 2,
+    routineId: `manual:${id}`,
+    params: [],
+    steps: [
+      { op: 'focus_app', app: input.app },
+      { op: 'choose_menu', app: input.app, menu: input.menu },
+    ],
+  });
+}
 
 export type Param = z.infer<typeof ParamSchema>;
 export type Step = z.infer<typeof StepSchema>;
@@ -245,6 +297,9 @@ export function resolveStep(step: Step, params: readonly Param[], values: Readon
     case 'press_shortcut':
       if (parseKeyChord(step.shortcut) !== step.shortcut) throw new Error('That key chord is not allowed.');
       return { op: 'press_shortcut', app: targetAppName(app), shortcut: step.shortcut };
+    case 'choose_menu':
+      if (!isAllowedMenuPath(step.menu)) throw new Error('That menu path is not allowed.');
+      return { op: 'choose_menu', app: targetAppName(app), menu: [...step.menu] };
   }
 }
 
@@ -276,6 +331,8 @@ export function describeStep(step: Step): string {
       return `Open ${step.path} in "${step.app}"?`;
     case 'press_shortcut':
       return `Press ${step.shortcut} in "${step.app}"?`;
+    case 'choose_menu':
+      return `Choose ${step.menu.join(' → ')} in "${step.app}"?`;
   }
 }
 

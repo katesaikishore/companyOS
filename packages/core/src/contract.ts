@@ -1,5 +1,6 @@
 import type { KindLabel } from './labels';
 import type { AutomationView } from './agent';
+import type { MenuAutomationInput } from './automation';
 import type { GateRequirement } from './autonomy';
 import type { EffectClass, TwinConfig, AutonomyLevel, CaptureKind, WindowClass } from './types';
 import type { DownloadState, HardwareProfile, InstalledModel, LayaBundleView, NetworkEntry, SetupPlan } from './models/types';
@@ -442,6 +443,8 @@ export interface TwinBridge {
   resetDecline(routineId: string): Promise<void>;
   /** Changes the name of an automation. Nothing else about it changes. */
   renameAutomation(automationId: string, name: string): Promise<AutomationView>;
+  /** Makes a draft automation by hand that brings an app forward, then chooses one menu path in it. */
+  createMenuAutomation(input: MenuAutomationInput): Promise<AutomationView>;
   setLevel(automationId: string, level: AutonomyLevel): Promise<AutomationView>;
   promote(automationId: string): Promise<AutomationView>;
   dryRun(automationId: string): Promise<RunResult>;

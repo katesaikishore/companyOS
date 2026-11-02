@@ -644,3 +644,26 @@
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
+
+/* The form that makes a menu automation by hand: three labelled fields in a row, one per line on a narrow window. */
+.menu-automation {
+  margin-top: 16px;
+}
+
+.menu-automation-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.menu-automation .field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.menu-automation .field-label {
+  font-size: 12px;
+  color: var(--muted);
+}
