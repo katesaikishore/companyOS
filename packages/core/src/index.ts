@@ -30,3 +30,5 @@ export * from './media-key';
 export * from './capture-policy';
 export * from './frame-dedupe';
 export * from './capture-text';
+export * from './workbook/sheet';
+export * from './workbook/brain';
