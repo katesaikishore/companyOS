@@ -266,6 +266,8 @@ export class AgentDesktopSession {
   private started: Promise<string | undefined> | undefined;
   /** The program path the current session was started with. A session belongs to that program only. */
   private startedWith: string | undefined;
+  /** The current session's id once it has started, so a report about an older session cannot drop this one. */
+  private current: string | undefined;
   /** Agent id and label pairs already drawn, so a renamed automation gets its new label. */
   private readonly styled = new Set<string>();
   /** Counts dropped sessions, so a style call that finishes after a drop cannot mark the new session as styled. */
@@ -283,7 +285,9 @@ export class AgentDesktopSession {
       this.startedWith = binary;
       // Forgotten on failure, so the next menu step tries again. Only this attempt is forgotten, never a newer one.
       void attempt.then(id => {
-        if (id === undefined && this.started === attempt) this.forget();
+        if (this.started !== attempt) return;
+        if (id === undefined) this.forget();
+        else this.current = id;
       });
     }
     return this.started;
@@ -291,21 +295,28 @@ export class AgentDesktopSession {
 
   /**
    * Drops the session, so the next menu step starts a new one, and ends the dropped one so its cursors leave the screen.
-   * Called when a call made in the session reports that the session has ended, or when the program path changes.
+   * Called when a call made in the session reports that the session has ended, or when the program path changes. With an
+   * id, only that session is dropped: a late report from a session already replaced leaves the newer one running.
    */
-  forget(): void {
+  forget(ended?: string): void {
+    if (ended !== undefined && ended !== this.current) return;
     void this.drop();
   }
 
-  /** Forgets the session at once, then ends it. Ending is best effort: a session that has already ended refuses quietly. */
+  /**
+   * Forgets the session at once, then ends it with the program that started it. Ending is best effort: a session that has
+   * already ended refuses quietly.
+   */
   private async drop(): Promise<void> {
     const previous = this.started;
+    const binary = this.startedWith;
     this.started = undefined;
     this.startedWith = undefined;
+    this.current = undefined;
     this.styled.clear();
     this.generation++;
     const id = await previous;
-    if (id !== undefined) await runCall(this.options(), ['session', 'end', id], false);
+    if (id !== undefined && binary !== undefined) await runCall({ ...this.options(), binary }, ['session', 'end', id], false);
   }
 
   private async start(): Promise<string | undefined> {
@@ -391,6 +402,29 @@ export async function chooseMenuWithAgentDesktop(options: HandsOptions, app: str
   // In a multi-agent session every desktop action needs an agent id, so the session is used only with a cursor.
   const cursor = options.cursor && AGENT_ID.test(options.cursor.agentId) ? options.cursor : undefined;
   const sessionId = cursor ? await options.session?.id() : undefined;
+  const first = await choosePath(options, app, menu, cursor, sessionId);
+  if (first !== SESSION_ENDED) return first;
+  // The session ended before anything was clicked, and was forgotten, so the path can start again: once in a new session,
+  // and if that one has ended too, with no session, as when one cannot start.
+  const fresh = await options.session?.id();
+  const second = fresh === undefined ? SESSION_ENDED : await choosePath(options, app, menu, cursor, fresh);
+  if (second !== SESSION_ENDED) return second;
+  const plain = await choosePath(options, app, menu, cursor, undefined);
+  // Without a session no call can report one ended, so this is only for the type.
+  return plain === SESSION_ENDED ? refused('not_found', MESSAGES.menuItem) : plain;
+}
+
+/** What choosePath returns when the session ended before the first click, so nothing was done and the path can be tried again. */
+const SESSION_ENDED = Symbol('session ended');
+
+/** One try at a menu path, in the given session or in none. */
+async function choosePath(
+  options: HandsOptions,
+  app: string,
+  menu: readonly string[],
+  cursor: HandsCursor | undefined,
+  sessionId: string | undefined,
+): Promise<HandsResult | typeof SESSION_ENDED> {
   const scope = sessionId === undefined ? [] : ['--session', sessionId];
   const actor = sessionId !== undefined && cursor ? ['--agent-id', cursor.agentId] : [];
   if (sessionId !== undefined && cursor) await options.session?.style(sessionId, cursor);
@@ -404,7 +438,13 @@ export async function chooseMenuWithAgentDesktop(options: HandsOptions, app: str
     const ref = found.result.ok ? menuItemRef(found.output, label) : undefined;
     if (ref === undefined) {
       const code = errorCodeOf(found.output);
-      if (sessionEnded(found.output)) options.session?.forget();
+      if (sessionId !== undefined && sessionEnded(found.output)) {
+        options.session?.forget(sessionId);
+        if (index === 0) {
+          recordStep(options, 'choose_menu', found.exit, started, code);
+          return SESSION_ENDED;
+        }
+      }
       if (openMenus > 0) await closeMenu(options, app, scope, actor);
       recordStep(options, 'choose_menu', 'not_found', started, code);
       return refused('not_found', MESSAGES.menuItem);
@@ -413,7 +453,7 @@ export async function chooseMenuWithAgentDesktop(options: HandsOptions, app: str
     const delivery = deliveryOf(clicked.output);
     if (!clicked.result.ok) {
       const code = errorCodeOf(clicked.output);
-      if (sessionEnded(clicked.output)) options.session?.forget();
+      if (sessionId !== undefined && sessionEnded(clicked.output)) options.session?.forget(sessionId);
       // After the last click the item may have run, and before it Escape is sent only to a menu known to be open.
       if (!last && openMenus > 0) await closeMenu(options, app, scope, actor);
       recordStep(options, 'choose_menu', clicked.exit, started, code);

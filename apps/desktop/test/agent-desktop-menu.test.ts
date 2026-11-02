@@ -251,14 +251,43 @@ describe.runIf(STARTS_FAKE_PROGRAM)('chooseMenuWithAgentDesktop', () => {
     expect(lastClick().some(args => args[0] === 'press')).toBe(false);
   });
 
-  it('drops a session the program says has ended, ends it, and starts a new one for the next run', async () => {
+  it('drops a session the program says has ended before the first click, and chooses the path again', async () => {
     const calls = fake({ FAKE_MENU_SESSION_ENDED: '1' });
     const shared = withCursor();
-    expect(await chooseMenuWithAgentDesktop(shared, 'Finder', CLEAN_UP)).toMatchObject({ ok: false, failure: 'not_found' });
+    // Every session the fake starts has ended, so the path is tried in a new session, then with no session, and runs.
+    expect(await chooseMenuWithAgentDesktop(shared, 'Finder', CLEAN_UP)).toEqual({ ok: true });
     await new Promise(resolve => setTimeout(resolve, 300));
-    await chooseMenuWithAgentDesktop(shared, 'Finder', CLEAN_UP);
     expect(calls().filter(args => args[0] === 'session' && args[1] === 'start').length).toBe(2);
-    expect(calls().some(args => args[0] === 'session' && args[1] === 'end' && args[2] === 'sess-1')).toBe(true);
+    expect(calls().filter(args => args[0] === 'session' && args[1] === 'end' && args[2] === 'sess-1').length).toBe(2);
+    const clicks = calls().filter(args => args[0] === 'click');
+    expect(clicks.length).toBe(2);
+    expect(clicks.every(args => !args.includes('--session'))).toBe(true);
+  });
+
+  it('keeps the current session when a report names an older one', async () => {
+    const calls = fake();
+    const session = new AgentDesktopSession(() => ({ binary: program }));
+    expect(await session.id()).toBe('sess-1');
+    session.forget('sess-0');
+    expect(await session.id()).toBe('sess-1');
+    await new Promise(resolve => setTimeout(resolve, 300));
+    expect(calls().filter(args => args[0] === 'session').map(args => args[1])).toEqual(['start']);
+  });
+
+  it('ends a session with the program that started it when the path changes', async () => {
+    const calls = fake();
+    const second = join(folder, 'agent-desktop-fake-second');
+    writeFileSync(second, FAKE_PROGRAM.replace('JSON.stringify(args)', "JSON.stringify(['second', ...args])"));
+    chmodSync(second, 0o755);
+    let binary = program;
+    const session = new AgentDesktopSession(() => ({ binary }));
+    await session.id();
+    binary = second;
+    await session.id();
+    await new Promise(resolve => setTimeout(resolve, 300));
+    expect(calls()).toContainEqual(['session', 'end', 'sess-1']);
+    expect(calls()).not.toContainEqual(['second', 'session', 'end', 'sess-1']);
+    expect(calls()).toContainEqual(['second', 'session', 'start', '--name', 'companyOS', '--cursor', '--multi-agent', '--no-trace']);
   });
 
   it('keeps a session that only failed to find a label', async () => {
