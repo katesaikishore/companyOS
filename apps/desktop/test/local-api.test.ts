@@ -1,6 +1,7 @@
 import { request as httpRequest, type IncomingHttpHeaders } from 'node:http';
+import type { CaptureHitView, CaptureKind } from '@companyos/twin-core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createLocalApi, type LocalApi, type LocalApiOptions } from '../src/main/local-api';
+import { createLocalApi, withheldFromLocalApi, type LocalApi, type LocalApiOptions } from '../src/main/local-api';
 
 /** Planted in a query and in an error. It must never appear in a reply. Never printed. */
 const CANARY = 'SCREEN_OCR_CANARY_4471';
@@ -148,6 +149,22 @@ describe('local API', () => {
     expect(JSON.parse(reply.body.toString('utf8'))).toEqual({ hits: [hit] });
     expect(seen[0]).toMatchObject({ text: 'quarterly plan', kind: 'screen', app: 'Notes', from: 1000 });
     expect((seen[0] as { to: number }).to).toBeGreaterThan(1000);
+  });
+
+  it('withholds typed and connector hits from the search reply, and serves screen and audio hits', async () => {
+    const hit = (kind: CaptureKind, id: string): CaptureHitView => ({ kind, id, ts: 1_700_000_000_000, app: null, snippet: 'plan' });
+    const hits = [hit('screen', FRAME_ID), hit('keystroke', 'k'.repeat(32)), hit('connector', 'c'.repeat(32)), hit('audio', 'a'.repeat(32))];
+    const port = await start({ search: () => hits });
+    const reply = await call(port, { path: '/v1/search?q=plan', headers: bearer(TOKEN) });
+    expect(reply.status).toBe(200);
+    expect(JSON.parse(reply.body.toString('utf8'))).toEqual({ hits: [hits[0], hits[3]] });
+  });
+
+  it('withholds keystroke and connector hits, and keeps screen and audio hits in order', () => {
+    const hit = (kind: CaptureKind, id: string): CaptureHitView => ({ kind, id, ts: 1, app: null, snippet: '' });
+    const hits = [hit('connector', '1'), hit('screen', '2'), hit('keystroke', '3'), hit('audio', '4')];
+    expect(withheldFromLocalApi(hits)).toEqual([hits[1], hits[3]]);
+    expect(withheldFromLocalApi([])).toEqual([]);
   });
 
   it('refuses an unknown kind or an over-long query before the engine runs, and never echoes it', async () => {

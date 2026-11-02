@@ -65,6 +65,8 @@ asarUnpack:
   - "**/node_modules/@tesseract.js-data/**"
   # transformers.js loads sharp for image inputs, and sharp loads a native library from disk, which asar cannot serve.
   - "**/node_modules/@img/**"
+  # uiohook-napi loads its keyboard hook from a .node file, which asar cannot serve. Only the macOS hook is used (src/main/keyboard.ts).
+  - "**/node_modules/uiohook-napi/**"
 mac:
   # onnxruntime-node and sharp hold the bindings of every platform in their packages. Each build keeps only its own.
   files:
@@ -74,6 +76,8 @@ mac:
     - "!**/node_modules/@img/sharp-libvips-{linux,linuxmusl,win32}*/**"
     - "!**/node_modules/@img/sharp-darwin-!(${arch})/**"
     - "!**/node_modules/@img/sharp-libvips-darwin-!(${arch})/**"
+    # An npm install on Linux also fetches the Linux llama.cpp builds. A package built from that install would carry them.
+    - "!**/node_modules/@node-llama-cpp/linux-*/**"
   category: public.app-category.productivity
   icon: build/icon.icns
   target:
@@ -102,6 +106,8 @@ win:
     - "!**/node_modules/@img/sharp-{darwin,linux,linuxmusl}-*/**"
     - "!**/node_modules/@img/sharp-libvips-{darwin,linux,linuxmusl}*/**"
     - "!**/node_modules/@img/sharp-win32-!(${arch})/**"
+    # An npm install on Linux also fetches the Linux llama.cpp builds. A package built from that install would carry them.
+    - "!**/node_modules/@node-llama-cpp/linux-*/**"
   icon: build/icon.ico
   target:
     - nsis

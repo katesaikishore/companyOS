@@ -12,6 +12,7 @@ import {
   type Automation,
   type AudioState,
   type Executor,
+  type Pipe,
   type ScreenState,
   type TwinEvent,
   type WindowClass,
@@ -24,6 +25,12 @@ import { MediaStore } from '../../apps/desktop/src/main/media-store';
 import { ModelManager } from '../../apps/desktop/src/main/models';
 import { CANARIES, type Surface } from './canaries';
 import { ConsoleCapture, diskSurfaces, errorText, listFiles, recordingFetch, refuseOutbound } from './surfaces';
+import { plantedVoice } from './voice';
+
+/** The saved write pipe whose kept run the scenario plants. Its id is a valid pipe id. */
+const PLANTED_PIPE_ID = 'write-0001';
+/** The name the scenario gives the planted voice. A name is typed text, which the export replaces, so it is not a canary. */
+const PLANTED_SPEAKER_NAME = 'Dana Reviewer';
 
 export type Outcome = 'stored' | 'dropped' | 'rejected';
 
@@ -112,17 +119,25 @@ export const PLANTED_FRAMES: readonly PlantedFrame[] = [
   { label: 'screen text in a browser window', outcome: 'dropped', app: 'Google Chrome', windowClass: 'browser', state: {}, text: `Browser ${CANARIES.screenOcrBrowser}` },
 ];
 
-/** A stand-in microphone segment, with the policy inputs that differ from a clear microphone. */
+/**
+ * A stand-in audio segment, from the microphone or from system sound, with the policy inputs that differ from a clear
+ * source. The source's own setting is read from the agent, as the runtime reads it.
+ */
 export interface PlantedSegment {
   label: string;
   outcome: Outcome;
+  source: 'microphone' | 'system';
+  /** For a system segment: whether the system sound switch is on when the segment arrives. Ignored for the microphone. */
+  systemSwitch?: boolean;
   state: Partial<Pick<AudioState, 'locked' | 'paused' | 'idle' | 'permissionGranted'>>;
   /** The transcript the stand-in speech model returns for the segment. */
   text: string;
 }
 
 export const PLANTED_SEGMENTS: readonly PlantedSegment[] = [
-  { label: 'microphone text while paused', outcome: 'dropped', state: { paused: true }, text: `Meeting notes ${CANARIES.audioTranscript}` },
+  { label: 'microphone text while paused', outcome: 'dropped', source: 'microphone', state: { paused: true }, text: `Meeting notes ${CANARIES.audioTranscript}` },
+  { label: 'system audio text while the system switch is off', outcome: 'dropped', source: 'system', systemSwitch: false, state: {}, text: `Call audio ${CANARIES.systemAudioOff}` },
+  { label: 'system audio text while the system switch is on', outcome: 'stored', source: 'system', systemSwitch: true, state: {}, text: `Call audio ${CANARIES.systemAudioTranscript}` },
 ];
 
 function frameState(planted: PlantedFrame): ScreenState {
@@ -178,12 +193,17 @@ async function plantFrame(
   }
 }
 
-/** The steps the audio service takes for one segment, with the stand-in transcript. */
+/**
+ * The steps the audio service takes for one segment, with the stand-in transcript. The source's setting is the one the runtime
+ * passes on: the microphone setting, or the system sound switch for a system segment.
+ */
 function plantSegment(agent: TwinAgent, planted: PlantedSegment, ts: number, thrown: unknown[]): Outcome {
-  const state: AudioState = { enabled: true, locked: false, paused: false, idle: false, permissionGranted: true, ...planted.state };
+  const config = agent.configuration;
+  const enabled = planted.source === 'system' ? config.systemAudioCaptureEnabled : config.audioCaptureEnabled;
+  const state: AudioState = { enabled, locked: false, paused: false, idle: false, permissionGranted: true, ...planted.state };
   if (!audioDecision(state).capture) return 'dropped';
   try {
-    return agent.ingestAudio({ ts, durationMs: 30_000, text: planted.text }) ? 'stored' : 'dropped';
+    return agent.ingestAudio({ ts, durationMs: 30_000, text: planted.text, source: planted.source }) ? 'stored' : 'dropped';
   } catch (error) {
     thrown.push(error);
     return 'rejected';
@@ -275,8 +295,24 @@ export async function runPlantedScenario(): Promise<ScenarioRun> {
       outcomes[planted.label] = await plantFrame(agent, media, deduper, planted, index, at(0, 12, index), thrown);
     }
     for (const [index, planted] of PLANTED_SEGMENTS.entries()) {
+      // The system sound switch is set as the person has it when this segment arrives.
+      if (planted.source === 'system') agent.updateConfig({ systemAudioCaptureEnabled: planted.systemSwitch === true });
       outcomes[planted.label] = plantSegment(agent, planted, at(0, 13, index), thrown);
     }
+    // A saved write pipe keeps the matches of its newest run, encrypted in the store. The planted match is the run's text.
+    const pipe: Pipe = { id: PLANTED_PIPE_ID, name: 'Invoice notes', query: '', intervalMinutes: 30, action: 'write', enabled: true };
+    agent.updateConfig({ pipes: [pipe] });
+    const runKept = agent.storePipeOutput(pipe.id, {
+      ranAt: at(0, 14),
+      items: [{ ts: at(0, 12), app: 'Microsoft Excel', kind: 'screen', text: CANARIES.pipeOutput }],
+    });
+    if (!runKept) throw new Error('The scenario should keep the planted pipe run.');
+    // A voice the person names. The planted voice is labelled as a session speaker and then named, so its voiceprint is kept
+    // encrypted in the speakers collection.
+    agent.updateConfig({ speakerIdentificationEnabled: true });
+    const voiceLabel = agent.identifySpeaker(plantedVoice());
+    if (voiceLabel === undefined) throw new Error('The scenario should label the planted voice.');
+    agent.nameSessionSpeaker(voiceLabel, PLANTED_SPEAKER_NAME);
     // A search for words the store holds finds the stored frame. A search for the query canary finds nothing, and the
     // query itself is not kept, which the store check below reads. A malformed search is refused with a fixed sentence.
     const screenHits = agent.searchCapture({ text: 'Invoice', from: at(-1, 0), to: at(1, 0) }).length;

@@ -1,0 +1,11 @@
+version: 2
+
+secret:
+  # Fake values used only to test redaction and the privacy canaries. They are not credentials.
+  ignored_matches:
+    - name: Sample JSON web token in the redaction test
+      match: eyJhbGciOiJIUzI1NiJ9\.eyJzdWIiOiIxMjM0NTY3ODkwIn0\.abcdefghijk
+      reason: Test fixture, not a credential
+    - name: Canary GitHub token in the connector privacy test
+      match: ghp_CANARYTOKEN9B3D1F0A2C4E6G8H0J
+      reason: Privacy test canary, not a credential

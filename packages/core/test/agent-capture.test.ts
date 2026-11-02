@@ -211,7 +211,7 @@ describe('prune, delete and export', () => {
     agent.ingestScreen(screenRead({ mediaId: null, text: 'No image here' }));
     agent.ingestAudio(audioRead());
     expect(agent.deleteAllCapture()).toEqual([IMAGE_A]);
-    expect(agent.captureSummary()).toEqual({ screenCount: 0, audioCount: 0, oldest: null, newest: null });
+    expect(agent.captureSummary()).toEqual({ screenCount: 0, audioCount: 0, keystrokeCount: 0, oldest: null, newest: null });
     expect(search(agent, 'invoice')).toEqual([]);
   });
 
@@ -224,6 +224,7 @@ describe('prune, delete and export', () => {
     expect(exported.includes(AUDIO_CANARY)).toBe(false);
     expect((agent.exportAll() as { screenCapture: unknown }).screenCapture).toEqual({
       screenCount: 1,
+      keystrokeCount: 0,
       audioCount: 1,
       oldest: new Date(NOW - 120_000).toISOString(),
       newest: new Date(NOW - 30_000).toISOString(),

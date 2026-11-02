@@ -17,7 +17,8 @@ import type {
   KnownRoutinesView,
 } from './contract';
 import { knownRoutinesView } from './known';
-import { normalizeSignal } from './redact';
+import { normalizeSignal, redactTypedText } from './redact';
+import { normaliseTyped } from './keystroke-text';
 import {
   promotionCheck,
   promote as promoteState,
@@ -30,12 +31,24 @@ import {
 } from './autonomy';
 import { runAutomation, type Executor, type RunMode, type RunRequest, type RunResult } from './runner';
 import { segment, type Segment } from './segment';
-import { EncryptedStore } from './store';
+import { EncryptedStore, type CaptureRecord } from './store';
+import { PIPE_ID, PipeOutputSchema, type PipeOutput } from './pipes';
+import {
+  CONNECTOR_KINDS,
+  CONNECTOR_LOCATION_MAX,
+  CONNECTOR_TEXT_MAX,
+  CONNECTOR_TITLE_MAX,
+  connectorSourceId,
+  type ConnectorItem,
+} from './connectors/types';
+import { SPEAKER_EMBEDDING_DIM } from './models/speaker';
+import { bestProfile, isSessionSpeakerLabel, isSpeakerName, SessionSpeakers, SPEAKER_NAME_MAX_CHARS, unitVector, type SpeakerProfile } from './speaker/match';
 import { dayKeyOf, decisionFits, parseTaskDecision, TaskDecisionSchema, tasksForDay, type TaskDecision } from './tasks';
 import type { InstalledModel, NetworkEntry } from './models/types';
 import {
   CAPTURE_KINDS,
   DEFAULT_CONFIG,
+  MAX_PIPES,
   TwinConfigSchema,
   WINDOW_CLASSES,
   mergeConfigPatch,
@@ -69,6 +82,40 @@ const MAX_TIME_MS = 8_640_000_000_000_000;
 const MEDIA_ID = /^[0-9a-f]{32}$/;
 const INVALID_CAPTURE = 'Invalid capture: it has a field or value the twin does not accept.';
 const INVALID_SEARCH = 'Invalid search: it has a field or value the twin does not accept.';
+const INVALID_PIPE_OUTPUT = 'Invalid pipe output: it has a field or value the twin does not accept.';
+const PipeIdSchema = z.string().regex(PIPE_ID);
+const INVALID_CONNECTOR_IMPORT = 'Invalid connector import: it has a field or value the twin does not accept.';
+const UNKNOWN_CONNECTOR_SOURCE = 'Unknown connector source: add the source in settings before importing into it.';
+const INVALID_CONNECTOR_SOURCE = 'Invalid connector source: the id is not allowed.';
+/** Most items one import call may pass. A larger import is split by the caller. */
+const MAX_CONNECTOR_IMPORT = 10_000;
+/** The source a call names. Source ids are 16 to 64 characters, and the saved list decides which ids exist. */
+const ConnectorSourceKeySchema = z.string().min(1).max(64);
+/** One parsed item, as the connector parsers build it. Strict, so a field a parser did not produce is refused. */
+const ConnectorItemSchema = z
+  .object({
+    source: z.enum(CONNECTOR_KINDS),
+    sourceId: z.string().min(1).max(128),
+    ts: z.number().min(-MAX_TIME_MS).max(MAX_TIME_MS),
+    title: z.string().min(1).max(CONNECTOR_TITLE_MAX),
+    text: z.string().max(CONNECTOR_TEXT_MAX),
+    location: z.string().max(CONNECTOR_LOCATION_MAX).optional(),
+  })
+  .strict();
+const ConnectorImportSchema = z
+  .object({
+    sourceKey: ConnectorSourceKeySchema,
+    items: z.array(ConnectorItemSchema).max(MAX_CONNECTOR_IMPORT),
+  })
+  .strict();
+
+/**
+ * The record id of an imported item: the same source and item always give the same id, so importing it again replaces the
+ * stored copy. The id is a hash, so it names no item.
+ */
+function connectorRecordId(sourceKey: string, sourceId: string): string {
+  return connectorSourceId('connector', sourceKey, sourceId);
+}
 
 const TimeSchema = z.number().int().nonnegative().max(MAX_TIME_MS);
 /** Strict, so a window title or any other extra field is refused rather than stored. */
@@ -81,10 +128,35 @@ const ScreenReadSchema = z
     mediaId: z.string().regex(MEDIA_ID).nullable(),
   })
   .strict();
+/** A speaker name the person gave, or a session label such as 'Speaker 2'. Anything else is refused. */
+const SpeakerLabelSchema = z
+  .string()
+  .max(SPEAKER_NAME_MAX_CHARS)
+  .refine(value => isSpeakerName(value) || isSessionSpeakerLabel(value), 'Invalid speaker label.');
+const INVALID_SPEAKER = 'Invalid speaker: the label or name is not allowed.';
+/** A stored speaker profile. Its centroid is checked for length and finiteness when it is read. */
+const StoredSpeakerSchema = z.object({
+  id: z.string().min(1).max(64),
+  name: z.string().min(1).max(SPEAKER_NAME_MAX_CHARS),
+  centroid: z.array(z.number()).max(SPEAKER_EMBEDDING_DIM),
+});
+/** Most audio items kept per session label, so a name given later can relabel them. The oldest are dropped first. */
+const MAX_SESSION_ITEMS = 500;
 const AudioReadSchema = z
   .object({
     ts: TimeSchema,
     durationMs: z.number().int().nonnegative().max(MAX_SEGMENT_MS),
+    text: z.string().max(MAX_RAW_TEXT_CHARS),
+    source: z.enum(['microphone', 'system']).default('microphone'),
+    speaker: SpeakerLabelSchema.optional(),
+  })
+  .strict();
+/** Typed text, one finished piece. The app is required: a piece with no app cannot be checked against the exclusions. */
+const KeystrokeReadSchema = z
+  .object({
+    ts: TimeSchema,
+    app: z.string().min(1).max(200),
+    windowClass: z.enum(WINDOW_CLASSES),
     text: z.string().max(MAX_RAW_TEXT_CHARS),
   })
   .strict();
@@ -93,6 +165,7 @@ const CaptureSearchSchema = z
     text: z.string().max(MAX_SEARCH_CHARS),
     kind: z.enum(CAPTURE_KINDS).optional(),
     app: z.string().max(200).optional(),
+    speaker: SpeakerLabelSchema.optional(),
     from: TimeSchema,
     to: TimeSchema,
   })
@@ -112,8 +185,26 @@ export interface ScreenRead {
 
 /** One microphone segment after transcription. A segment that carries any other field is refused. */
 export interface AudioRead {
+  /** Where the sound came from. Microphone when not given. */
+  source?: 'microphone' | 'system';
   ts: number;
   durationMs: number;
+  text: string;
+  /**
+   * The speaker's name or session label, when speaker identification named one. Kept only when the setting is on. The
+   * voice itself is never passed in or stored. See identifySpeaker.
+   */
+  speaker?: string;
+}
+
+/**
+ * One finished piece of typed text, from the keystroke buffer. The app and the window kind are the ones the text was typed
+ * into. A piece that carries any other field is refused.
+ */
+export interface KeystrokeRead {
+  ts: number;
+  app: string;
+  windowClass: WindowClass;
   text: string;
 }
 
@@ -192,6 +283,12 @@ export class TwinAgent {
   private readonly routineKinds = new Map<string, KindLabeling>();
   /** Offers and declines. The declines are loaded from the config when the agent starts, and written back when they change. */
   private readonly gate: TriggerGate;
+  /** Voice profiles the person named, loaded from the encrypted store. Their centroids stay in this process. */
+  private speakers: SpeakerProfile[] = [];
+  /** Session speakers nobody has named. Memory only: a restart starts again from Speaker 1. */
+  private readonly sessionSpeakers = new SessionSpeakers();
+  /** The audio item ids of each session label, oldest first, so naming the speaker can relabel them. */
+  private readonly sessionItems = new Map<string, string[]>();
 
   constructor(options: AgentOptions) {
     this.store = new EncryptedStore(options.dataDir, options.dataKey);
@@ -200,6 +297,7 @@ export class TwinAgent {
     const saved = this.store.readAll<unknown>('settings').at(-1);
     this.config = saved ? TwinConfigSchema.parse(withoutRetiredKeys(saved)) : { ...DEFAULT_CONFIG };
     this.gate = new TriggerGate(this.now, this.config.declinedRoutines);
+    this.speakers = this.loadSpeakers();
   }
 
   /** Closes the encrypted store. Windows will not delete the store's files while it is open, so tests close before cleanup. */
@@ -208,22 +306,34 @@ export class TwinAgent {
   }
 
   get configuration(): TwinConfig {
-    return { ...this.config, excludedApps: [...this.config.excludedApps], installedModels: [...this.config.installedModels] };
+    return {
+      ...this.config,
+      excludedApps: [...this.config.excludedApps],
+      installedModels: [...this.config.installedModels],
+      connectors: this.config.connectors.map(source => ({ ...source })),
+    };
   }
 
   /** Merges a settings patch into the saved config and checks the result as a whole, so a patch resets nothing it leaves out. */
   updateConfig(patch: Partial<TwinConfig>): TwinConfig {
     const parsed = mergeConfigPatch(this.config, patch);
     const excludedChanged = JSON.stringify(parsed.excludedApps) !== JSON.stringify(this.config.excludedApps);
+    const windowKindsChanged = JSON.stringify(parsed.excludedWindowClasses) !== JSON.stringify(this.config.excludedWindowClasses);
     // The dismissed signatures that name an excluded app go with its events, from the saved config as well.
     const next = excludedChanged
       ? { ...parsed, dismissedRoutineSignatures: withoutExcludedApps(parsed.dismissedRoutineSignatures, parsed.excludedApps) }
       : parsed;
     if (this.config.automationsEnabled && !next.automationsEnabled) this.stopGeneration++;
     if (this.config.allowUnattended && !next.allowUnattended) this.unattendedGeneration++;
+    // A source the person removed takes its imported items with it, so no item is left without a source in the list.
+    const kept = new Set(next.connectors.map(source => source.id));
+    for (const source of this.config.connectors) if (!kept.has(source.id)) this.store.deleteConnectorSource(source.id);
     this.config = next;
     this.store.replaceAll('settings', [next]);
+    // A pipe that is off, removed or not a write pipe keeps no run, so its kept matches go with the change, not at a later check.
+    this.store.prunePipeOutputs(next.pipes.filter(pipe => pipe.enabled && pipe.action === 'write').map(pipe => pipe.id));
     if (excludedChanged) this.purgeExcluded();
+    if (windowKindsChanged) this.purgeExcludedWindowKinds();
     return this.configuration;
   }
 
@@ -233,6 +343,16 @@ export class TwinAgent {
     const kept = all.filter(event => !event.app || !isExcludedApp(event.app, this.config.excludedApps));
     if (kept.length !== all.length) this.store.replaceAll('events', kept);
     this.purgeExcludedCapture();
+    // Kept pipe matches may hold text from an app that is now excluded, so every kept run goes, as the files did.
+    this.store.deletePipeOutputs();
+  }
+
+  /** Text read from a kind of window that is now excluded goes with its images, as an excluded app's does. */
+  private purgeExcludedWindowKinds(): void {
+    const { mediaIds } = this.store.deleteCaptureForWindowClasses(this.config.excludedWindowClasses);
+    if (mediaIds.length > 0) this.deleteMedia?.(mediaIds);
+    // Kept pipe matches may hold text from a kind of window that is now excluded, so every kept run goes.
+    this.store.deletePipeOutputs();
   }
 
   /**
@@ -292,6 +412,7 @@ export class TwinAgent {
     const app = parsed.data.app === null ? null : normalizeAppName(parsed.data.app) || null;
     if (!this.config.screenCaptureEnabled) return false;
     if (windowClass === 'browser' || (app !== null && isBrowserApp(app))) return false;
+    if (this.config.excludedWindowClasses.includes(windowClass)) return false;
     if (app !== null && isExcludedApp(app, this.config.excludedApps)) return false;
     const text = normaliseOcr(parsed.data.text);
     if (text === '' && mediaId === null) return false;
@@ -316,18 +437,53 @@ export class TwinAgent {
   ingestAudio(segment: AudioRead): boolean {
     const parsed = AudioReadSchema.safeParse(segment);
     if (!parsed.success) throw new Error(INVALID_CAPTURE);
-    if (!this.config.audioCaptureEnabled) return false;
+    const system = parsed.data.source === 'system';
+    if (system ? !this.config.systemAudioCaptureEnabled : !this.config.audioCaptureEnabled) return false;
     const text = normaliseTranscript(parsed.data.text);
     if (text === '') return false;
     const { ts, durationMs } = parsed.data;
+    // A label is kept only while speaker identification is on, so switching it off stops new labels at once.
+    const speaker = this.config.speakerIdentificationEnabled ? parsed.data.speaker : undefined;
+    const id = newId();
     this.store.appendCapture({
       collection: 'audioText',
       kind: 'audio',
-      id: newId(),
+      id,
       ts,
       app: null,
       text,
-      body: { ts, durationMs },
+      body: speaker === undefined ? { ts, durationMs, source: parsed.data.source } : { ts, durationMs, source: parsed.data.source, speaker },
+    });
+    if (speaker !== undefined && isSessionSpeakerLabel(speaker)) this.rememberSessionItem(speaker, id);
+    return true;
+  }
+
+  /**
+   * Stores one finished piece of typed text. Nothing is stored when typed-text capture is off, when the app is excluded or a
+   * browser, when the window kind is excluded, or when the text is empty once cleaned. The text is redacted before it is
+   * stored: card-like numbers and key-like tokens are replaced (see redactTypedText). The lock, pause, idle, permission and
+   * secure-input checks are made by keystrokeDecision before a piece is ended. Returns whether the piece was stored.
+   */
+  ingestKeystrokes(read: KeystrokeRead): boolean {
+    const parsed = KeystrokeReadSchema.safeParse(read);
+    if (!parsed.success) throw new Error(INVALID_CAPTURE);
+    const { ts, windowClass } = parsed.data;
+    const app = normalizeAppName(parsed.data.app);
+    if (!app) return false;
+    if (!this.config.keystrokeCaptureEnabled) return false;
+    if (windowClass === 'browser' || isBrowserApp(app)) return false;
+    if (this.config.excludedWindowClasses.includes(windowClass)) return false;
+    if (isExcludedApp(app, this.config.excludedApps)) return false;
+    const text = redactTypedText(normaliseTyped(parsed.data.text));
+    if (text === '') return false;
+    this.store.appendCapture({
+      collection: 'keystrokeText',
+      kind: 'keystroke',
+      id: newId(),
+      ts,
+      app,
+      text,
+      body: { ts, windowClass },
     });
     return true;
   }
@@ -345,19 +501,170 @@ export class TwinAgent {
         terms: searchTerms(parsed.data.text),
         kind: parsed.data.kind,
         app,
+        speaker: parsed.data.speaker,
         from: parsed.data.from,
         to: parsed.data.to,
         limit: CAPTURE_SEARCH_LIMIT,
       })
-      .filter(hit => hit.app === null || !isExcludedApp(hit.app, this.config.excludedApps));
+      .filter(hit => hit.app === null || !isExcludedApp(hit.app, this.config.excludedApps))
+      .map(({ speaker, ...hit }) => (speaker ? { ...hit, speaker } : hit));
   }
 
   /**
-   * Deletes every stored screen and microphone item, with its text. Returns the image ids, so the caller deletes those
-   * files too.
+   * Deletes every stored screen, microphone and typed-text item, with its text, and every write pipe's kept matches. Returns the
+   * image ids, so the caller deletes those files too. Speaker profiles are not items: they stay until forgetSpeakers. Session
+   * speakers are cleared, since their voices came from the audio just deleted, so none of them can be named into a profile.
+   * Imported connector items stay as well, because the person chose to import them: removeConnectorItems or a wipe removes them.
    */
   deleteAllCapture(): string[] {
+    this.sessionItems.clear();
+    this.sessionSpeakers.clear();
     return this.store.deleteAllCapture().mediaIds;
+  }
+
+  /**
+   * Keeps the newest run of a write pipe's matches, encrypted in the store, in place of the run kept before it. Returns false, and
+   * keeps nothing, when the pipe is not saved, is off, or does not keep its matches: a pipe removed or turned off during a run keeps
+   * no run. The run is checked first, and a refusal names no text.
+   */
+  storePipeOutput(pipeId: string, output: PipeOutput): boolean {
+    const id = PipeIdSchema.safeParse(pipeId);
+    const parsed = PipeOutputSchema.safeParse(output);
+    if (!id.success || !parsed.success) throw new Error(INVALID_PIPE_OUTPUT);
+    const pipe = this.config.pipes.find(item => item.id === id.data);
+    if (!pipe || !pipe.enabled || pipe.action !== 'write') return false;
+    this.store.replacePipeOutput({ pipeId: id.data, ranAt: parsed.data.ranAt, items: parsed.data.items });
+    return true;
+  }
+
+  /**
+   * Deletes the kept matches of the given pipes, or of every pipe when no ids are given. Returns how many were deleted. Holds no text.
+   */
+  removePipeOutputs(pipeIds?: readonly string[]): number {
+    if (pipeIds === undefined) return this.store.deletePipeOutputs();
+    const parsed = z.array(PipeIdSchema).max(MAX_PIPES).safeParse(pipeIds);
+    if (!parsed.success) throw new Error(INVALID_PIPE_OUTPUT);
+    return this.store.deletePipeOutputs(parsed.data);
+  }
+
+  /** When a pipe's newest kept run was read, and how many matches it kept. Null when the pipe has no kept run. Holds no text. */
+  pipeOutputSummary(pipeId: string): { count: number; ranAt: number } | null {
+    const parsed = PipeIdSchema.safeParse(pipeId);
+    if (!parsed.success) throw new Error(INVALID_PIPE_OUTPUT);
+    return this.store.pipeOutputSummary(parsed.data);
+  }
+
+  /**
+   * Stores items imported from one connector source, indexed for search, with the same redaction as typed text. A token in an
+   * imported title or text is replaced before anything is stored. Importing an item again replaces its stored copy, so a
+   * re-import does not duplicate. The source must be in the saved list, so its items can always be removed with it. Returns how
+   * many items were stored. A refused import stores nothing and names no item.
+   */
+  ingestConnectorItems(sourceKey: string, items: readonly ConnectorItem[]): number {
+    const parsed = ConnectorImportSchema.safeParse({ sourceKey, items });
+    if (!parsed.success) throw new Error(INVALID_CONNECTOR_IMPORT);
+    const key = parsed.data.sourceKey;
+    if (!this.config.connectors.some(source => source.id === key)) throw new Error(UNKNOWN_CONNECTOR_SOURCE);
+    // Two items with one id in the same import: the later one is the copy that is kept.
+    const records = new Map<string, CaptureRecord>();
+    for (const item of parsed.data.items) {
+      const id = connectorRecordId(key, item.sourceId);
+      const ts = Math.floor(item.ts);
+      const title = redactTypedText(item.title);
+      const text = redactTypedText(item.text);
+      const location = item.location === undefined ? undefined : redactTypedText(item.location);
+      records.set(id, {
+        collection: 'connectorText',
+        kind: 'connector',
+        id,
+        ts,
+        app: null,
+        text: text === '' ? title : `${title}\n${text}`,
+        body: location === undefined ? { ts, source: item.source, sourceKey: key } : { ts, source: item.source, sourceKey: key, location },
+      });
+    }
+    return this.store.storeConnectorItems([...records.values()]);
+  }
+
+  /** Deletes every item imported from one source, with its text and search index rows. Returns how many were deleted. */
+  removeConnectorItems(sourceKey: string): number {
+    const parsed = ConnectorSourceKeySchema.safeParse(sourceKey);
+    if (!parsed.success) throw new Error(INVALID_CONNECTOR_SOURCE);
+    return this.store.deleteConnectorSource(parsed.data);
+  }
+
+  /** How many imported connector items are stored, across every source. Holds no text. */
+  connectorCount(): number {
+    return this.store.connectorSummary().count;
+  }
+
+  /**
+   * Says which speaker a microphone or system segment came from, from its voice embedding: the enrolled speaker when the
+   * similarity reaches the match threshold, otherwise a session label such as 'Speaker 2'. Undefined when speaker
+   * identification is off, or the embedding is not usable. The embedding is compared here and then dropped. Only the name or
+   * the label is returned, and only the name or label is ever stored.
+   */
+  identifySpeaker(embedding: ArrayLike<number>): string | undefined {
+    if (!this.config.speakerIdentificationEnabled) return undefined;
+    const vector = unitVector(embedding, SPEAKER_EMBEDDING_DIM);
+    if (!vector) return undefined;
+    const match = bestProfile(vector, this.speakers);
+    return match ? match.name : this.sessionSpeakers.assign(vector);
+  }
+
+  /**
+   * Gives a session speaker a name. The voice becomes a profile, encrypted in the store, that later segments are matched
+   * against. The audio items already labelled with that session label are relabelled to the name. Refused while speaker
+   * identification is off, for a label or name that is not allowed, and for a speaker that is no longer in this session.
+   */
+  nameSessionSpeaker(label: string, name: string): void {
+    if (!this.config.speakerIdentificationEnabled) throw new Error('Speaker identification is off.');
+    const trimmed = name.trim();
+    if (!isSessionSpeakerLabel(label) || !isSpeakerName(trimmed)) throw new Error(INVALID_SPEAKER);
+    const centroid = this.sessionSpeakers.centroidOf(label);
+    if (!centroid) throw new Error('That speaker is not in this session any more.');
+    const id = newId();
+    this.store.append('speakers', { id, name: trimmed, centroid: Array.from(centroid), createdAt: this.now() });
+    this.speakers = [...this.speakers, { id, name: trimmed, centroid }];
+    this.sessionSpeakers.remove(label);
+    const items = this.sessionItems.get(label) ?? [];
+    this.sessionItems.delete(label);
+    this.store.relabelCaptureSpeaker(items, trimmed);
+  }
+
+  /**
+   * Deletes every speaker profile and forgets the session speakers, so no voice is matched or labelled from now on. The
+   * names already on past audio items are text, and they stay.
+   */
+  forgetSpeakers(): void {
+    this.store.replaceAll('speakers', []);
+    this.speakers = [];
+    this.sessionSpeakers.clear();
+    this.sessionItems.clear();
+  }
+
+  /** How many speaker profiles the person has named. The profiles and their voices are never returned. */
+  speakerProfileCount(): number {
+    return this.speakers.length;
+  }
+
+  private rememberSessionItem(label: string, id: string): void {
+    const items = this.sessionItems.get(label) ?? [];
+    items.push(id);
+    if (items.length > MAX_SESSION_ITEMS) items.splice(0, items.length - MAX_SESSION_ITEMS);
+    this.sessionItems.set(label, items);
+  }
+
+  /** Reads the stored profiles. A row that does not have the right shape, or a vector of the wrong length, is skipped. */
+  private loadSpeakers(): SpeakerProfile[] {
+    const profiles: SpeakerProfile[] = [];
+    for (const row of this.store.readAll<unknown>('speakers')) {
+      const parsed = StoredSpeakerSchema.safeParse(row);
+      if (!parsed.success) continue;
+      const centroid = unitVector(parsed.data.centroid, SPEAKER_EMBEDDING_DIM);
+      if (centroid) profiles.push({ id: parsed.data.id, name: parsed.data.name, centroid });
+    }
+    return profiles;
   }
 
   /**
@@ -384,23 +691,44 @@ export class TwinAgent {
   }
 
   /**
-   * How many screen and microphone items are stored, and the first and the last time one was captured. Holds no text, so the
-   * export can show it.
+   * How many screen, microphone and typed-text items are stored, and the first and the last time one was captured. Holds no
+   * text, so the export can show it.
    */
-  captureSummary(): { screenCount: number; audioCount: number; oldest: string | null; newest: string | null } {
+  captureSummary(): {
+    screenCount: number;
+    audioCount: number;
+    keystrokeCount: number;
+    oldest: string | null;
+    newest: string | null;
+  } {
     const counts = this.store.captureCounts();
+    const keystrokeCount = this.store.keystrokeCount();
     const times = [
       ...this.store.readAll<{ ts?: unknown }>('screenText'),
       ...this.store.readAll<{ ts?: unknown }>('audioText'),
+      ...this.store.readAll<{ ts?: unknown }>('keystrokeText'),
     ].flatMap(body => (typeof body.ts === 'number' ? [body.ts] : []));
-    if (times.length === 0) return { screenCount: counts.screen, audioCount: counts.audio, oldest: null, newest: null };
+    if (times.length === 0) {
+      return { screenCount: counts.screen, audioCount: counts.audio, keystrokeCount, oldest: null, newest: null };
+    }
     const first = times.reduce((min, ts) => Math.min(min, ts), Infinity);
     const last = times.reduce((max, ts) => Math.max(max, ts), -Infinity);
     return {
       screenCount: counts.screen,
       audioCount: counts.audio,
+      keystrokeCount,
       oldest: new Date(first).toISOString(),
       newest: new Date(last).toISOString(),
+    };
+  }
+
+  /** How many imported connector items are stored, and the first and last of their times. Holds no text, so the export can show it. */
+  private connectorCapture(): { count: number; oldest: string | null; newest: string | null } {
+    const { count, oldest, newest } = this.store.connectorSummary();
+    return {
+      count,
+      oldest: oldest === null ? null : new Date(oldest).toISOString(),
+      newest: newest === null ? null : new Date(newest).toISOString(),
     };
   }
 
@@ -851,8 +1179,8 @@ export class TwinAgent {
   }
 
   /**
-   * Drops events, handoff records, task decisions, dismissed signatures and captured text past the retention window. A
-   * signature goes once the events no longer hold the sites or unknown apps it names. Returns how many records were removed.
+   * Drops events, handoff records, task decisions, dismissed signatures, captured text and kept pipe runs past the retention window.
+   * A signature goes once the events no longer hold the sites or unknown apps it names. Returns how many records were removed.
    */
   prune(): number {
     return this.pruneWithMedia().removed;
@@ -869,6 +1197,8 @@ export class TwinAgent {
     const kept = all.filter(event => event.ts >= cutoff);
     if (kept.length !== all.length) this.store.replaceAll('events', kept);
     const capture = this.store.pruneCapture(cutoff);
+    // A kept pipe run is copied text, so each match in it goes once it is past the same window as the text it came from.
+    const pipeRuns = this.store.prunePipeOutputsBefore(cutoff);
     return {
       removed:
         all.length -
@@ -876,7 +1206,8 @@ export class TwinAgent {
         this.pruneHandoffs(cutoff) +
         this.pruneTaskDecisions(cutoff) +
         this.pruneSignatures(kept) +
-        capture.removed,
+        capture.removed +
+        pipeRuns,
       mediaIds: capture.mediaIds,
     };
   }
@@ -885,13 +1216,23 @@ export class TwinAgent {
    * Everything the twin holds about the person, for the person. Handoff rows from earlier versions are included as they
    * were stored, so the export does not lose them. Nothing else reads them. The export is plain text, so a name the
    * person typed, for a task or an automation, is replaced by a placeholder. A cleared task name holds no typed text.
-   * Captured screen and microphone text is not exported, only its counts and the first and last capture times.
+   * Captured screen, microphone and typed text is not exported, only its counts and the first and last capture times.
    */
   exportAll(): object {
     const renamed = this.renamedAutomationIds();
     return {
       exportedAt: new Date(this.now()).toISOString(),
-      config: this.configuration,
+      // A pipe's name and search are typed by the person, so the plain-text export replaces them, as it does automation names.
+      config: {
+        ...this.configuration,
+        pipes: this.config.pipes.map(pipe => ({ ...pipe, name: TYPED_NAME_NOT_EXPORTED, query: pipe.query === '' ? '' : TYPED_NAME_NOT_EXPORTED })),
+        // A source's label and path are chosen by the person, so the plain-text export replaces both, as it does automation names.
+        connectors: this.config.connectors.map(({ path, ...source }) => ({
+          ...source,
+          label: TYPED_NAME_NOT_EXPORTED,
+          ...(path === undefined ? {} : { path: TYPED_NAME_NOT_EXPORTED }),
+        })),
+      },
       events: this.store.readAll<TwinEvent>('events'),
       automations: this.readAutomations().map(automation =>
         renamed.has(automation.id) ? { ...automation, name: TYPED_NAME_NOT_EXPORTED } : automation,
@@ -903,12 +1244,19 @@ export class TwinAgent {
         decision.kind === 'rename' && decision.name !== '' ? { ...decision, name: TYPED_NAME_NOT_EXPORTED } : decision,
       ),
       screenCapture: this.captureSummary(),
+      // Imported items: how many, and the first and last of their times. Their text, titles and locations are not exported.
+      connectorCapture: this.connectorCapture(),
+      // How many voices were named. The names and the voice vectors are not exported.
+      speakers: { profiles: this.speakers.length },
     };
   }
 
   /** Removes all stored data. The caller must also destroy the data key to make recovery impossible. */
   wipe(): void {
     this.store.wipe();
+    this.speakers = [];
+    this.sessionSpeakers.clear();
+    this.sessionItems.clear();
   }
 
   /** Dismissed by id, or a near copy of a dismissed routine (see matchesDismissed). */

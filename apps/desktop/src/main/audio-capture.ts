@@ -1,7 +1,7 @@
-import { audioDecision, type AudioState } from '@companyos/twin-core';
+import { audioDecision, normaliseTranscript, type AudioState } from '@companyos/twin-core';
 import { BrowserWindow, ipcMain, systemPreferences, utilityProcess, type UtilityProcess } from 'electron';
 import { join } from 'node:path';
-import { APP_ORIGIN } from '../shared/ipc';
+import { captureUrl, type CaptureSource } from './capture-source';
 import type { TranscribeReply } from './transcribe-worker';
 
 /** How long after a crashed capture page the window is opened again. */
@@ -45,15 +45,34 @@ export interface Transcriber {
 
 /** Where kept text goes. The twin's agent satisfies this. */
 export interface AudioSink {
-  ingestAudio(segment: { ts: number; durationMs: number; text: string }): boolean;
+  ingestAudio(segment: { ts: number; durationMs: number; text: string; source?: CaptureSource; speaker?: string }): boolean;
+}
+
+/**
+ * Says who is speaking in one segment: an enrolled name, a session label such as 'Speaker 2', or undefined when it cannot say.
+ * It rejects on failure, and its message never holds speech or a voice. Only the answer is passed on, never the voice.
+ */
+export interface SpeakerIdentifier {
+  identify(samples: Float32Array): Promise<string | undefined>;
 }
 
 export interface AudioCaptureOptions {
   transcriber: Transcriber;
+  /** Which sound this service takes. Microphone when not given. */
+  source?: CaptureSource;
   sink: AudioSink;
   now?: () => number;
   /** Whether the operating system lets this app use the microphone now. Tests replace it. */
   microphoneGranted?: () => boolean;
+  /**
+   * Whether the permission this service's sound needs is granted now: the microphone, or screen recording for system
+   * sound. Used instead of microphoneGranted when given.
+   */
+  permissionGranted?: () => boolean;
+  /** Tells the speakers apart, when the person has turned that on. Left out, segments carry no speaker. */
+  speakers?: SpeakerIdentifier;
+  /** Whether speaker identification is on now. Left out, or false, no voice is compared, whatever `speakers` is. */
+  speakersEnabled?: () => boolean;
 }
 
 interface Segment {
@@ -95,9 +114,11 @@ export class AudioCaptureService {
   /** One segment at a time. A segment that arrives while another is being transcribed is dropped, not queued. */
   private busy = false;
   private readonly granted: () => boolean;
+  private readonly source: CaptureSource;
 
   constructor(private readonly options: AudioCaptureOptions) {
-    this.granted = options.microphoneGranted ?? (() => microphoneGranted());
+    this.granted = options.permissionGranted ?? options.microphoneGranted ?? (() => microphoneGranted());
+    this.source = options.source ?? 'microphone';
   }
 
   /** Starts listening for segments. Nothing opens until the setting is on and the policy allows capture. */
@@ -188,7 +209,7 @@ export class AudioCaptureService {
         this.windowReady = false;
       }
     });
-    void window.loadURL(`${APP_ORIGIN}/capture.html`);
+    void window.loadURL(captureUrl(this.source));
     return window;
   }
 
@@ -222,10 +243,31 @@ export class AudioCaptureService {
     }
     // Checked again, because the person may have paused or locked the screen while the segment was being transcribed.
     if (!audioDecision(this.state()).capture) return;
+    // A segment the store will discard, such as one that is only a tag like [BLANK_AUDIO], opens no speaker.
+    if (normaliseTranscript(text) === '') return;
+    // The voice is compared only for a segment that will be kept. A failed check keeps the text, without a speaker.
+    const speaker = await this.identify(segment.samples);
+    if (!audioDecision(this.state()).capture) return;
     try {
-      this.options.sink.ingestAudio({ ts, durationMs: segment.durationMs, text });
+      this.options.sink.ingestAudio({
+        ts,
+        durationMs: segment.durationMs,
+        text,
+        source: this.source,
+        ...(speaker === undefined ? {} : { speaker }),
+      });
     } catch {
       // The store refused the segment. Its reason is not shown, because it can echo the text.
+    }
+  }
+
+  private async identify(samples: Float32Array): Promise<string | undefined> {
+    const speakers = this.options.speakers;
+    if (!speakers || this.options.speakersEnabled?.() !== true) return undefined;
+    try {
+      return await speakers.identify(samples);
+    } catch {
+      return undefined;
     }
   }
 }

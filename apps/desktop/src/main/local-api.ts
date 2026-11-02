@@ -49,6 +49,17 @@ export interface LocalApi {
   stop(): Promise<void>;
 }
 
+/** Kinds the API never serves: typed text, and imported connector text (mail, calendar, git, folder text). */
+const WITHHELD_KINDS: ReadonlySet<CaptureKind> = new Set<CaptureKind>(['keystroke', 'connector']);
+
+/**
+ * The hits the API may serve: screen and microphone text only. Typed text and imported connector text are kept to the Recall
+ * page, so those hits are left out here, whatever the request asked for. The API applies this to every search reply too.
+ */
+export function withheldFromLocalApi<Hit extends { kind: CaptureKind }>(hits: readonly Hit[]): Hit[] {
+  return hits.filter(hit => !WITHHELD_KINDS.has(hit.kind));
+}
+
 export function createLocalApi(options: LocalApiOptions): LocalApi {
   let server: Server | undefined;
 
@@ -145,7 +156,7 @@ function searchReply(options: LocalApiOptions, params: URLSearchParams, response
   const request = searchRequest(params);
   if (!request) return json(response, 400, { error: 'The search is not valid.' });
   try {
-    return json(response, 200, { hits: options.search(request) });
+    return json(response, 200, { hits: withheldFromLocalApi(options.search(request)) });
   } catch {
     // The engine's own message can quote the query, so it is not sent on.
     return json(response, 400, { error: 'The search could not run with these settings.' });

@@ -29,7 +29,8 @@ your approval, and it runs on its own only after it has earned that. Your activi
 ## Why it is different
 
 - **It records little.** The app name in front, the window type and, if you turn browser capture on, the host and path
-  shape of the active tab. Activity capture never reads window titles, page text, typed text, the clipboard or keystrokes.
+  shape of the active tab. Activity capture never reads window titles, page text, the clipboard or the keys you press.
+  Typed text is kept only if you turn on "Record typed text", which is off by default.
   Recall, which is off by default, keeps text read from the screen and the microphone only if you turn it on. Screen
   text is read from the whole screen, so a visible browser or excluded-app window can be read too, and its text is stored
   under the app in front.

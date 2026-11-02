@@ -26,7 +26,11 @@ beforeAll(async () => {
   run = await runPlantedScenario();
 }, 60_000);
 
-/** Fails with every leak found on the surfaces that match. A surface that matches nothing fails too, so a pass is never empty. */
+/**
+ * Fails with every leak found on the surfaces that match. It fails too when no surface matches the selector, so a misspelt
+ * name cannot pass. It does not check that a matched surface holds any content: an empty surface passes it. The checks that
+ * need content have a positive control beside them, which asserts that the canary is really present on the surface.
+ */
 function expectNoLeaks(surfaces: readonly Surface[], select: (name: string) => boolean): void {
   const selected = surfaces.filter(surface => select(surface.name));
   expect(selected.length, 'no surface matched, so nothing was checked').toBeGreaterThan(0);
@@ -39,8 +43,9 @@ describe('the planted inputs reach the pipeline and take the designed path', () 
     expect(run.outcomes).toEqual(Object.fromEntries(planted.map(input => [input.label, input.outcome])));
   });
 
-  it('stores one screen item with its sealed image, no microphone item, and no hit for the query', () => {
-    expect(run.facts.captures).toEqual({ screenCount: 1, audioCount: 0, mediaFiles: 1, screenHits: 1, queryHits: 0 });
+  // The one audio item is the system sound segment, kept with its switch on. The microphone segment is paused, so it is dropped.
+  it('stores one screen item with its sealed image, one system audio item, and no hit for the query', () => {
+    expect(run.facts.captures).toEqual({ screenCount: 1, audioCount: 1, mediaFiles: 1, screenHits: 1, queryHits: 0 });
   });
 
   it('keeps only the template of a URL that carries a query and a fragment', () => {
@@ -124,15 +129,35 @@ describe('no canary appears on any output surface', () => {
   });
 });
 
-describe('stored screen text is held by design, and only in the encrypted store', () => {
+/** The text of one decrypted store surface, or an empty string when the surface is missing. */
+function decryptedText(name: string): string {
+  return run.surfaces.find(surface => surface.name === name)?.text ?? '';
+}
+
+describe('stored text is held by design, and only in the encrypted store', () => {
   it('the decrypted capture index holds the stored frame text, so the exception is not an empty pass', () => {
-    const text = run.surfaces.find(surface => surface.name === 'store:decrypted:capture')?.text ?? '';
-    expect(text).toContain(CANARIES.screenOcr);
+    expect(decryptedText('store:decrypted:capture')).toContain(CANARIES.screenOcr);
+  });
+
+  it('the decrypted capture index holds the stored system sound text, so its exception is not an empty pass', () => {
+    expect(decryptedText('store:decrypted:capture')).toContain(CANARIES.systemAudioTranscript);
   });
 
   it('the decrypted records hold no screen text, since the text lives only in the index', () => {
-    const records = run.surfaces.find(surface => surface.name === 'store:decrypted:screenText')?.text ?? '';
+    const records = decryptedText('store:decrypted:screenText');
+    // The records do hold the time, the image id and the window class. These are read first, so the absence below is not
+    // an empty record.
+    expect(records).toContain('"windowClass"');
+    expect(records).toContain('"mediaId"');
     expect(records).not.toContain(CANARIES.screenOcr);
+  });
+
+  it('the decrypted pipe outputs hold the planted match, so the exception is not an empty pass', () => {
+    expect(decryptedText('store:decrypted:pipeOutputs')).toContain(CANARIES.pipeOutput);
+  });
+
+  it('the decrypted speaker profiles hold the planted voiceprint, so the exception is not an empty pass', () => {
+    expect(decryptedText('store:decrypted:speakers')).toContain(CANARIES.voiceprint);
   });
 });
 
@@ -195,31 +220,69 @@ describe('screen and microphone text are off until the person turns them on', ()
   });
 });
 
-describe('the local API is the one documented place where stored screen text leaves the store', () => {
-  it('returns the text only with the token, and the health check carries no data', async () => {
+describe('the local API is the one documented place where stored screen and microphone text leave the store', () => {
+  it('serves screen and microphone text only with the token, never typed or connector text, and the health check carries no data', async () => {
     const root = mkdtempSync(join(tmpdir(), 'twin-privacy-api-'));
-    const agent = new TwinAgent({ dataDir: join(root, 'twin'), dataKey: randomBytes(32), now: () => at(10, 0) });
+    const storeDir = join(root, 'twin');
+    const agent = new TwinAgent({ dataDir: storeDir, dataKey: randomBytes(32), now: () => at(10, 0) });
     const token = randomBytes(24).toString('base64url');
+    const source = 'folder-source-api';
+    // The engine's raw search is wired in, so the server's own filter is what keeps typed and connector text out of a reply.
     const api = createLocalApi({
       host: '127.0.0.1',
       port: 0,
       token: () => token,
       search: request => agent.searchCapture(request),
       frameImage: async () => null,
-      status: () => ({ screenState: 'on', audioState: 'off', screenCount: 1, audioCount: 0, mediaBytes: 0 }),
+      status: () => ({ screenState: 'on', audioState: 'on', screenCount: 1, audioCount: 1, mediaBytes: 0 }),
     });
     try {
-      agent.updateConfig({ screenCaptureEnabled: true });
+      agent.updateConfig({
+        screenCaptureEnabled: true,
+        audioCaptureEnabled: true,
+        keystrokeCaptureEnabled: true,
+        connectors: [{ id: source, kind: 'folder', label: 'Notes folder', path: '/notes', createdAt: at(-1, 0) }],
+      });
       agent.ingestScreen({ ts: at(0, 12), app: 'Microsoft Excel', windowClass: 'spreadsheet', text: `Invoice ${CANARIES.screenOcr}`, mediaId: null });
-      const base = `http://127.0.0.1:${await api.start()}`;
-      const query = `/v1/search?q=Invoice&from=${at(-1, 0)}&to=${at(1, 0)}`;
+      agent.ingestAudio({ ts: at(0, 12, 10), durationMs: 30_000, text: `Meeting notes ${CANARIES.audioTranscript}` });
+      agent.ingestKeystrokes({ ts: at(0, 12, 20), app: 'Notes', windowClass: 'document', text: `${CANARIES.typedText} draft` });
+      agent.ingestConnectorItems(source, [
+        { source: 'folder', sourceId: 'note-1', ts: at(0, 12, 30), title: 'Quarterly plan', text: `Plan ${CANARIES.connectorText}.` },
+      ]);
+      // The engine holds all four kinds in the range. So the reply below is short of the typed and connector text only because
+      // the server filters it, not because the engine lacks it.
+      const range = `from=${at(-1, 0)}&to=${at(1, 0)}`;
+      expect(agent.searchCapture({ text: '', from: at(-1, 0), to: at(1, 0) }).map(hit => hit.kind).sort()).toEqual([
+        'audio',
+        'connector',
+        'keystroke',
+        'screen',
+      ]);
 
-      const withToken = await fetch(`${base}${query}`, { headers: { Authorization: `Bearer ${token}` } });
-      const body = await withToken.text();
-      expect(withToken.status).toBe(200);
-      // The documented exception: the search reply carries the stored frame's text, and no other canary.
+      const base = `http://127.0.0.1:${await api.start()}`;
+      const authorised = { headers: { Authorization: `Bearer ${token}` } };
+      const query = `/v1/search?q=Invoice&${range}`;
+
+      // A search for the screen text returns its frame. The reply carries that canary and no other.
+      const screen = await fetch(`${base}${query}`, authorised);
+      const screenBody = await screen.text();
+      expect(screen.status).toBe(200);
+      expect(screenBody).toContain(CANARIES.screenOcr);
+      expect(findLeaks([{ name: 'local-api:screen', text: screenBody }]).map(leak => leak.canary)).toEqual(['screenOcr']);
+
+      // An empty search lists every item in range. The reply carries the screen and microphone text, and no typed text, no
+      // connector text and no other canary.
+      const listed = await fetch(`${base}/v1/search?q=&${range}`, authorised);
+      const body = await listed.text();
+      expect(listed.status).toBe(200);
       expect(body).toContain(CANARIES.screenOcr);
-      expect(findLeaks([{ name: 'local-api', text: body }]).map(leak => leak.canary)).toEqual(['screenOcr']);
+      expect(body).toContain(CANARIES.audioTranscript);
+      expect(body).not.toContain(CANARIES.typedText);
+      expect(body).not.toContain(CANARIES.connectorText);
+      expect(findLeaks([{ name: 'local-api:all', text: body }]).map(leak => leak.canary).sort()).toEqual([
+        'audioTranscript',
+        'screenOcr',
+      ]);
 
       const withoutToken = await fetch(`${base}${query}`);
       const wrongToken = await fetch(`${base}${query}`, { headers: { Authorization: 'Bearer not-the-token' } });

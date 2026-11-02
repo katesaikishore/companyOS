@@ -3,6 +3,7 @@ import {
   HUGGING_FACE_HOSTS,
   LocalModelClient,
   RoutineNamingJob,
+  SPEAKER_BUNDLE,
   WHISPER_BUNDLE,
   bundleDirectory,
   bundleSizesMatch,
@@ -29,7 +30,7 @@ import { join } from 'node:path';
  * Multi-file bundles this manager installs, such as the speech model. They use the same queue, progress and cancel as the
  * single-file catalog, and each file is checked against its pin before it is kept.
  */
-const BUNDLES: readonly BundleSpec[] = [WHISPER_BUNDLE];
+const BUNDLES: readonly BundleSpec[] = [WHISPER_BUNDLE, SPEAKER_BUNDLE];
 
 function findBundle(id: string): BundleSpec | undefined {
   return BUNDLES.find(bundle => bundle.id === id);

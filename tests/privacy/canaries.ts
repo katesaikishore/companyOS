@@ -1,8 +1,11 @@
+import { plantedVoice } from './voice';
+
 /**
  * Planted canaries for the privacy leak suite (plan 9.2). Each canary is planted on one ingest surface, and none
  * may appear on any output surface. They are upper case with underscores and digits, so the URL template never
  * keeps one as a "plain word", and they never collide with real data. The one exception is encodedForms, which
- * carries punctuation on purpose: its raw, base64, base64url, hex and percent forms all differ.
+ * carries punctuation on purpose: its raw, base64, base64url, hex and percent forms all differ. connectorText has
+ * spaces instead of underscores, because the key-like redaction would replace a long underscore run before storing it.
  */
 export const CANARIES = {
   windowTitle: 'CANARY_WINDOW_TITLE_7F3A91',
@@ -29,19 +32,43 @@ export const CANARIES = {
   screenOcrLocked: 'CANARY_SCREEN_LOCKED_E61C03',
   screenOcrBrowser: 'CANARY_SCREEN_BROWSER_19D8F4',
   audioTranscript: 'CANARY_AUDIO_TRANSCRIPT_5E27B9',
+  // System sound (the speaker output). A segment is dropped while the system sound switch is off, so its canary must never
+  // reach a surface. With the switch on, the text is kept in the encrypted index, and only there.
+  systemAudioOff: 'CANARY_SYSTEM_AUDIO_OFF_4A7D3C',
+  systemAudioTranscript: 'CANARY_SYSTEM_AUDIO_TRANSCRIPT_B0E9F2',
+  // Imported connector text. It is stored in the encrypted index, and the local API never serves it.
+  connectorText: 'CANARY CONNECTOR TEXT 6D2F81',
+  // One match of a write pipe's kept run. The run is stored encrypted in the pipe-output collection, and nowhere else.
+  pipeOutput: 'CANARY_PIPE_OUTPUT_9E4B21',
+  // The voiceprint of a named speaker: the voice vector's value at index 7. Its centroid is stored encrypted, in the speakers collection.
+  voiceprint: String(plantedVoice()[7]),
   searchQuery: 'CANARY_SEARCH_QUERY_E1F4A8',
+  // Typed text (keystroke-service.ts). Each refused piece plants its own canary, so a leak from it is named. The stored piece
+  // is kept only in the encrypted index, once it is redacted: its card-like number and key-like token are planted too, and
+  // must never reach any surface. Letters only, so the redaction rules leave the canary itself alone.
+  keystrokeSecure: 'CANARY_KEYSTROKE_SECURE_QWZX',
+  keystrokeUnknown: 'CANARY_KEYSTROKE_UNKNOWN_VBNM',
+  keystrokeLocked: 'CANARY_KEYSTROKE_LOCKED_RTYU',
+  keystrokeStored: 'CANARY_KEYSTROKE_STORED_PLMK',
+  // A card number and a key-like token typed into an allowed app. The redaction must remove both before anything is stored.
+  keystrokeCard: '4111 1111 1111 1111',
+  keystrokeKey: 'AKIAIOSFODNN7EXAMPLE',
   encodedForms: 'CANARY_FORMS_?>?/B2F90',
 } as const;
 
 export type CanaryName = keyof typeof CANARIES;
 
 /**
- * Canaries a surface holds on purpose. Screen text is stored encrypted, and the owner's data key opens it, so the decrypted
- * capture index holds the stored frame's text. Only that surface and that canary are excepted. The privacy test checks that
- * the copy really is there, so the exception cannot pass on an empty store.
+ * Canaries a decrypted surface holds on purpose. Text is stored encrypted, and the owner's data key opens it, so the decrypted
+ * capture index holds the stored text of screen, system sound and typed text, a pipe's kept matches are held in their own
+ * collection, and a named voice's centroid is held in the speakers collection. Only that surface and that canary are excepted.
+ * Every other surface, including disk, console, export and notices, is checked strictly. Each excepted pair has a positive
+ * control in the suite that asserts the copy really is there, so the exception cannot pass on an empty store.
  */
 export const HELD_BY_DESIGN: Readonly<Record<string, readonly CanaryName[]>> = {
-  'store:decrypted:capture': ['screenOcr'],
+  'store:decrypted:capture': ['screenOcr', 'keystrokeStored', 'systemAudioTranscript'],
+  'store:decrypted:pipeOutputs': ['pipeOutput'],
+  'store:decrypted:speakers': ['voiceprint'],
 };
 
 export type Encoding = 'raw' | 'base64' | 'base64url' | 'hex' | 'percent';
@@ -92,9 +119,15 @@ export interface Leak {
   encoding: Encoding;
 }
 
-/** Every canary that appears on every surface, in any of its encodings. */
+/**
+ * Every canary that appears on every surface, in any of its encodings. A blank canary would match every surface, so it is refused
+ * here rather than reported as a leak on each surface.
+ */
 export function findLeaks(surfaces: readonly Surface[], canaries: Readonly<Record<string, string>> = CANARIES): Leak[] {
   const leaks: Leak[] = [];
+  for (const [name, canary] of Object.entries(canaries)) {
+    if (canary === '') throw new Error(`The canary ${name} is blank, so it would match every surface.`);
+  }
   for (const surface of surfaces) {
     const haystack = surface.text.toLowerCase();
     for (const [name, canary] of Object.entries(canaries)) {

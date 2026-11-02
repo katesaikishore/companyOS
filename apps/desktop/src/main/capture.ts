@@ -8,6 +8,8 @@ export interface CaptureDeps {
   platform: Platform | undefined;
   /** Called for each focus change the agent kept (not dropped by redaction). */
   onFocus?: (app: string) => void;
+  /** Called with the app in front on each poll, before any check. Typed text ends its piece on a change of app. */
+  onFrontApp?: (app: string | undefined) => void;
   /** Seconds since the last keyboard or mouse input, from the OS. */
   idleSeconds: () => number;
   /** Whether the browser bridge is running. While it is, a Chrome or Edge change waits for the bridge's visit. */
@@ -129,6 +131,7 @@ export class CaptureService {
       this.detail = 'Could not read the active app. Retrying.';
       return;
     }
+    this.deps.onFrontApp?.(app || undefined);
     // The poll can take a second, so the state may have changed while it ran. Check again before storing.
     if (this.paused || this.knownLocked() || this.idle) return;
     if (!app || isOwnApp(app)) return;

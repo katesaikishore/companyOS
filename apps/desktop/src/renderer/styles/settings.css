@@ -304,3 +304,16 @@
 .settings-view .settings-theme-swatch.is-system {
   background: linear-gradient(135deg, var(--rail-ink) 50%, var(--rail-bg) 50%);
 }
+
+/* The four add buttons of the Connectors section wrap onto as many lines as the card needs, at any width. */
+.settings-view .settings-connector-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.settings-view .settings-connector-add > .muted {
+  flex-basis: 100%;
+  margin: 0;
+}

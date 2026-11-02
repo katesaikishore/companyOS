@@ -52,6 +52,7 @@ const CANARY_SERVICE = {
   allowed: 'CANARY_SERVICE_ALLOWED_B95C3D',
   behindBrowser: 'CANARY_SERVICE_BEHIND_0F6E82',
   probeError: 'CANARY_SERVICE_PROBE_6E0B1A',
+  otherApp: 'CANARY_SERVICE_OTHER_APP_5C1E8B',
   stopWait: 'CANARY_SERVICE_STOP_A39C52',
 } as const;
 
@@ -120,10 +121,14 @@ interface Fixture {
   failSecureProbe(): void;
   /** Holds OCR until the returned release is called. The read in progress is the one held. */
   holdOcr(): () => void;
+  /** Sets what the accessibility reader does on each read. It is called while the frame is being read. */
+  setAccessibility(reader: () => Promise<string>): void;
+  /** Sets the app the front-app check reports. Undefined means the frame's own app is in front, as on a normal screen. */
+  setFrontApp(app: string | null | undefined): void;
   /** Holds every image write until the returned release is called. */
   holdWrites(): () => void;
   /** Shows the service one frame with the given text, and waits for the frame to be taken or dropped, not for its read. */
-  shot(text: string): Promise<void>;
+  shot(text: string, display?: string): Promise<void>;
   /** Resolves once no read is in flight. The service keeps its drain private, so the wait reads it here. */
   idle(): Promise<void>;
   /** Every output the suite inspects, after the run. */
@@ -156,6 +161,8 @@ function open(): Fixture {
   let context: ScreenContext = { ...OPEN };
   let secure: boolean | 'unknown' = false;
   let secureFails = false;
+  let accessibility: () => Promise<string> = async () => '';
+  let frontApp: string | null | undefined;
   let writeGate: Promise<void> | undefined;
   let writeStarts = 0;
   let frames = 0;
@@ -178,6 +185,9 @@ function open(): Fixture {
       if (secureFails) throw new Error('The probe failed.');
       return secure;
     },
+    accessibility: () => accessibility(),
+    // The app in front is the frame's own app unless a test moves focus, so the accessibility text of a normal screen is kept.
+    frontApp: async () => (frontApp === undefined ? context.app : frontApp),
   });
   service.setContext(context);
   service.start(60_000);
@@ -200,6 +210,12 @@ function open(): Fixture {
     failSecureProbe() {
       secureFails = true;
     },
+    setAccessibility(reader) {
+      accessibility = reader;
+    },
+    setFrontApp(app) {
+      frontApp = app;
+    },
     holdOcr() {
       let release: () => void = () => undefined;
       ocr.gate = new Promise<void>(resolve => {
@@ -220,11 +236,11 @@ function open(): Fixture {
         release();
       };
     },
-    async shot(text) {
+    async shot(text, display) {
       frames += 1;
       const label = `frame ${frames}`;
       ocr.reads.set(label, text);
-      source.next = frameOf(label, frames * 20, text);
+      source.next = { ...frameOf(label, frames * 20, text), display };
       await service.requestFrame('interval');
     },
     async idle() {
@@ -384,6 +400,60 @@ describe('ScreenCaptureService, against planted canaries', () => {
     expect(fx.agent.captureSummary().screenCount).toBe(0);
     expect(fx.mediaFiles()).toBe(0);
     expect(findLeaks(fx.surfaces(), { probeError: CANARY_SERVICE.probeError })).toEqual([]);
+  });
+
+  it('stores the accessibility text together with the OCR text of the same frame', async () => {
+    fx.setAccessibility(async () => 'Quarterly figures from the accessibility tree');
+    await fx.shot('Visible ocr words');
+    await fx.idle();
+    const stored = fx.surfaces().find(surface => surface.name === 'store:decrypted:capture')?.text ?? '';
+    expect(stored).toContain('Quarterly figures from the accessibility tree');
+    expect(stored).toContain('Visible ocr words');
+  });
+
+  it('stores nothing when a password field takes focus while the accessibility text is read', async () => {
+    fx.setAccessibility(async () => {
+      fx.setSecure(true);
+      return `Accessible text ${CANARY_SERVICE.probeError}`;
+    });
+    await fx.shot('Visible ocr words');
+    await fx.idle();
+    expect(fx.agent.captureSummary().screenCount).toBe(0);
+    expect(fx.writeStarts).toBe(0);
+    expect(findLeaks(fx.surfaces(), { probeError: CANARY_SERVICE.probeError })).toEqual([]);
+  });
+
+  it('does not file accessibility text under another app when a different app is in front', async () => {
+    fx.setFrontApp('Slack');
+    fx.setAccessibility(async () => `Chat text ${CANARY_SERVICE.otherApp}`);
+    await fx.shot('Visible ocr words');
+    await fx.idle();
+    // The frame is labelled with its own app, so the accessibility text of another app is left out. The OCR text is kept.
+    expect(fx.agent.captureSummary().screenCount).toBe(1);
+    const stored = fx.surfaces().find(surface => surface.name === 'store:decrypted:capture')?.text ?? '';
+    expect(stored).toContain('Visible ocr words');
+    expect(findLeaks(fx.surfaces(), { otherApp: CANARY_SERVICE.otherApp })).toEqual([]);
+  });
+
+  it('reads each display, and does not treat one display\'s frame as a repeat of another\'s', async () => {
+    // The same pixels on two displays. A shared duplicate check would drop the second display's frame.
+    const same = 40;
+    fx.ocr.reads.set('left frame', 'Left display text');
+    fx.ocr.reads.set('right frame', 'Right display text');
+    fx.source.next = { ...frameOf('left frame', same, 'Left display text'), display: 'left' };
+    await fx.service.requestFrame('interval');
+    fx.source.next = { ...frameOf('right frame', same, 'Right display text'), display: 'right' };
+    await fx.service.requestFrame('interval');
+    await fx.idle();
+    expect(fx.ocr.calls).toEqual(['left frame', 'right frame']);
+    expect(fx.agent.captureSummary().screenCount).toBe(2);
+
+    // A repeat on the same display is still skipped, so the screen is not read again for nothing.
+    fx.ocr.reads.set('left again', 'Left display text');
+    fx.source.next = { ...frameOf('left again', same, 'Left display text'), display: 'left' };
+    await fx.service.requestFrame('interval');
+    await fx.idle();
+    expect(fx.ocr.calls).toHaveLength(2);
   });
 
   it('stop waits for a read that is still running to end', async () => {

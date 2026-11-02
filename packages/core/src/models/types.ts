@@ -82,7 +82,11 @@ export interface DownloadState {
 /** A network call the twin made. Recorded so the person can see exactly what left the device. */
 export interface NetworkEntry {
   ts: number;
-  purpose: 'model_download' | 'update_check';
+  /**
+   * 'connector' is a read from a cloud account the person connected (read-only). The entry holds the host and the path without
+   * its query, the status and the byte count. Never a token.
+   */
+  purpose: 'model_download' | 'update_check' | 'connector';
   /** Model downloads only. */
   modelId?: string;
   host: string;

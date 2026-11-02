@@ -33,6 +33,8 @@ const CHANNEL = {
   searchCapture: 'twin:search-capture',
   frameImage: 'twin:frame-image',
   deleteCapture: 'twin:delete-capture',
+  nameSpeaker: 'twin:name-speaker',
+  forgetSpeakers: 'twin:forget-speakers',
   copyApiToken: 'twin:copy-api-token',
   rotateApiToken: 'twin:rotate-api-token',
   requestPermission: 'twin:request-permission',
@@ -40,6 +42,11 @@ const CHANNEL = {
   exportData: 'twin:export-data',
   deleteAll: 'twin:delete-all',
   openMainWindow: 'twin:open-main-window',
+  addConnector: 'twin:add-connector',
+  removeConnector: 'twin:remove-connector',
+  importConnector: 'twin:import-connector',
+  connectCloud: 'twin:connect-cloud',
+  disconnectCloud: 'twin:disconnect-cloud',
   navigate: 'twin:navigate',
 } as const;
 
@@ -72,6 +79,8 @@ const bridge: TwinBridge = {
   searchCapture: request => ipcRenderer.invoke(CHANNEL.searchCapture, request),
   frameImage: id => ipcRenderer.invoke(CHANNEL.frameImage, id),
   deleteCapture: () => ipcRenderer.invoke(CHANNEL.deleteCapture),
+  nameSpeaker: (label, name) => ipcRenderer.invoke(CHANNEL.nameSpeaker, label, name),
+  forgetSpeakers: () => ipcRenderer.invoke(CHANNEL.forgetSpeakers),
   copyApiToken: () => ipcRenderer.invoke(CHANNEL.copyApiToken),
   rotateApiToken: () => ipcRenderer.invoke(CHANNEL.rotateApiToken),
   requestPermission: permission => ipcRenderer.invoke(CHANNEL.requestPermission, permission),
@@ -79,6 +88,11 @@ const bridge: TwinBridge = {
   exportData: () => ipcRenderer.invoke(CHANNEL.exportData),
   deleteAll: () => ipcRenderer.invoke(CHANNEL.deleteAll),
   openMainWindow: route => ipcRenderer.invoke(CHANNEL.openMainWindow, route),
+  addConnector: kind => ipcRenderer.invoke(CHANNEL.addConnector, kind),
+  removeConnector: id => ipcRenderer.invoke(CHANNEL.removeConnector, id),
+  importConnector: id => ipcRenderer.invoke(CHANNEL.importConnector, id),
+  connectCloud: provider => ipcRenderer.invoke(CHANNEL.connectCloud, provider),
+  disconnectCloud: provider => ipcRenderer.invoke(CHANNEL.disconnectCloud, provider),
   onNavigate: listener => {
     const handler = (_event: unknown, route: unknown) => {
       if (typeof route === 'string' && route.length <= 200) listener(route);

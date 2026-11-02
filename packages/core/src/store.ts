@@ -8,8 +8,12 @@ import type { CaptureKind } from './types';
  * 'handoffs' is no longer written, since the OpenMausBot integration was removed. Its rows from earlier versions are
  * pruned once they are past the retention window, and the data export carries the rest as stored. Nothing else reads them.
  * 'renamedAutomations' holds the ids of automations the person renamed. Their names are typed, so the export replaces them.
- * 'screenText' and 'audioText' hold captured text. They are written only through appendCapture, which indexes the text
+ * 'screenText', 'audioText' and 'keystrokeText' hold captured text. They are written only through appendCapture, which indexes the text
  * for search in the same transaction, so the index cannot fall out of step with the records.
+ * 'connectorText' holds imported items. They are written only through storeConnectorItems, and removed by deleteConnectorSource
+ * or by a wipe of the whole store. deleteAllCapture and pruneCapture leave them alone.
+ * 'pipeOutputs' holds the newest run of each write pipe's matches, one record per pipe. It is written only through replacePipeOutput,
+ * and removed by the pipe-output methods, by deleteAllCapture or by a wipe. Its text is not indexed for search.
  */
 export const COLLECTIONS = [
   'events',
@@ -20,16 +24,36 @@ export const COLLECTIONS = [
   'handoffs',
   'taskDecisions',
   'renamedAutomations',
+  // Voice profiles for speaker identification: a name and a centroid vector, encrypted with the rest. See speaker/match.ts.
+  'speakers',
   'screenText',
   'audioText',
+  'keystrokeText',
+  'connectorText',
+  'pipeOutputs',
 ] as const;
 export type Collection = (typeof COLLECTIONS)[number];
 
-/** The collections that hold captured text. Their rows are changed only by appendCapture, pruneCapture and deleteAllCapture. */
-export const CAPTURE_COLLECTIONS = ['screenText', 'audioText'] as const;
+/** The newest run of one write pipe's matches. Each item is one match: its time, app, kind and one-line text. */
+export interface PipeOutputRecord {
+  pipeId: string;
+  ranAt: number;
+  items: Array<{ ts: number; app: string | null; kind: CaptureKind; text: string }>;
+}
+
+/**
+ * The collections that hold captured text. Their rows are changed only by appendCapture, storeConnectorItems, pruneCapture,
+ * deleteAllCapture and deleteConnectorSource.
+ */
+export const CAPTURE_COLLECTIONS = ['screenText', 'audioText', 'keystrokeText', 'connectorText'] as const;
 export type CaptureCollection = (typeof CAPTURE_COLLECTIONS)[number];
 
-const CAPTURE_COLLECTION_OF: Readonly<Record<CaptureKind, CaptureCollection>> = { screen: 'screenText', audio: 'audioText' };
+const CAPTURE_COLLECTION_OF: Readonly<Record<CaptureKind, CaptureCollection>> = {
+  screen: 'screenText',
+  audio: 'audioText',
+  keystroke: 'keystrokeText',
+  connector: 'connectorText',
+};
 
 /** The most hits one search returns. A larger limit is cut down to this. */
 export const MAX_CAPTURE_HITS = 500;
@@ -65,6 +89,8 @@ export interface CaptureQuery {
   from: number;
   to: number;
   app?: string;
+  /** Only audio items labelled with this speaker name or session label. */
+  speaker?: string;
   /** At most this many hits, newest first. Capped at MAX_CAPTURE_HITS. */
   limit: number;
 }
@@ -76,6 +102,8 @@ export interface CaptureHit {
   app: string | null;
   /** A short piece of the stored text: around the first match when there is one, otherwise from the start. */
   snippet: string;
+  /** The speaker label of an audio item, when it has one. Null for every other item. */
+  speaker?: string | null;
 }
 
 const DATABASE_FILE = 'twin.db';
@@ -132,7 +160,7 @@ export class EncryptedStore {
   }
 
   append(collection: Collection, record: unknown): void {
-    if (isCaptureCollection(collection)) throw captureWriteError();
+    if (isCaptureCollection(collection) || collection === 'pipeOutputs') throw restrictedWriteError(collection);
     this.guard(() => {
       const insert = this.conn().prepare('INSERT INTO records (collection, body) VALUES (?, ?)');
       insert.run(collection, JSON.stringify(record));
@@ -150,7 +178,7 @@ export class EncryptedStore {
 
   /** Atomically replaces a whole collection. Used for small collections such as settings. */
   replaceAll(collection: Collection, records: readonly unknown[]): void {
-    if (isCaptureCollection(collection)) throw captureWriteError();
+    if (isCaptureCollection(collection) || collection === 'pipeOutputs') throw restrictedWriteError(collection);
     this.guard(() => {
       const db = this.conn();
       const insert = db.prepare('INSERT INTO records (collection, body) VALUES (?, ?)');
@@ -207,6 +235,10 @@ export class EncryptedStore {
       where.push('app = ?');
       values.push(query.app);
     }
+    if (query.speaker !== undefined) {
+      where.push(`(SELECT json_extract(r.body, '$.speaker') FROM records r WHERE r.id = capture_fts.rowid) = ?`);
+      values.push(query.speaker);
+    }
     let snippet = `substr(text, 1, ${CAPTURE_SCAN_CHARS})`;
     if (terms.length > 0) {
       where.unshift('capture_fts MATCH ?');
@@ -218,11 +250,31 @@ export class EncryptedStore {
       if (!this.hasCaptureIndex()) return [];
       return this.conn()
         .prepare(
-          `SELECT kind, recordId AS id, ts, app, ${snippet} AS snippet
+          `SELECT kind, recordId AS id, ts, app, ${snippet} AS snippet,
+             (SELECT json_extract(r.body, '$.speaker') FROM records r WHERE r.id = capture_fts.rowid) AS speaker
            FROM capture_fts WHERE ${where.join(' AND ')}
            ORDER BY ts DESC, rowid DESC LIMIT ?`,
         )
         .all(...values, limit) as CaptureHit[];
+    });
+  }
+
+  /**
+   * Sets the speaker of audio items, by their item ids, in one statement. Only the speaker field changes: the text, its index
+   * and every other item are left alone. Returns how many items changed.
+   */
+  relabelCaptureSpeaker(itemIds: readonly string[], speaker: string): number {
+    if (itemIds.length === 0) return 0;
+    const marks = itemIds.map(() => '?').join(', ');
+    return this.guard(() => {
+      if (!this.hasCaptureIndex()) return 0;
+      const result = this.conn()
+        .prepare(
+          `UPDATE records SET body = json_set(body, '$.speaker', ?)
+           WHERE collection = 'audioText' AND id IN (SELECT rowid FROM capture_fts WHERE kind = 'audio' AND recordId IN (${marks}))`,
+        )
+        .run(speaker, ...itemIds);
+      return Number(result.changes);
     });
   }
 
@@ -244,16 +296,21 @@ export class EncryptedStore {
             )
             .all(cutoffMs) as Array<{ mediaId: string }>
         ).map(row => row.mediaId);
+        // Imported connector items are not on the retention window: the person removes them by source.
         const removed = db
-          .prepare('DELETE FROM records WHERE id IN (SELECT rowid FROM capture_fts WHERE ts < ?)')
+          .prepare(`DELETE FROM records WHERE id IN (SELECT rowid FROM capture_fts WHERE ts < ? AND kind != 'connector')`)
           .run(cutoffMs).changes;
-        db.prepare('DELETE FROM capture_fts WHERE ts < ?').run(cutoffMs);
+        db.prepare(`DELETE FROM capture_fts WHERE ts < ? AND kind != 'connector'`).run(cutoffMs);
         return { removed, mediaIds };
       })();
     });
   }
 
-  /** Deletes every captured item and its text. Returns the image ids, so the caller can delete the image files too. */
+  /**
+   * Deletes every screen, microphone and typed-text item and its text, and every pipe's stored matches, in one transaction.
+   * Imported connector items stay: they are removed by source (deleteConnectorSource) or by a wipe. Returns the image ids, so the
+   * caller can delete the image files too.
+   */
   deleteAllCapture(): { mediaIds: string[] } {
     return this.guard(() => {
       const db = this.conn();
@@ -266,8 +323,9 @@ export class EncryptedStore {
             )
             .all() as Array<{ mediaId: string }>
         ).map(row => row.mediaId);
-        db.prepare(`DELETE FROM records WHERE collection IN ('screenText', 'audioText')`).run();
-        if (this.hasCaptureIndex()) db.prepare('DELETE FROM capture_fts').run();
+        db.prepare(`DELETE FROM records WHERE collection IN ('screenText', 'audioText', 'keystrokeText')`).run();
+        db.prepare(`DELETE FROM records WHERE collection = 'pipeOutputs'`).run();
+        if (this.hasCaptureIndex()) db.prepare(`DELETE FROM capture_fts WHERE kind != 'connector'`).run();
         return { mediaIds };
       })();
     });
@@ -293,6 +351,30 @@ export class EncryptedStore {
         ).map(row => row.mediaId);
         db.prepare('DELETE FROM records WHERE id IN (SELECT rowid FROM capture_fts WHERE app = ?)').run(app);
         db.prepare('DELETE FROM capture_fts WHERE app = ?').run(app);
+        return { mediaIds };
+      })();
+    });
+  }
+
+  /**
+   * Deletes the stored screen and typed-text items whose window is of one of the given kinds, with their index rows. Returns
+   * their image ids, read before the rows go, so the caller can remove the files. Audio has no window kind, so it is kept.
+   */
+  deleteCaptureForWindowClasses(classes: readonly string[]): { mediaIds: string[] } {
+    if (classes.length === 0) return { mediaIds: [] };
+    return this.guard(() => {
+      const db = this.conn();
+      return db.transaction((): { mediaIds: string[] } => {
+        if (!this.hasCaptureIndex()) return { mediaIds: [] };
+        const marks = classes.map(() => '?').join(', ');
+        const scope = `collection IN ('screenText', 'keystrokeText') AND json_extract(body, '$.windowClass') IN (${marks})`;
+        const mediaIds = (
+          db
+            .prepare(`SELECT json_extract(body, '$.mediaId') AS mediaId FROM records WHERE ${scope} AND json_extract(body, '$.mediaId') IS NOT NULL`)
+            .all(...classes) as Array<{ mediaId: string }>
+        ).map(row => row.mediaId);
+        db.prepare(`DELETE FROM capture_fts WHERE rowid IN (SELECT id FROM records WHERE ${scope})`).run(...classes);
+        db.prepare(`DELETE FROM records WHERE ${scope}`).run(...classes);
         return { mediaIds };
       })();
     });
@@ -336,6 +418,180 @@ export class EncryptedStore {
         .all() as Array<{ collection: CaptureCollection; n: number }>;
       const count = (collection: CaptureCollection): number => rows.find(row => row.collection === collection)?.n ?? 0;
       return { screen: count('screenText'), audio: count('audioText') };
+    });
+  }
+
+  /** How many typed-text items are stored. Kept apart from captureCounts, whose shape the screen and audio counts pin. */
+  keystrokeCount(): number {
+    return this.guard(() => {
+      const row = this.conn().prepare(`SELECT count(*) AS n FROM records WHERE collection = 'keystrokeText'`).get() as {
+        n: number;
+      };
+      return row.n;
+    });
+  }
+
+  /**
+   * Stores a batch of imported connector items, indexed for search, in one transaction. A record's id is derived from its
+   * source and item, so an item that is already stored is replaced rather than duplicated. Returns how many were stored.
+   */
+  storeConnectorItems(records: readonly CaptureRecord[]): number {
+    for (const record of records) {
+      if (record.kind !== 'connector' || record.collection !== 'connectorText') {
+        throw new Error('Connector items are stored only as connector kind.');
+      }
+      if (!Number.isSafeInteger(record.ts)) throw new Error('Capture time must be a whole number of milliseconds.');
+    }
+    if (records.length === 0) return 0;
+    return this.guard(() => {
+      const db = this.conn();
+      return db.transaction(() => {
+        db.exec(CAPTURE_INDEX);
+        // One scan maps each stored item to its row, so a large import does not rescan the index once per item.
+        const stored = new Map<string, number>();
+        const rows = db.prepare(`SELECT rowid, recordId FROM capture_fts WHERE kind = 'connector'`).all() as Array<{
+          rowid: number;
+          recordId: string;
+        }>;
+        for (const row of rows) stored.set(row.recordId, row.rowid);
+        const dropRecord = db.prepare('DELETE FROM records WHERE id = ?');
+        const dropIndex = db.prepare('DELETE FROM capture_fts WHERE rowid = ?');
+        const insert = db.prepare('INSERT INTO records (collection, body) VALUES (?, ?)');
+        const index = db.prepare('INSERT INTO capture_fts (rowid, text, kind, recordId, ts, app) VALUES (?, ?, ?, ?, ?, ?)');
+        for (const record of records) {
+          const previous = stored.get(record.id);
+          if (previous !== undefined) {
+            dropRecord.run(previous);
+            dropIndex.run(previous);
+          }
+          const rowid = Number(insert.run(record.collection, JSON.stringify(record.body)).lastInsertRowid);
+          index.run(rowid, record.text, record.kind, record.id, record.ts, record.app);
+          stored.set(record.id, rowid);
+        }
+        return records.length;
+      })();
+    });
+  }
+
+  /**
+   * Deletes every item imported from one source, with its text and index rows. Other sources are not touched. Returns how many
+   * items were deleted. A source id that holds no items deletes nothing.
+   */
+  deleteConnectorSource(sourceKey: string): number {
+    return this.guard(() => {
+      const db = this.conn();
+      return db.transaction(() => {
+        // Without a capture index no connector item can exist, so there is nothing to delete.
+        if (!this.hasCaptureIndex()) return 0;
+        const owned = `collection = 'connectorText' AND json_extract(body, '$.sourceKey') = ?`;
+        db.prepare(`DELETE FROM capture_fts WHERE rowid IN (SELECT id FROM records WHERE ${owned})`).run(sourceKey);
+        return Number(db.prepare(`DELETE FROM records WHERE ${owned}`).run(sourceKey).changes);
+      })();
+    });
+  }
+
+  /** How many imported connector items are stored, and the earliest and latest of their times. Holds no text. */
+  connectorSummary(): { count: number; oldest: number | null; newest: number | null } {
+    return this.guard(() => {
+      const row = this.conn()
+        .prepare(
+          `SELECT count(*) AS n, min(json_extract(body, '$.ts')) AS first, max(json_extract(body, '$.ts')) AS last
+           FROM records WHERE collection = 'connectorText'`,
+        )
+        .get() as { n: number; first: number | null; last: number | null };
+      return { count: row.n, oldest: row.first, newest: row.last };
+    });
+  }
+
+  /**
+   * Replaces one write pipe's stored matches with its newest run. The pipe's older record is deleted in the same transaction, so
+   * a pipe has one record, and it holds that run's matches only.
+   */
+  replacePipeOutput(record: PipeOutputRecord): void {
+    this.guard(() => {
+      const db = this.conn();
+      db.transaction(() => {
+        db.prepare(`DELETE FROM records WHERE collection = 'pipeOutputs' AND json_extract(body, '$.pipeId') = ?`).run(record.pipeId);
+        db.prepare(`INSERT INTO records (collection, body) VALUES ('pipeOutputs', ?)`).run(JSON.stringify(record));
+      })();
+    });
+  }
+
+  /**
+   * Deletes the stored matches of the given pipes, or of every pipe when no ids are given. An empty list deletes nothing. Returns
+   * how many records were deleted.
+   */
+  deletePipeOutputs(pipeIds?: readonly string[]): number {
+    if (pipeIds !== undefined && pipeIds.length === 0) return 0;
+    return this.guard(() => {
+      const result =
+        pipeIds === undefined
+          ? this.conn().prepare(`DELETE FROM records WHERE collection = 'pipeOutputs'`).run()
+          : this.conn()
+              .prepare(`DELETE FROM records WHERE collection = 'pipeOutputs' AND json_extract(body, '$.pipeId') IN (SELECT value FROM json_each(?))`)
+              .run(JSON.stringify(pipeIds));
+      return Number(result.changes);
+    });
+  }
+
+  /** Deletes the stored matches of every pipe that is not in the list, so a pipe that is off or removed keeps none. Returns how many were deleted. */
+  prunePipeOutputs(keepPipeIds: readonly string[]): number {
+    return this.guard(() => {
+      const result = this.conn()
+        .prepare(
+          `DELETE FROM records WHERE collection = 'pipeOutputs' AND json_extract(body, '$.pipeId') NOT IN (SELECT value FROM json_each(?))`,
+        )
+        .run(JSON.stringify(keepPipeIds));
+      return Number(result.changes);
+    });
+  }
+
+  /**
+   * Removes copied text older than the cutoff, in ms. A run that ran before the cutoff goes whole. In a newer run, each match
+   * keeps its own capture time, so a match captured before the cutoff is dropped and the rest stay. A run left with no matches
+   * is removed. Returns how many run records were deleted. Matches dropped from a kept run are not counted.
+   */
+  prunePipeOutputsBefore(cutoffMs: number): number {
+    return this.guard(() => {
+      const db = this.conn();
+      return db.transaction(() => {
+        const rows = db
+          .prepare(`SELECT id, body FROM records WHERE collection = 'pipeOutputs'`)
+          .all() as Array<{ id: number; body: string }>;
+        const drop = db.prepare(`DELETE FROM records WHERE id = ?`);
+        const rewrite = db.prepare(`UPDATE records SET body = ? WHERE id = ?`);
+        let deleted = 0;
+        for (const row of rows) {
+          const record = JSON.parse(row.body) as PipeOutputRecord;
+          if (record.ranAt < cutoffMs) {
+            drop.run(row.id);
+            deleted += 1;
+            continue;
+          }
+          const items = record.items.filter(item => item.ts >= cutoffMs);
+          if (items.length === record.items.length) continue;
+          if (items.length === 0) {
+            drop.run(row.id);
+            deleted += 1;
+          } else {
+            rewrite.run(JSON.stringify({ ...record, items }), row.id);
+          }
+        }
+        return deleted;
+      })();
+    });
+  }
+
+  /** The count and run time of one pipe's stored matches. Holds no text. Null when the pipe has no stored run. */
+  pipeOutputSummary(pipeId: string): { count: number; ranAt: number } | null {
+    return this.guard(() => {
+      const row = this.conn()
+        .prepare(
+          `SELECT json_array_length(body, '$.items') AS count, json_extract(body, '$.ranAt') AS ranAt
+           FROM records WHERE collection = 'pipeOutputs' AND json_extract(body, '$.pipeId') = ?`,
+        )
+        .get(pipeId) as { count: number; ranAt: number } | undefined;
+      return row === undefined ? null : { count: Number(row.count), ranAt: Number(row.ranAt) };
     });
   }
 
@@ -484,6 +740,13 @@ function isCaptureCollection(collection: Collection): collection is CaptureColle
 
 function captureWriteError(): Error {
   return new Error('Captured text is written through appendCapture, not append or replaceAll.');
+}
+
+/** Refuses a generic write to a collection that has its own checked writer, so each record goes through that writer. */
+function restrictedWriteError(collection: Collection): Error {
+  return isCaptureCollection(collection)
+    ? captureWriteError()
+    : new Error('Pipe outputs are written through replacePipeOutput, not append or replaceAll.');
 }
 
 /** A search or listing limit. Must be a whole number of at least 1, and is capped at MAX_CAPTURE_HITS. */
