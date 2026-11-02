@@ -61,6 +61,46 @@ export async function readSheet(data: Buffer): Promise<TaskSheet> {
   return { headerRow: first.rowNumber, headers, rows };
 }
 
+/** One non-empty cell of a row: its address, such as "B7", and its text. */
+export interface WorkbookCell {
+  address: string;
+  text: string;
+}
+
+/** One non-empty row of a worksheet. `sheet` is the worksheet's name, and `rowNumber` is 1-based. */
+export interface WorkbookRow {
+  sheet: string;
+  rowNumber: number;
+  cells: WorkbookCell[];
+}
+
+/**
+ * Every non-empty row of every worksheet, in order. Unlike readSheet, nothing is taken as a header and no task column is
+ * needed, so a search can cover a whole workbook. Cell text is read the way readSheet reads it.
+ */
+export async function readWorkbookRows(data: Buffer): Promise<WorkbookRow[]> {
+  const workbook = await load(data);
+  const rows: WorkbookRow[] = [];
+  for (const worksheet of workbook.worksheets) {
+    worksheet.eachRow((row, rowNumber) => {
+      const cells: WorkbookCell[] = [];
+      row.eachCell((cell, column) => {
+        const text = cellText(cell.value);
+        if (text) cells.push({ address: cell.address ?? `${columnLetter(column)}${rowNumber}`, text });
+      });
+      if (cells.length > 0) rows.push({ sheet: worksheet.name, rowNumber, cells });
+    });
+  }
+  return rows;
+}
+
+/** A column number as its letters, so 1 is "A" and 27 is "AA". */
+function columnLetter(column: number): string {
+  let letters = '';
+  for (let n = column; n > 0; n = Math.floor((n - 1) / 26)) letters = String.fromCharCode(65 + ((n - 1) % 26)) + letters;
+  return letters;
+}
+
 /** Reads a sheet that has a column of task text, as the task list needs. Throws when there is no such column. */
 export async function readTaskSheet(data: Buffer): Promise<TaskSheet> {
   const sheet = await readSheet(data);
@@ -137,11 +177,13 @@ async function save(workbook: ExcelJS.Workbook): Promise<Buffer> {
 /**
  * The text a cell shows. A date becomes its calendar day as YYYY-MM-DD, and the time of day is dropped. ExcelJS builds a
  * date from local parts, so the day is read from local parts too; reading UTC would move some dates to the day before. A
- * formula gives its cached result. An error, or a value with no text, gives ''.
+ * formula gives its cached result. An error such as #REF! reads as its own text, so a search can find it. A value with no
+ * text gives ''.
  */
 function cellText(value: ExcelJS.CellValue | undefined): string {
   if (value === null || value === undefined) return '';
   if (value instanceof Date) return Number.isNaN(value.getTime()) ? '' : dayOf(value);
+  if (typeof value === 'object' && value !== null && 'error' in value) return String(value.error);
   if (typeof value !== 'object') return String(value).trim();
   if ('richText' in value) return value.richText.map(part => part.text).join('').trim();
   if ('formula' in value || 'sharedFormula' in value) return cellText(value.result);

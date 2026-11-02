@@ -32,3 +32,4 @@ export * from './frame-dedupe';
 export * from './capture-text';
 export * from './workbook/sheet';
 export * from './workbook/brain';
+export * from './workbook/search';
