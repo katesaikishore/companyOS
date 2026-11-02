@@ -15,10 +15,13 @@ let activeIndex = 0;
 function availableCommands(): Command[] {
   const pages: Command[] = [
     { title: 'Your twin', detail: 'Open overview', run: () => go('#/overview') },
+    { title: 'Tasks', detail: 'See the tasks the twin found in your day', run: () => go('#/tasks') },
     { title: 'Recall', detail: 'Search the text the twin read or heard', run: () => go('#/recall') },
     { title: 'Suggestions', detail: 'Review routines the twin noticed', run: () => go('#/suggestions') },
     { title: 'Automations', detail: 'Review accepted routines and runs', run: () => go('#/automations') },
+    { title: 'App readiness', detail: 'See which apps the twin can work in', run: () => go('#/readiness') },
     { title: 'What the twin knows', detail: 'See routines, habits and declines', run: () => go('#/knows') },
+    { title: 'Connectors', detail: 'Manage the local sources the twin reads', run: () => go('#/connectors') },
     { title: 'Network ledger', detail: 'Review model downloads and network calls', run: () => go('#/ledger') },
     { title: 'Settings', detail: 'Change capture, autonomy, and appearance', run: () => go('#/settings') },
   ];
