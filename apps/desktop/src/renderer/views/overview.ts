@@ -333,8 +333,9 @@ function networkPanel(network: readonly NetworkEntry[], now: number): HTMLElemen
       { class: 'ov-figures' },
       figure('Calls', String(summary.calls)),
       figure('Downloaded', formatBytes(summary.bytes)),
-      // Fixed, not counted: no request the twin makes carries twin data. The ledger states the same.
-      figure('Personal data sent', 'None', true),
+      // Fixed, not counted: model and update requests carry no twin data. Google calls, when Gmail is connected, send the
+      // sign-in token and the mail search, and the ledger says so.
+      figure('Personal data sent', 'None in model calls', true),
     ),
     h(
       'div',

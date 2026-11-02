@@ -10,8 +10,20 @@ function entryKey(entry: NetworkEntry): string {
   return `${entry.ts}:${entry.modelId ?? entry.host}:${entry.path}`;
 }
 
+const PURPOSE_LABELS: Record<NetworkEntry['purpose'], string> = {
+  model_download: 'Model download',
+  update_check: 'Update check',
+  mail_sync: 'Mail sync',
+  sign_in: 'Google sign-in',
+};
+
 function purposeLabel(entry: NetworkEntry): string {
-  return entry.purpose === 'model_download' ? 'Model download' : 'Update check';
+  return PURPOSE_LABELS[entry.purpose];
+}
+
+/** Google calls carry no digest, and they are not model files or the update feed. */
+function isGoogleCall(entry: NetworkEntry): boolean {
+  return entry.purpose === 'mail_sync' || entry.purpose === 'sign_in';
 }
 
 /** The item a call fetched: the file of a multi-file download, the model for a single-file one, the channel file for an update check. */
@@ -23,6 +35,7 @@ function itemText(entry: NetworkEntry): string {
 /** Plain words for the outcome, verification and failure state of one call. */
 function outcomeText(entry: NetworkEntry): string {
   if (entry.purpose === 'update_check') return entry.outcome === 'ok' ? 'feed read' : 'failed';
+  if (isGoogleCall(entry)) return entry.outcome === 'ok' ? 'answered' : entry.outcome;
   const parts: string[] = [];
   if (entry.outcome === 'cancelled') parts.push('cancelled');
   else if (entry.outcome === 'failed') parts.push('failed');
@@ -33,12 +46,14 @@ function outcomeText(entry: NetworkEntry): string {
 function outcomeTone(entry: NetworkEntry): Tone {
   if (entry.outcome === 'cancelled') return 'muted';
   if (entry.purpose === 'update_check') return entry.outcome === 'ok' ? 'teal' : 'danger';
+  if (isGoogleCall(entry)) return entry.outcome === 'ok' ? 'teal' : 'danger';
   return entry.outcome === 'ok' && entry.sha256Verified ? 'teal' : 'danger';
 }
 
 /** What the call was checked against. An update check has no digest to compare. */
 function checkedText(entry: NetworkEntry): string {
   if (entry.purpose === 'update_check') return 'No checksum to verify';
+  if (isGoogleCall(entry)) return 'Google API call, no checksum';
   return entry.sha256Verified ? 'SHA-256 matched the pinned digest' : 'SHA-256 not verified';
 }
 
@@ -50,14 +65,14 @@ export function ledgerView(status: TwinStatus): HTMLElement {
     { class: 'stack ledger-view', 'data-testid': 'view-ledger' },
     pageHeader(
       'Network ledger',
-      'Every network call the twin has made. Nothing about you leaves in these calls.',
+      'Every network call the twin has made. Model and update calls send nothing about you. Google calls send your sign-in token and the mail search you set.',
     ),
     h(
       'section',
       { class: 'tiles ledger-summary', 'aria-label': 'Ledger summary' },
-      tile('count', 'Calls so far', String(entries.length), 'Model downloads and update checks only'),
-      tile('hosts', 'Allowed hosts', 'huggingface.co · *.hf.co', 'and the update feed, when one is set'),
-      tile('clear', 'Personal data sent', 'Nothing', 'GET requests with no body. Hosts see your IP address, which this ledger does not record.'),
+      tile('count', 'Calls so far', String(entries.length), 'Model downloads, update checks and Google calls'),
+      tile('hosts', 'Allowed hosts', 'huggingface.co · *.hf.co', 'Google hosts only when you connect Gmail, and the update feed when one is set'),
+      tile('clear', 'Personal data sent', 'Nothing in model calls', 'Model and update calls are GET requests with no body. Google calls send your sign-in token and your mail search. Hosts see your IP address, which this ledger does not record.'),
     ),
     selected
       ? h('div', { class: 'ledger-split' }, requestsPanel(entries, selected), detailPanel(selected))
@@ -128,12 +143,13 @@ function ledgerRow(entry: NetworkEntry, selected: boolean): HTMLElement {
 }
 
 function detailPanel(entry: NetworkEntry): HTMLElement {
+  const method = entry.purpose === 'sign_in' ? 'POST' : 'GET';
   const lines = [
-    `GET ${entry.path}`,
+    `${method} ${entry.path}`,
     `Host: ${entry.host}`,
     `Purpose: ${purposeLabel(entry)}`,
-    'Method: GET',
-    'Body: none',
+    `Method: ${method}`,
+    method === 'POST' ? 'Body: form fields, not recorded' : 'Body: none',
   ];
   return panel(
     { testid: 'ledger-detail', labelledBy: 'exact-title', extra: 'ledger-detail' },
