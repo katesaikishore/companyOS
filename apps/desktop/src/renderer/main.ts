@@ -2,7 +2,7 @@ import type { TwinStatus } from '@companyos/twin-core';
 import { h, mount } from './dom.js';
 import { shell } from './components/shell.js';
 import { openCommandPalette } from './commands.js';
-import { layaFraction, layaStateLabel, modelFraction, modelStateLabel } from './labels.js';
+import { downloadLeftLabel, layaFraction, layaStateLabel, modelFraction, modelStateLabel } from './labels.js';
 import { automationDetailView, automationsView } from './views/automations.js';
 import { knowsView } from './views/knows.js';
 import { ledgerView } from './views/ledger.js';
@@ -106,6 +106,10 @@ function patchLive(status: TwinStatus): void {
   document.querySelectorAll<HTMLElement>('[data-label-model]').forEach(el => {
     const id = el.dataset.labelModel;
     if (id) el.textContent = modelStateLabel(status, id);
+  });
+  document.querySelectorAll<HTMLElement>('[data-left-model]').forEach(el => {
+    const id = el.dataset.leftModel;
+    if (id) el.textContent = downloadLeftLabel(status, id);
   });
   document.querySelectorAll<HTMLElement>('[data-progress-model]').forEach(el => {
     const id = el.dataset.progressModel;

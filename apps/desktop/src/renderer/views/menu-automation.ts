@@ -14,7 +14,9 @@ export function menuAutomationPanel(): HTMLElement {
   let createButton: HTMLButtonElement | undefined;
   const update = (field: keyof MenuAutomationDraft) => (event: Event) => {
     draft[field] = (event.currentTarget as HTMLInputElement).value;
-    state.dirty.add(KEY);
+    // Unsaved only while a field holds text, so emptied fields let the page redraw again, as the other forms do.
+    if (Object.values(draft).some(value => value.trim() !== '')) state.dirty.add(KEY);
+    else state.dirty.delete(KEY);
     if (createButton) createButton.disabled = !draftReady(draft) || pending(KEY);
   };
   const field = (label: string, name: keyof MenuAutomationDraft, placeholder: string, maxlength: number) =>

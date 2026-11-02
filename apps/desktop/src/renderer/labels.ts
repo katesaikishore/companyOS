@@ -198,6 +198,13 @@ export function modelFraction(status: TwinStatus, modelId: string): number {
   return clamp01(download.receivedBytes / download.totalBytes);
 }
 
+/** " · 3.1 GB left" while a model downloads with a known size, otherwise empty. Patched in place every poll, as the label is. */
+export function downloadLeftLabel(status: TwinStatus, modelId: string): string {
+  const download = status.downloads.find(entry => entry.modelId === modelId);
+  const left = Math.max(0, (download?.totalBytes ?? 0) - (download?.receivedBytes ?? 0));
+  return left > 0 ? ` · ${formatBytes(left)} left` : '';
+}
+
 export function modelStateLabel(status: TwinStatus, modelId: string): string {
   const download = status.downloads.find(entry => entry.modelId === modelId);
   switch (modelState(status, modelId)) {

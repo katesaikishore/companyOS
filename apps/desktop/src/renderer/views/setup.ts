@@ -4,7 +4,7 @@ import { h, type Child } from '../dom.js';
 import { twinCompanion } from '../components/companion.js';
 import { button, chip, exclusionEditor, fact, logo, progressBar, toggleRow } from '../components/ui.js';
 import { formatBytes, formatDecimalBytes } from '../format.js';
-import { browserCaptureNote, fitLabel, layaFraction, layaState, layaStateLabel, modelFraction, modelState, modelStateLabel } from '../labels.js';
+import { browserCaptureNote, downloadLeftLabel, fitLabel, layaFraction, layaState, layaStateLabel, modelFraction, modelState, modelStateLabel } from '../labels.js';
 import { act, bridge, call, errorText, go, pending, requestRender, saveConfig, state } from '../store.js';
 
 const TITLES = ['Welcome', 'What companyOS can see', 'Recall', 'Your device and models', 'Decision model (optional)', 'Start observing'];
@@ -407,8 +407,7 @@ function alternativesBlock(plan: SetupPlan, status: TwinStatus): HTMLElement {
  * on every poll, so the bar and the text stay in step while the download runs.
  */
 function downloadProgress(status: TwinStatus, modelId: string, testid: string): HTMLElement {
-  const download = status.downloads.find(entry => entry.modelId === modelId);
-  const left = Math.max(0, (download?.totalBytes ?? 0) - (download?.receivedBytes ?? 0));
+  // The byte counts are left out of the page signature, so both texts are patched in place every poll, like the bar.
   return h(
     'div',
     { class: 'download-progress-block', 'data-testid': testid, 'data-model-id': modelId },
@@ -416,8 +415,8 @@ function downloadProgress(status: TwinStatus, modelId: string, testid: string): 
     h(
       'p',
       { class: 'mono small muted download-progress-text' },
-      h('span', { 'data-label-download': modelId }, modelStateLabel(status, modelId)),
-      left > 0 ? h('span', { 'data-testid': 'download-left' }, ` · ${formatBytes(left)} left`) : undefined,
+      h('span', { 'data-label-model': modelId }, modelStateLabel(status, modelId)),
+      h('span', { 'data-testid': 'download-left', 'data-left-model': modelId }, downloadLeftLabel(status, modelId)),
     ),
   );
 }
