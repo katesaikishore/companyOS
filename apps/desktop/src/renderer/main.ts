@@ -208,7 +208,9 @@ function schedulePoll(delay: number): void {
 async function poll(): Promise<void> {
   if (document.visibilityState === 'visible') await refresh();
   const downloading = state.status?.downloads.some(download => download.status === 'running') ?? false;
-  schedulePoll(downloading ? 1000 : 2000);
+  // A running task reads status every second, so its steps and a step that waits show promptly.
+  const working = (state.status?.operator.state ?? 'idle') !== 'idle';
+  schedulePoll(downloading || working ? 1000 : 2000);
 }
 
 function boot(): void {

@@ -21,6 +21,8 @@ export type Route =
   | { name: 'knows' }
   /** Search of the text the twin read on screen or heard. Its results are cleared when the page is left. */
   | { name: 'recall' }
+  /** The task box: tell the twin what to do in an app, and answer the steps that wait for you. */
+  | { name: 'tasks' }
   | { name: 'settings' };
 
 /** The Recall page's search. The words and filters stay so a redraw keeps them. The hits are the last search's result. */
@@ -77,6 +79,8 @@ export const state = {
   recall: { text: '', kind: 'all', range: 'today' } as RecallState,
   /** Screen images the Recall page has read, as data URLs, or null when one is not available. Capped, and cleared when the page is left. */
   frames: new Map<string, string | null>(),
+  /** The Tasks page form. The Chutes key is never kept here: it is read from its field when saved. */
+  task: { goal: '', app: 'TextEdit', shareMemory: false },
 };
 
 let renderer: (() => void) | undefined;
@@ -191,6 +195,8 @@ export function routeFromHash(hash: string): Route {
       return { name: 'knows' };
     case 'recall':
       return { name: 'recall' };
+    case 'tasks':
+      return { name: 'tasks' };
     case 'settings':
       return { name: 'settings' };
     default:

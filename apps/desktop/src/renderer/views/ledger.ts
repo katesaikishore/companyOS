@@ -13,8 +13,12 @@ function entryKey(entry: NetworkEntry): string {
 const PURPOSE_LABELS: Record<NetworkEntry['purpose'], string> = {
   model_download: 'Model download',
   update_check: 'Update check',
+  connector: 'Cloud account read',
   mail_sync: 'Mail sync',
   sign_in: 'Google sign-in',
+  connector_send: 'Connector send',
+  local_model: 'Local model (this Mac)',
+  remote_model: 'Remote model (Chutes)',
 };
 
 function purposeLabel(entry: NetworkEntry): string {
@@ -26,16 +30,33 @@ function isGoogleCall(entry: NetworkEntry): boolean {
   return entry.purpose === 'mail_sync' || entry.purpose === 'sign_in';
 }
 
+/** A call to the vision model on this Mac: a POST with a screenshot and control names, to the loopback address only. */
+function isLocalCall(entry: NetworkEntry): boolean {
+  return entry.purpose === 'local_model';
+}
+
+/** A call to the operator's model on Chutes, made only when the person picked it: a POST with the task's goal and control names. */
+function isRemoteCall(entry: NetworkEntry): boolean {
+  return entry.purpose === 'remote_model';
+}
+
 /** The item a call fetched: the file of a multi-file download, the model for a single-file one, the channel file for an update check. */
 function itemText(entry: NetworkEntry): string {
   const item = entry.file ?? entry.modelId ?? entry.path;
   return `${entry.host} · ${item}`;
 }
 
+/** A failed model call with the status the server gave, such as "failed (401)". */
+function withStatus(entry: NetworkEntry): string {
+  return entry.status === undefined ? entry.outcome : `${entry.outcome} (${entry.status})`;
+}
+
 /** Plain words for the outcome, verification and failure state of one call. */
 function outcomeText(entry: NetworkEntry): string {
   if (entry.purpose === 'update_check') return entry.outcome === 'ok' ? 'feed read' : 'failed';
   if (isGoogleCall(entry)) return entry.outcome === 'ok' ? 'answered' : entry.outcome;
+  if (isLocalCall(entry)) return entry.outcome === 'ok' ? 'answered on this Mac' : withStatus(entry);
+  if (isRemoteCall(entry)) return entry.outcome === 'ok' ? 'answered by Chutes' : withStatus(entry);
   const parts: string[] = [];
   if (entry.outcome === 'cancelled') parts.push('cancelled');
   else if (entry.outcome === 'failed') parts.push('failed');
@@ -47,6 +68,7 @@ function outcomeTone(entry: NetworkEntry): Tone {
   if (entry.outcome === 'cancelled') return 'muted';
   if (entry.purpose === 'update_check') return entry.outcome === 'ok' ? 'teal' : 'danger';
   if (isGoogleCall(entry)) return entry.outcome === 'ok' ? 'teal' : 'danger';
+  if (isLocalCall(entry) || isRemoteCall(entry)) return entry.outcome === 'ok' ? 'teal' : 'danger';
   return entry.outcome === 'ok' && entry.sha256Verified ? 'teal' : 'danger';
 }
 
@@ -54,6 +76,8 @@ function outcomeTone(entry: NetworkEntry): Tone {
 function checkedText(entry: NetworkEntry): string {
   if (entry.purpose === 'update_check') return 'No checksum to verify';
   if (isGoogleCall(entry)) return 'Google API call, no checksum';
+  if (isLocalCall(entry)) return 'On this Mac, no checksum';
+  if (isRemoteCall(entry)) return 'Sent to Chutes, no checksum';
   return entry.sha256Verified ? 'SHA-256 matched the pinned digest' : 'SHA-256 not verified';
 }
 
@@ -65,14 +89,14 @@ export function ledgerView(status: TwinStatus): HTMLElement {
     { class: 'stack ledger-view', 'data-testid': 'view-ledger' },
     pageHeader(
       'Network ledger',
-      'Every network call the twin has made. Model and update calls send nothing about you. Google calls send your sign-in token and the mail search you set.',
+      'Every network call the twin has made. Model downloads and update checks send nothing about you. Calls to the vision model stay on this Mac. Task steps go to Chutes only when you pick it. Google calls send your sign-in token and the mail search you set.',
     ),
     h(
       'section',
       { class: 'tiles ledger-summary', 'aria-label': 'Ledger summary' },
-      tile('count', 'Calls so far', String(entries.length), 'Model downloads, update checks and Google calls'),
-      tile('hosts', 'Allowed hosts', 'huggingface.co · *.hf.co', 'Google hosts only when you connect Gmail, and the update feed when one is set'),
-      tile('clear', 'Personal data sent', 'Nothing in model calls', 'Model and update calls are GET requests with no body. Google calls send your sign-in token and your mail search. Hosts see your IP address, which this ledger does not record.'),
+      tile('count', 'Calls so far', String(entries.length), 'Model downloads, update checks, Google calls and model calls'),
+      tile('hosts', 'Allowed hosts', 'huggingface.co · *.hf.co · 127.0.0.1 (this Mac)', 'Google hosts only when you connect Gmail, the update feed when one is set, and llm.chutes.ai only when you pick Chutes for tasks'),
+      tile('clear', 'Personal data sent', entries.some(isRemoteCall) ? 'Task steps to Chutes, when you chose it' : 'Nothing in model calls', 'Model and update calls are GET requests with no body. The local vision model gets a picture of the whole screen and control names, on this Mac only. Chutes, when you pick it, gets the goal of a task and the control names of the app. Google calls send your sign-in token and your mail search. Hosts see your IP address, which this ledger does not record.'),
     ),
     selected
       ? h('div', { class: 'ledger-split' }, requestsPanel(entries, selected), detailPanel(selected))
@@ -143,13 +167,13 @@ function ledgerRow(entry: NetworkEntry, selected: boolean): HTMLElement {
 }
 
 function detailPanel(entry: NetworkEntry): HTMLElement {
-  const method = entry.purpose === 'sign_in' ? 'POST' : 'GET';
+  const method = entry.purpose === 'sign_in' || isLocalCall(entry) || isRemoteCall(entry) ? 'POST' : 'GET';
   const lines = [
     `${method} ${entry.path}`,
     `Host: ${entry.host}`,
     `Purpose: ${purposeLabel(entry)}`,
     `Method: ${method}`,
-    method === 'POST' ? 'Body: form fields, not recorded' : 'Body: none',
+    method === 'POST' ? (isLocalCall(entry) ? 'Body: a screen picture or a task step, with control names, not recorded' : isRemoteCall(entry) ? (entry.sharedScreenText ? 'Body: the task goal, window title, control names, field text and memory notes, which you opted in to; not recorded' : 'Body: the task goal, window title and control names, not recorded') : 'Body: form fields, not recorded') : 'Body: none',
   ];
   return panel(
     { testid: 'ledger-detail', labelledBy: 'exact-title', extra: 'ledger-detail' },

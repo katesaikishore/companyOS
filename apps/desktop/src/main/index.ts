@@ -27,7 +27,7 @@ import { pathToFileURL } from 'node:url';
 import {
   AutonomyLevelSchema,
   describeStep,
-  type Approval,
+  type StepApproval,
   type Automation,
   type CapturePermission,
   type CaptureSearchRequest,
@@ -242,6 +242,26 @@ function registerIpc(): void {
   // The engine checks the decision's shape and that it still fits the day's tasks, so the page cannot store anything else.
   handle(IPC.decideTask, decision => requireRuntime().decideTask(decision));
 
+  // The operator checks every step of a task. Here only the request's shape is checked.
+  handle(IPC.startTask, request => {
+    if (typeof request !== 'object' || request === null) throw new Error('Invalid task.');
+    const { goal, app, shareMemory } = request as Record<string, unknown>;
+    if (typeof goal !== 'string' || typeof app !== 'string' || (shareMemory !== undefined && typeof shareMemory !== 'boolean')) {
+      throw new Error('Invalid task.');
+    }
+    return requireRuntime().startTask({ goal: goal.slice(0, 500), app: app.slice(0, 80), shareMemory: shareMemory === true });
+  });
+  handle(IPC.stopTask, () => requireRuntime().stopTask());
+  handle(IPC.answerTaskStep, (id, approve) => {
+    const step = text(id, /^[0-9a-f-]{36}$/, 'Invalid step id.');
+    if (typeof approve !== 'boolean') throw new Error('Invalid answer.');
+    requireRuntime().answerTaskStep(step, approve);
+  });
+  handle(IPC.setChutesKey, key =>
+    requireRuntime().setChutesKey(text(key, /^cpk_[A-Za-z0-9._-]{10,200}$/, 'That is not a Chutes key. A Chutes key starts with cpk_.')),
+  );
+  handle(IPC.clearChutesKey, () => requireRuntime().clearChutesKey());
+
   // The engine checks the search's shape, and refuses anything it does not accept, so only the object's form is checked here.
   handle(IPC.searchCapture, request => {
     if (typeof request !== 'object' || request === null) throw new Error('Invalid search.');
@@ -357,7 +377,7 @@ function registerIpc(): void {
 }
 
 /** Asks the person before each step the policy marks as needing confirmation. */
-async function approveStep(automation: Automation, step: Step, decision: Decision): Promise<Approval> {
+async function approveStep(automation: Automation, step: Step, decision: Decision): Promise<StepApproval> {
   const message = describeStep(step);
   // "Allow for this run" spares a question per step for this run only. Each step still passes the policy first.
   const options: MessageBoxOptions = {

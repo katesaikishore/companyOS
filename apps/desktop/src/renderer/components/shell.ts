@@ -29,14 +29,14 @@ export const AUTOMATE: Shape[] = [
   ['path', { d: 'M20 12a8 8 0 0 1-13.7 5.6L4 15' }],
   ['path', { d: 'M4 20v-5h5' }],
 ];
-/** A checklist: the tasks Recall has assigned, and today's tasks. */
+/** A checklist: the tasks the twin works through for the person. */
 export const TASKS: Shape[] = [
-  ['path', { d: 'M10 6h10' }],
-  ['path', { d: 'M10 12h10' }],
-  ['path', { d: 'M10 18h10' }],
-  ['path', { d: 'M4 6l1.6 1.6L8 5' }],
-  ['path', { d: 'M4 12l1.6 1.6L8 11' }],
-  ['path', { d: 'M4 18l1.6 1.6L8 17' }],
+  ['path', { d: 'M9 6h11' }],
+  ['path', { d: 'M9 12h11' }],
+  ['path', { d: 'M9 18h11' }],
+  ['path', { d: 'm3.5 6 1.5 1.5L7.5 4.5' }],
+  ['path', { d: 'm3.5 12 1.5 1.5L7.5 10.5' }],
+  ['path', { d: 'm3.5 18 1.5 1.5L7.5 16.5' }],
 ];
 /** Three cursors: several automations working at once. */
 const SWARM: Shape[] = [
@@ -111,21 +111,33 @@ export function shell(status: TwinStatus, route: Route, content: Child): HTMLEle
       active: route.name === 'overview' || route.name === 'review',
     },
     {
-      label: 'Tasks',
-      href: '#/tasks',
-      testid: 'nav-tasks',
-      icon: TASKS,
-      tone: 'blue',
-      count: status.assignedTasks?.length ?? 0,
-      active: route.name === 'tasks',
-    },
-    {
       label: 'Recall',
       href: '#/recall',
       testid: 'nav-recall',
       icon: RECALL,
       tone: 'blue',
       active: route.name === 'recall',
+    },
+    {
+      label: 'Tasks',
+      href: '#/tasks',
+      testid: 'nav-tasks',
+      icon: TASKS,
+      tone: 'green',
+      // A step that waits for the person is drawn as an accent pill.
+      count: status.operator.state === 'waiting' ? 1 : 0,
+      pill: true,
+      active: route.name === 'tasks',
+    },
+    {
+      label: 'Suggestions',
+      href: '#/suggestions',
+      testid: 'nav-suggestions',
+      icon: SUGGEST,
+      tone: 'orange',
+      count: status.suggestions.length,
+      pill: true,
+      active: route.name === 'suggestions',
     },
     {
       label: 'Automations',
