@@ -44,14 +44,21 @@ function task(id: string, text: string): BrainTask {
 }
 
 describe('allocateTask', () => {
-  it('gives a task to the routine that covers its terms, at the threshold', () => {
-    // "send" is not covered and "excel" is, so the share is one of two terms: exactly the threshold.
+  it('gives a task to the routine that covers half its terms', () => {
+    // "send" is not covered and "excel" is, so the share is one of two terms.
     const allocation = allocateTask(task('t1', 'Send the sheet to Excel'), brain);
     expect(allocation.target).toBe('a1b2c3d4e5f6');
-    expect(allocation.confidence).toBe(AUTOMATE_MIN_CONFIDENCE);
+    expect(allocation.confidence).toBe(0.5);
     expect(allocation.matchedRoutine).toBe('a1b2c3d4e5f6');
     expect(allocation.matchedTerms).toEqual(['excel']);
     expect(allocation.reason).toBe('Routine a1b2c3d4e5f6 covers excel (1 of 2 terms).');
+  });
+
+  it('gives a task to a routine when exactly the threshold share of its terms is covered', () => {
+    // One of four terms is covered: exactly AUTOMATE_MIN_CONFIDENCE.
+    const allocation = allocateTask(task('t1b', 'Triage the open Jira sprint'), brain);
+    expect(allocation.confidence).toBe(AUTOMATE_MIN_CONFIDENCE);
+    expect(allocation.target).toBe('0f0f0f0f0f0f');
   });
 
   it('gives a task to a routine when two of four terms are covered', () => {
@@ -62,10 +69,11 @@ describe('allocateTask', () => {
   });
 
   it('keeps a near miss with the person and still names the closest routine', () => {
-    const allocation = allocateTask(task('t3', 'Triage the open Jira tickets'), brain);
+    // One of six terms is covered, below the threshold.
+    const allocation = allocateTask(task('t3', 'Triage the open Jira sprint team planning'), brain);
     expect(allocation.target).toBe(PERSON);
     expect(allocation.matchedRoutine).toBe('0f0f0f0f0f0f');
-    expect(allocation.confidence).toBe(0.33);
+    expect(allocation.confidence).toBe(0.17);
     expect(allocation.reason).toContain('below the threshold');
     // The reason names matched terms only, never the rest of the task.
     expect(allocation.reason).not.toContain('open');
@@ -93,6 +101,13 @@ describe('allocateTask', () => {
     const allocation = allocateTask(task('t6', 'Refresh the spreadsheet'), brain);
     expect(allocation.target).toBe('a1b2c3d4e5f6');
     expect(allocation.matchedTerms).toEqual(['excel']);
+  });
+
+  it('matches a plural in a task with the singular in a routine', () => {
+    const expenses = routine('eeeeeeeeeeee', [{ app: 'Google Chrome', site: 'expenses.example' }]);
+    const allocation = allocateTask(task('t7c', 'Process the expense claim'), buildBrain([expenses]));
+    expect(allocation.target).toBe('eeeeeeeeeeee');
+    expect(allocation.matchedTerms).toEqual(['expense']);
   });
 
   it('reads a routine app name that carries an extension as its plain name', () => {
@@ -187,12 +202,12 @@ describe('understanding', () => {
     ]);
     const summary = understanding(allocations, expected);
     expect(summary.tasks).toBe(4);
-    expect(summary.automated).toBe(2);
-    expect(summary.coverage).toBe(0.5);
+    expect(summary.automated).toBe(3);
+    expect(summary.coverage).toBe(0.75);
     expect(summary.meanConfidence).toBeCloseTo((0.5 + 0.5 + 0 + 0.33) / 4, 5);
     expect(summary.labelled).toBe(4);
-    // "b" is automated but labelled as the person's, and "d" is kept but labelled as the routine's.
-    expect(summary.agreement).toBe(0.5);
+    // "b" is automated but labelled as the person's. The other three agree.
+    expect(summary.agreement).toBe(0.75);
   });
 
   it('leaves agreement undefined when nothing is labelled', () => {
