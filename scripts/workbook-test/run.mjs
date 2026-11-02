@@ -33,7 +33,8 @@ const inputPath = join(out, 'tasks-50.xlsx');
 writeFileSync(inputPath, Buffer.from(await input.xlsx.writeBuffer()));
 
 // 2. Read it back through the reader that the app will use.
-const sheet = await readTaskSheet(readFileSync(inputPath));
+const inputBuffer = readFileSync(inputPath);
+const sheet = await readTaskSheet(inputBuffer);
 const tasks = sheet.rows.map(row => ({ id: String(row.rowNumber), text: row.cells.Task }));
 const expected = new Map(sheet.rows.map(row => [String(row.rowNumber), row.cells.Expected]));
 
@@ -54,7 +55,7 @@ const outputs = allocations.map(allocation => {
   };
 });
 const resultPath = join(out, 'tasks-50-result.xlsx');
-writeFileSync(resultPath, await writeResultSheet(sheet, columns, outputs));
+writeFileSync(resultPath, await writeResultSheet(inputBuffer, sheet, columns, outputs));
 
 // 5. Report.
 const percent = value => `${Math.round(value * 100)}%`;
