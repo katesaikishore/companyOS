@@ -518,15 +518,23 @@ async function main(userDataDir, fixtureDir) {
 
     // 11. The window has one fixed size. Every main route holds the checks in responsiveProblems at 900x600, and the
     // window still reports that it cannot be resized, maximised or made full screen.
-    const ROUTES = ['overview', 'recall', 'suggestions', 'automations', 'readiness', 'knows', 'review', 'ledger', 'settings'];
+    const ROUTES = ['overview', 'tasks', 'recall', 'suggestions', 'automations', 'readiness', 'knows', 'review', 'connectors', 'ledger', 'settings'];
+    // These pages have no sidebar link. They open from the Overview or the command palette, and still have to lay out.
+    const UNLINKED = new Set(['suggestions', 'readiness', 'knows', 'review']);
     for (const route of ROUTES) {
-      if (route === 'review') {
-        // The review has no sidebar link. It opens from the Overview, and its route still has to lay out.
+      if (UNLINKED.has(route)) {
         await page.evaluate(name => { location.hash = `#/${name}`; }, route);
       } else {
         await page.click(`[data-testid="nav-${route}"]`);
       }
       await page.waitForTimeout(250);
+      if (route === 'connectors') {
+        // Connectors opens Settings at its own section, and a status refresh does not pull the page back to the top.
+        const connectorsTop = () => page.$eval('#settings-connectors', element => element.getBoundingClientRect().top);
+        assert.ok(Math.abs(await connectorsTop()) < 200, `Connectors opens at its section: top ${await connectorsTop()}px`);
+        await page.waitForTimeout(2500);
+        assert.ok(Math.abs(await connectorsTop()) < 200, 'a refresh keeps the place on the Connectors page');
+      }
       // The Recall page is reached from its sidebar link, and its view must render at this size.
       if (route === 'recall') await page.waitForSelector('[data-testid="view-recall"]', { timeout: 15_000 });
       await noDocumentScroll(page, `${route} route`);
