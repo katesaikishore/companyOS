@@ -2,11 +2,14 @@ import Database from 'better-sqlite3-multiple-ciphers';
 import { createDecipheriv } from 'node:crypto';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import type { CaptureKind } from './types';
 
 /**
  * 'handoffs' is no longer written, since the OpenMausBot integration was removed. Its rows from earlier versions are
  * pruned once they are past the retention window, and the data export carries the rest as stored. Nothing else reads them.
  * 'renamedAutomations' holds the ids of automations the person renamed. Their names are typed, so the export replaces them.
+ * 'screenText' and 'audioText' hold captured text. They are written only through appendCapture, which indexes the text
+ * for search in the same transaction, so the index cannot fall out of step with the records.
  */
 export const COLLECTIONS = [
   'events',
@@ -17,8 +20,63 @@ export const COLLECTIONS = [
   'handoffs',
   'taskDecisions',
   'renamedAutomations',
+  'screenText',
+  'audioText',
 ] as const;
 export type Collection = (typeof COLLECTIONS)[number];
+
+/** The collections that hold captured text. Their rows are changed only by appendCapture, pruneCapture and deleteAllCapture. */
+export const CAPTURE_COLLECTIONS = ['screenText', 'audioText'] as const;
+export type CaptureCollection = (typeof CAPTURE_COLLECTIONS)[number];
+
+const CAPTURE_COLLECTION_OF: Readonly<Record<CaptureKind, CaptureCollection>> = { screen: 'screenText', audio: 'audioText' };
+
+/** The most hits one search returns. A larger limit is cut down to this. */
+export const MAX_CAPTURE_HITS = 500;
+const CAPTURE_SNIPPET_TOKENS = 12;
+const CAPTURE_SCAN_CHARS = 240;
+
+/**
+ * One captured item to store. The text goes into the search index only. body is stored as JSON and should not repeat
+ * the text.
+ */
+export interface CaptureRecord {
+  collection: CaptureCollection;
+  kind: CaptureKind;
+  /**
+   * The item's id. For a screen item, pass the id of its image file as well (the same value as body.mediaId), so a
+   * search hit can name its image.
+   */
+  id: string;
+  ts: number;
+  app: string | null;
+  text: string;
+  body: unknown;
+}
+
+export interface CaptureQuery {
+  /**
+   * Words to find. Each is matched as a whole phrase, and the last one also as a prefix. An empty list returns the
+   * newest items in range.
+   */
+  terms: string[];
+  kind?: CaptureKind;
+  /** Inclusive bounds, in ms. */
+  from: number;
+  to: number;
+  app?: string;
+  /** At most this many hits, newest first. Capped at MAX_CAPTURE_HITS. */
+  limit: number;
+}
+
+export interface CaptureHit {
+  kind: CaptureKind;
+  id: string;
+  ts: number;
+  app: string | null;
+  /** A short piece of the stored text: around the first match when there is one, otherwise from the start. */
+  snippet: string;
+}
 
 const DATABASE_FILE = 'twin.db';
 const MIGRATION_FILE = `${DATABASE_FILE}.migrating`;
@@ -37,6 +95,18 @@ const SCHEMA = `
     body TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS records_by_collection ON records (collection, id);
+`;
+
+/**
+ * The search index for captured text. It is created by the first capture write, not when the store opens, so a store
+ * that never holds captured text has no index and is unchanged. Each row's rowid is the id of its row in records, so the
+ * two are removed together.
+ */
+const CAPTURE_INDEX = `
+  CREATE VIRTUAL TABLE IF NOT EXISTS capture_fts USING fts5(
+    text, kind UNINDEXED, recordId UNINDEXED, ts UNINDEXED, app UNINDEXED,
+    tokenize='unicode61 remove_diacritics 2'
+  );
 `;
 
 /**
@@ -62,6 +132,7 @@ export class EncryptedStore {
   }
 
   append(collection: Collection, record: unknown): void {
+    if (isCaptureCollection(collection)) throw captureWriteError();
     this.guard(() => {
       const insert = this.conn().prepare('INSERT INTO records (collection, body) VALUES (?, ?)');
       insert.run(collection, JSON.stringify(record));
@@ -79,6 +150,7 @@ export class EncryptedStore {
 
   /** Atomically replaces a whole collection. Used for small collections such as settings. */
   replaceAll(collection: Collection, records: readonly unknown[]): void {
+    if (isCaptureCollection(collection)) throw captureWriteError();
     this.guard(() => {
       const db = this.conn();
       const insert = db.prepare('INSERT INTO records (collection, body) VALUES (?, ?)');
@@ -87,6 +159,197 @@ export class EncryptedStore {
         db.prepare('DELETE FROM records WHERE collection = ?').run(collection);
         for (const record of records) insert.run(collection, JSON.stringify(record));
       })();
+    });
+  }
+
+  /**
+   * Stores one captured item and indexes its text, in one transaction: a record never exists without its index row.
+   * The text is not stored anywhere else, so pruning and deleting remove it completely.
+   */
+  appendCapture(record: CaptureRecord): void {
+    if (CAPTURE_COLLECTION_OF[record.kind] !== record.collection) {
+      throw new Error('Capture kind does not match its collection.');
+    }
+    if (!Number.isSafeInteger(record.ts)) throw new Error('Capture time must be a whole number of milliseconds.');
+    this.guard(() => {
+      const db = this.conn();
+      db.transaction(() => {
+        db.exec(CAPTURE_INDEX);
+        const row = db
+          .prepare('INSERT INTO records (collection, body) VALUES (?, ?)')
+          .run(record.collection, JSON.stringify(record.body));
+        db.prepare('INSERT INTO capture_fts (rowid, text, kind, recordId, ts, app) VALUES (?, ?, ?, ?, ?, ?)').run(
+          row.lastInsertRowid,
+          record.text,
+          record.kind,
+          record.id,
+          record.ts,
+          record.app,
+        );
+      })();
+    });
+  }
+
+  /**
+   * Searches captured text, newest first. Terms are matched as phrases, so search syntax typed by the person is never
+   * parsed. With no terms, every item in range is returned.
+   */
+  searchCapture(query: CaptureQuery): CaptureHit[] {
+    const limit = captureLimit(query.limit);
+    const terms = query.terms.map(term => term.trim()).filter(term => term.length > 0);
+    const where = ['ts >= ?', 'ts <= ?'];
+    const values: Array<string | number> = [query.from, query.to];
+    if (query.kind !== undefined) {
+      where.push('kind = ?');
+      values.push(query.kind);
+    }
+    if (query.app !== undefined) {
+      where.push('app = ?');
+      values.push(query.app);
+    }
+    let snippet = `substr(text, 1, ${CAPTURE_SCAN_CHARS})`;
+    if (terms.length > 0) {
+      where.unshift('capture_fts MATCH ?');
+      values.unshift(phraseQuery(terms));
+      snippet = `snippet(capture_fts, 0, '', '', '…', ${CAPTURE_SNIPPET_TOKENS})`;
+    }
+    return this.guard(() => {
+      // A store with no capture has no index, so nothing can match.
+      if (!this.hasCaptureIndex()) return [];
+      return this.conn()
+        .prepare(
+          `SELECT kind, recordId AS id, ts, app, ${snippet} AS snippet
+           FROM capture_fts WHERE ${where.join(' AND ')}
+           ORDER BY ts DESC, rowid DESC LIMIT ?`,
+        )
+        .all(...values, limit) as CaptureHit[];
+    });
+  }
+
+  /**
+   * Deletes captured items older than the cutoff, with their text. Returns the image ids of the deleted screen items,
+   * so the caller can delete the image files too.
+   */
+  pruneCapture(cutoffMs: number): { removed: number; mediaIds: string[] } {
+    return this.guard(() => {
+      const db = this.conn();
+      // One transaction: the images are listed before their rows go, and the rows and index go together.
+      return db.transaction((): { removed: number; mediaIds: string[] } => {
+        if (!this.hasCaptureIndex()) return { removed: 0, mediaIds: [] };
+        const mediaIds = (
+          db
+            .prepare(
+              `SELECT json_extract(r.body, '$.mediaId') AS mediaId FROM capture_fts f JOIN records r ON r.id = f.rowid
+               WHERE f.kind = 'screen' AND f.ts < ? AND json_extract(r.body, '$.mediaId') IS NOT NULL`,
+            )
+            .all(cutoffMs) as Array<{ mediaId: string }>
+        ).map(row => row.mediaId);
+        const removed = db
+          .prepare('DELETE FROM records WHERE id IN (SELECT rowid FROM capture_fts WHERE ts < ?)')
+          .run(cutoffMs).changes;
+        db.prepare('DELETE FROM capture_fts WHERE ts < ?').run(cutoffMs);
+        return { removed, mediaIds };
+      })();
+    });
+  }
+
+  /** Deletes every captured item and its text. Returns the image ids, so the caller can delete the image files too. */
+  deleteAllCapture(): { mediaIds: string[] } {
+    return this.guard(() => {
+      const db = this.conn();
+      return db.transaction(() => {
+        const mediaIds = (
+          db
+            .prepare(
+              `SELECT json_extract(body, '$.mediaId') AS mediaId FROM records
+               WHERE collection = 'screenText' AND json_extract(body, '$.mediaId') IS NOT NULL`,
+            )
+            .all() as Array<{ mediaId: string }>
+        ).map(row => row.mediaId);
+        db.prepare(`DELETE FROM records WHERE collection IN ('screenText', 'audioText')`).run();
+        if (this.hasCaptureIndex()) db.prepare('DELETE FROM capture_fts').run();
+        return { mediaIds };
+      })();
+    });
+  }
+
+  /**
+   * Deletes the captured items of one app, with their text and index rows. Returns their image ids, so the caller can
+   * delete the image files too. The name is compared as stored, which is the name the agent normalised.
+   */
+  deleteCaptureForApp(app: string): { mediaIds: string[] } {
+    return this.guard(() => {
+      const db = this.conn();
+      return db.transaction((): { mediaIds: string[] } => {
+        if (!this.hasCaptureIndex()) return { mediaIds: [] };
+        // The images are listed before their rows go, in the same transaction.
+        const mediaIds = (
+          db
+            .prepare(
+              `SELECT json_extract(r.body, '$.mediaId') AS mediaId FROM capture_fts f JOIN records r ON r.id = f.rowid
+               WHERE f.app = ? AND json_extract(r.body, '$.mediaId') IS NOT NULL`,
+            )
+            .all(app) as Array<{ mediaId: string }>
+        ).map(row => row.mediaId);
+        db.prepare('DELETE FROM records WHERE id IN (SELECT rowid FROM capture_fts WHERE app = ?)').run(app);
+        db.prepare('DELETE FROM capture_fts WHERE app = ?').run(app);
+        return { mediaIds };
+      })();
+    });
+  }
+
+  /** The distinct app names of the stored captured items. Lets the agent find the items of an app that is now excluded. */
+  captureApps(): string[] {
+    return this.guard(() => {
+      if (!this.hasCaptureIndex()) return [];
+      return (
+        this.conn().prepare('SELECT DISTINCT app FROM capture_fts WHERE app IS NOT NULL').all() as Array<{ app: string }>
+      ).map(row => row.app);
+    });
+  }
+
+  /**
+   * Replaces the image reference of the given screen items with null. Their text stays. Call it once the image files
+   * are deleted, so the store no longer names an image that is gone. The ids are image ids: for a screen item, its item
+   * id is the same value.
+   */
+  clearCaptureMedia(mediaIds: readonly string[]): void {
+    if (mediaIds.length === 0) return;
+    this.guard(() => {
+      this.conn()
+        .prepare(
+          `UPDATE records SET body = json_set(body, '$.mediaId', json('null'))
+           WHERE collection = 'screenText' AND json_extract(body, '$.mediaId') IN (SELECT value FROM json_each(?))`,
+        )
+        .run(JSON.stringify(mediaIds));
+    });
+  }
+
+  /** How many captured items are stored, by kind. */
+  captureCounts(): { screen: number; audio: number } {
+    return this.guard(() => {
+      const rows = this.conn()
+        .prepare(
+          `SELECT collection, count(*) AS n FROM records
+           WHERE collection IN ('screenText', 'audioText') GROUP BY collection`,
+        )
+        .all() as Array<{ collection: CaptureCollection; n: number }>;
+      const count = (collection: CaptureCollection): number => rows.find(row => row.collection === collection)?.n ?? 0;
+      return { screen: count('screenText'), audio: count('audioText') };
+    });
+  }
+
+  /** The oldest screen items that have an image, oldest first. Used to keep the image folder under its size cap. */
+  oldestScreenMedia(limit: number): Array<{ id: string; mediaId: string; ts: number }> {
+    const max = captureLimit(limit);
+    return this.guard(() => {
+      if (!this.hasCaptureIndex()) return [];
+      return this.conn()
+        .prepare(
+          `SELECT f.recordId AS id, json_extract(r.body, '$.mediaId') AS mediaId, f.ts AS ts FROM capture_fts f JOIN records r ON r.id = f.rowid
+           WHERE f.kind = 'screen' AND json_extract(r.body, '$.mediaId') IS NOT NULL ORDER BY f.ts ASC, f.rowid ASC LIMIT ?`,
+        )
+        .all(max) as Array<{ id: string; mediaId: string; ts: number }>;
     });
   }
 
@@ -119,6 +382,11 @@ export class EncryptedStore {
   private conn(): Database.Database {
     if (!this.db) throw new Error('The store is closed.');
     return this.db;
+  }
+
+  /** Whether the search index exists. Only a capture write creates it, so a store without captured text has none. */
+  private hasCaptureIndex(): boolean {
+    return this.conn().prepare(`SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'capture_fts'`).get() !== undefined;
   }
 
   /** SQLCipher reports a wrong key or an altered page as NOTADB or CORRUPT. Both mean the store cannot be trusted. */
@@ -208,6 +476,30 @@ export class EncryptedStore {
 function asStoreError(error: unknown): unknown {
   const code = (error as { code?: unknown } | null)?.code;
   return code === 'SQLITE_NOTADB' || code === 'SQLITE_CORRUPT' ? new Error(UNREADABLE, { cause: error }) : error;
+}
+
+function isCaptureCollection(collection: Collection): collection is CaptureCollection {
+  return (CAPTURE_COLLECTIONS as readonly string[]).includes(collection);
+}
+
+function captureWriteError(): Error {
+  return new Error('Captured text is written through appendCapture, not append or replaceAll.');
+}
+
+/** A search or listing limit. Must be a whole number of at least 1, and is capped at MAX_CAPTURE_HITS. */
+function captureLimit(limit: number): number {
+  if (!Number.isInteger(limit) || limit < 1) throw new Error('The limit must be a whole number of at least 1.');
+  return Math.min(limit, MAX_CAPTURE_HITS);
+}
+
+/**
+ * Builds an FTS5 query from words. Each word is a quoted phrase, with inner quotes doubled, so FTS operators such as
+ * AND, NEAR, * or column filters typed by the person are only ever text. The last word also matches as a prefix.
+ */
+function phraseQuery(terms: string[]): string {
+  return terms
+    .map((term, index) => `"${term.replace(/"/g, '""')}"${index === terms.length - 1 ? '*' : ''}`)
+    .join(' ');
 }
 
 /**

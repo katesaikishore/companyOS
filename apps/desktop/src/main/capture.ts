@@ -25,7 +25,12 @@ const IDLE_THRESHOLD_SECONDS = 300;
 export class CaptureService {
   private timer: NodeJS.Timeout | undefined;
   private paused = false;
-  private locked = false;
+  /**
+   * The screen's lock state. It starts unknown, and stays unknown until the operating system says or a lock event arrives.
+   * Screen and microphone reads treat unknown as locked (see holds). The app-switch log stops only for a known lock, so a
+   * system that cannot report the lock still records app switches, as it did before the lock was known.
+   */
+  private lock: 'locked' | 'unlocked' | 'unknown' = 'unknown';
   private idle = false;
   private readonly tracker = new FrontAppTracker();
   private detail: string;
@@ -38,10 +43,28 @@ export class CaptureService {
 
   get state(): CaptureState {
     if (!this.deps.platform) return 'unsupported';
-    if (this.locked) return 'locked';
+    if (this.lock === 'locked') return 'locked';
     if (this.paused) return 'paused';
     if (this.idle) return 'idle';
     return 'capturing';
+  }
+
+  /**
+   * The holds on screen and microphone capture. Unknown lock state counts as locked, so nothing is read before the screen's
+   * state is known. The app-switch log is not held by it.
+   */
+  holds(): { locked: boolean; paused: boolean; idle: boolean } {
+    return { locked: this.lock !== 'unlocked', paused: this.paused, idle: this.idle };
+  }
+
+  /** A lock the operating system or an event has reported. Unknown is not a lock here, see the note on the lock field. */
+  private knownLocked(): boolean {
+    return this.lock === 'locked';
+  }
+
+  /** Whether the lock state is known yet. */
+  get lockKnown(): boolean {
+    return this.lock !== 'unknown';
   }
 
   get status(): { state: CaptureState; detail: string } {
@@ -63,9 +86,19 @@ export class CaptureService {
     this.paused = paused;
   }
 
+  /** A lock or unlock event from the operating system. It is recorded in the activity log. */
   setLocked(locked: boolean): void {
-    this.locked = locked;
+    this.lock = locked ? 'locked' : 'unlocked';
     this.deps.agent.ingest({ kind: locked ? 'lock' : 'unlock', ts: this.now() });
+  }
+
+  /**
+   * The lock state read from the operating system at start, or on a later check while it is still unknown. It is not recorded
+   * as an event, since no change was seen. It does nothing once the state is known, so a stale read cannot overwrite an event.
+   */
+  learnLock(locked: boolean): void {
+    if (this.lock !== 'unknown') return;
+    this.lock = locked ? 'locked' : 'unlocked';
   }
 
   /** The browser bridge reported a visit. The poll leaves that browser's change to the bridge while the visit is recent. */
@@ -77,8 +110,8 @@ export class CaptureService {
     const platform = this.deps.platform;
     if (!platform) return;
 
-    // Pause and lock stop everything, including idle bookkeeping. Nothing is recorded while they are on.
-    if (this.paused || this.locked) return;
+    // Pause and a known lock stop everything, including idle bookkeeping. Nothing is recorded while they are on.
+    if (this.paused || this.knownLocked()) return;
 
     const ts = this.now();
     const idle = this.deps.idleSeconds() >= IDLE_THRESHOLD_SECONDS;
@@ -97,7 +130,7 @@ export class CaptureService {
       return;
     }
     // The poll can take a second, so the state may have changed while it ran. Check again before storing.
-    if (this.paused || this.locked || this.idle) return;
+    if (this.paused || this.knownLocked() || this.idle) return;
     if (!app || isOwnApp(app)) return;
 
     const recorded = this.tracker.observe(app, ts, this.deps.bridgeRunning());

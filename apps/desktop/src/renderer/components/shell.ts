@@ -55,6 +55,12 @@ const SEARCH: Shape[] = [
   ['circle', { cx: '11', cy: '11', r: '7' }],
   ['path', { d: 'm20 20-3.5-3.5' }],
 ];
+/** A clock turned back, for what was read or heard earlier. */
+const RECALL: Shape[] = [
+  ['path', { d: 'M4 12a8 8 0 1 0 2.3-5.6' }],
+  ['path', { d: 'M4 4v4.5h4.5' }],
+  ['path', { d: 'M12 8v4l2.5 1.5' }],
+];
 export const LOCK: Shape[] = [
   ['rect', { x: '5', y: '11', width: '14', height: '10', rx: '2' }],
   ['path', { d: 'M8 11V8a4 4 0 0 1 8 0v3' }],
@@ -90,6 +96,14 @@ export function shell(status: TwinStatus, route: Route, content: Child): HTMLEle
       icon: OVERVIEW,
       tone: 'blue',
       active: route.name === 'overview' || route.name === 'review',
+    },
+    {
+      label: 'Recall',
+      href: '#/recall',
+      testid: 'nav-recall',
+      icon: RECALL,
+      tone: 'blue',
+      active: route.name === 'recall',
     },
     {
       label: 'Suggestions',

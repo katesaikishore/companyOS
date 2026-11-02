@@ -78,6 +78,10 @@ export const MAX_DECLINE_STREAK = 32;
 /** The longest dismissed-routine signature kept. A longer one is not stored, so its routine is hidden by id only. */
 export const MAX_SIGNATURE_CHARS = 2048;
 
+/** The two kinds of captured item: text read from the screen, and text from the microphone. */
+export const CAPTURE_KINDS = ['screen', 'audio'] as const;
+export type CaptureKind = (typeof CAPTURE_KINDS)[number];
+
 export const TwinConfigSchema = z
   .object({
     excludedApps: z.array(z.string().min(1).max(100)).max(200),
@@ -110,9 +114,31 @@ export const TwinConfigSchema = z
       )
       .max(500)
       .default([]),
+    /** Screen text from the primary display. Off until the person turns it on, in settings or during setup. */
+    screenCaptureEnabled: z.boolean().default(false),
+    /** Microphone text. Off until the person turns it on, in settings or during setup. */
+    audioCaptureEnabled: z.boolean().default(false),
+    /** The read-only API on 127.0.0.1 for other programs on this device. Off until the person turns it on. */
+    localApiEnabled: z.boolean().default(false),
+    /** How many days captured screen images are kept. Their text is kept for the same 90 days as the rest of the history. */
+    frameRetentionDays: z.union([z.literal(1), z.literal(3), z.literal(7), z.literal(14)]).default(7),
+    /** Whether the person paused screen and microphone capture. Kept here, so a relaunch keeps the pause. Set by the pause control. */
+    capturePaused: z.boolean().default(false),
   })
   .strict();
 export type TwinConfig = z.infer<typeof TwinConfigSchema>;
+
+/**
+ * The config after a settings patch, checked as a whole. The merged object is parsed, never the patch on its own: a patch
+ * parsed alone gets every defaulted field filled in with its default, and that would overwrite each saved value the patch
+ * does not name. A key whose value is undefined is not a change. Throws on anything that is not an object, and on an
+ * unknown key or a value the schema refuses.
+ */
+export function mergeConfigPatch(current: TwinConfig, patch: unknown): TwinConfig {
+  if (typeof patch !== 'object' || patch === null || Array.isArray(patch)) throw new Error('Invalid settings.');
+  const changes = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined));
+  return TwinConfigSchema.parse({ ...current, ...changes });
+}
 
 export const DEFAULT_CONFIG: TwinConfig = {
   excludedApps: [
@@ -141,4 +167,10 @@ export const DEFAULT_CONFIG: TwinConfig = {
   agentDesktopPath: '',
   dismissedRoutineSignatures: [],
   declinedRoutines: [],
+  // Screen and microphone capture, and the local API, stay off until the person turns them on.
+  screenCaptureEnabled: false,
+  audioCaptureEnabled: false,
+  localApiEnabled: false,
+  frameRetentionDays: 7,
+  capturePaused: false,
 };

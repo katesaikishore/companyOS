@@ -516,8 +516,12 @@ function fakePlatform(file: string): Platform {
   };
 }
 
-export async function choosePlatform(): Promise<PlatformChoice> {
-  const fake = process.env.COMPANYOS_TEST_FAKE_PLATFORM;
+/**
+ * The platform for this run. A packaged app never takes the test platform, so the variable cannot change what a person's
+ * installed app reads. Tests and scripts run unpackaged and keep the variable.
+ */
+export async function choosePlatform(packaged = false): Promise<PlatformChoice> {
+  const fake = packaged ? undefined : process.env.COMPANYOS_TEST_FAKE_PLATFORM;
   if (fake) return { platform: fakePlatform(fake), detail: 'Test platform' };
   if (process.platform === 'darwin') {
     return { platform: macOS, detail: 'macOS: the first capture may ask for Automation permission.' };

@@ -1,4 +1,5 @@
-import type { HardwareProfile, RunResult, SetupPlan, TwinBridge, TwinConfig, TwinStatus } from '@companyos/twin-core';
+import type { CaptureHitView, HardwareProfile, RunResult, SetupPlan, TwinBridge, TwinConfig, TwinStatus } from '@companyos/twin-core';
+import type { RecallKind, RecallRange } from './recall-model.js';
 
 export type Route =
   | { name: 'overview' }
@@ -12,7 +13,20 @@ export type Route =
   | { name: 'review' }
   /** What the twin knows: its routines, its habits, what the person said no to, and today's tasks. */
   | { name: 'knows' }
+  /** Search of the text the twin read on screen or heard. Its results are cleared when the page is left. */
+  | { name: 'recall' }
   | { name: 'settings' };
+
+/** The Recall page's search. The words and filters stay so a redraw keeps them. The hits are the last search's result. */
+export interface RecallState {
+  text: string;
+  kind: RecallKind;
+  range: RecallRange;
+  /** The last search's hits, newest first. Unset until the first search. */
+  hits?: CaptureHitView[];
+  /** The screen item whose image is open, by its id. */
+  open?: string;
+}
 
 export interface Notice {
   text: string;
@@ -50,6 +64,10 @@ export const state = {
   runResults: new Map<string, StoredRun>(),
   /** The automation whose name is being edited, and the text typed so far. Unset when no name is being edited. */
   renaming: undefined as { automationId: string; draft: string } | undefined,
+  /** The Recall page's search. Its hits are cleared when the page is left. */
+  recall: { text: '', kind: 'all', range: 'today' } as RecallState,
+  /** Screen images the Recall page has read, as data URLs, or null when one is not available. Capped, and cleared when the page is left. */
+  frames: new Map<string, string | null>(),
 };
 
 let renderer: (() => void) | undefined;
@@ -156,6 +174,8 @@ export function routeFromHash(hash: string): Route {
       return { name: 'review' };
     case 'knows':
       return { name: 'knows' };
+    case 'recall':
+      return { name: 'recall' };
     case 'settings':
       return { name: 'settings' };
     default:

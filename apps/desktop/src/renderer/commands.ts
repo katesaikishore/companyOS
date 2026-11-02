@@ -15,6 +15,7 @@ let activeIndex = 0;
 function availableCommands(): Command[] {
   const pages: Command[] = [
     { title: 'Your twin', detail: 'Open overview', run: () => go('#/overview') },
+    { title: 'Recall', detail: 'Search the text the twin read or heard', run: () => go('#/recall') },
     { title: 'Suggestions', detail: 'Review routines the twin noticed', run: () => go('#/suggestions') },
     { title: 'Automations', detail: 'Review accepted routines and runs', run: () => go('#/automations') },
     { title: 'What the twin knows', detail: 'See routines, habits and declines', run: () => go('#/knows') },

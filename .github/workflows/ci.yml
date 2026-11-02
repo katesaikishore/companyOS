@@ -19,6 +19,8 @@ jobs:
     env:
       # Unsigned CI builds. Release signing uses secrets in a separate, tag-triggered job.
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      # onnxruntime-node would download its CUDA GPU provider (gigabytes) on install. The app runs on the CPU, so skip it.
+      ONNXRUNTIME_NODE_INSTALL_CUDA: 'skip'
     steps:
       - uses: actions/checkout@v4
 

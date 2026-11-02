@@ -33,6 +33,8 @@ jobs:
     env:
       # electron-builder must not pick up a certificate that happens to be on the runner.
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      # The app runs on the CPU. Skipping the CUDA provider keeps the install small and leaves room on the runner.
+      ONNXRUNTIME_NODE_INSTALL_CUDA: 'skip'
     steps:
       - uses: actions/checkout@v4
 

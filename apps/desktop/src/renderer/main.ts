@@ -8,6 +8,7 @@ import { knowsView } from './views/knows.js';
 import { ledgerView } from './views/ledger.js';
 import { readinessView } from './views/readiness.js';
 import { overviewView } from './views/overview.js';
+import { forgetRecall, recallView } from './views/recall.js';
 import { reviewView } from './views/review.js';
 import { settingsView } from './views/settings.js';
 import { setupView } from './views/setup.js';
@@ -95,6 +96,8 @@ function signature(status: TwinStatus | undefined): string {
     setup: state.setup,
     selection: [state.selectedSuggestion, state.selectedLedger, state.automationTab, state.renaming?.automationId],
     runs: [...state.runResults.entries()],
+    // The Recall search is compared only on its own page. Its images are listed by id, not by their data.
+    recall: state.route.name === 'recall' ? { ...state.recall, frames: [...state.frames.keys()] } : undefined,
   });
 }
 
@@ -132,6 +135,8 @@ function viewFor(status: TwinStatus, route: Route): HTMLElement {
       return automationDetailView(status, route.id);
     case 'knows':
       return knowsView(status);
+    case 'recall':
+      return recallView(status);
     case 'ledger':
       return ledgerView(status);
     case 'readiness':
@@ -194,7 +199,10 @@ function boot(): void {
   setKicker(() => schedulePoll(300));
 
   window.addEventListener('hashchange', () => {
+    const previous = state.route;
     state.route = routeFromHash(location.hash);
+    // Recall results and the images read on that page are cleared when the page is left.
+    if (previous.name === 'recall' && state.route.name !== 'recall') forgetRecall();
     state.dirty.clear();
     state.renaming = undefined;
     // Read status for the new route. The poll runs only while the window is visible, so a hidden window would show old data.

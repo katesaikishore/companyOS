@@ -1,0 +1,69 @@
+---
+title: "Recall"
+description: "Search the text the twin reads on your screen and hears on your microphone. Off by default, and kept encrypted on this device"
+---
+
+Recall keeps two kinds of text and lets you search them on the **Recall** page. Both are off until you turn them on, in setup or in **Settings**, under **Screen and audio**.
+
+- **Screen text** is the text read from the primary display, kept with a small image of the screen.
+- **Microphone text** is speech turned into text on this device, in 30-second parts.
+
+Recall is a preview. Its Screen Recording and microphone prompts have not yet been checked on a Mac with a password field on screen, so keep it off unless you are testing it.
+
+## Turn it on
+
+Setup has a Recall step with both switches off:
+
+- **Read text on screen** reads the primary display.
+- **Transcribe the microphone** turns speech into text on this device. It needs the speech model, which you install in Settings under Screen and audio. Until it is installed, the switch is disabled.
+
+Each switch saves at once, and you can change either one later in Settings.
+
+## What is read
+
+Screen text is read only when what is on the primary display changes, and after you switch apps. It is checked about every five seconds. On a machine where text reading is slow, the checks come about every fifteen seconds instead, so the computer is not kept busy. It is read only on macOS in this version. Windows and Linux do not read screen text, because the check for a focused password field runs only on macOS. On macOS, the app also needs Screen Recording permission.
+
+Nothing is read in these cases:
+
+- capture is paused, the screen is locked, or you are away from the keyboard
+- the app in front is excluded (see [Privacy](/privacy))
+- a browser window is in front, because private windows cannot be told apart from ordinary ones
+- a password field may have focus, or the check for one cannot run
+- Screen Recording permission has not been granted
+
+Microphone text is read in 30-second parts, and a part that is almost silent is dropped. Nothing is heard while capture is paused, the screen is locked, or you are away. The microphone also picks up people nearby and on calls, so check the recording rules where you work first. System audio is not recorded.
+
+Screen text is whatever OCR reads from the screen. OCR reads everything visible, including window titles, chat messages, and any password shown as plain text. Password managers are excluded by default. The checks on the app in front, the pause, the lock and the idle check are the only protection. They do not cover what is visible behind the app in front: a browser window or an excluded app there is read, and its text is stored under the name of the app in front. Excluding that browser or excluded app later does not remove that text. Excluding the app in front does remove it. So these checks are not complete.
+
+## Where it is kept
+
+- Text goes into the same encrypted database as your activity, and it is indexed for search.
+- Each kept screen image is a small JPEG, sealed with a key derived from your data key. Its image file is readable only by your user account. Without the data key, the image cannot be opened.
+- Text is kept for 90 days, then removed.
+- Images are kept for 1, 3, 7 or 14 days, which you choose in Settings. The default is 7. The text stays after its image is removed.
+- The image folder holds up to 2 GB. When it is full, the oldest images are removed first, and their text stays.
+- A frame with no readable text is not kept. Neither is a frame that repeats the one kept before it.
+
+## Search
+
+Open **Recall** in the sidebar. Type words and press Enter, or pick a range to list what was recorded. The range is **Today** or **Last 7 days**. Filter by **Everything**, **Screen** or **Microphone**. Results are grouped by hour. Click a screen result to see its image, if the image is still kept.
+
+## Delete
+
+- **Delete screen and audio text** in Settings removes every stored screen and microphone item, with its text and its images. Your activity and automations are not touched.
+- **Delete everything** removes them too.
+- An export shows only the number of screen and microphone items and their date range. It holds no text and no images.
+
+## Local API
+
+The local API is off by default. When it is on, programs on this device can search the stored text and read the screen images, with a token. It listens on `127.0.0.1` only. It refuses a request whose host is not `127.0.0.1` or `localhost`, and any request that carries a browser `Origin` header.
+
+Every route is `GET` only. Every route except `/health` needs the token. `/health` says only that the API is running. The routes are `/v1/status`, `/v1/search` and `/v1/frames/:id`.
+
+Search and image requests are refused while **Read text on screen** is off, microphone text included. `/v1/status` still answers. Anyone who holds the token can read the stored text and images for as long as they are kept, so turn the local API off, or rotate the token, if it may have leaked.
+
+Use **Copy token** in Settings to give the token to a program. The page never shows the token. **Rotate token** makes the old token stop working at once. If the new token cannot be saved, the local API is switched off, so the old token stops working too.
+
+## What leaves the device
+
+Recall text and screen images are not sent anywhere. The microphone's speech model is downloaded from Hugging Face only when you install it. Each file is checked against its SHA-256 digest, and each file is recorded in the network ledger. The local API answers only programs on this device.

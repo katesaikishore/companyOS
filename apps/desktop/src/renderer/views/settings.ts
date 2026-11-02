@@ -1,17 +1,22 @@
-import type { TwinConfig, TwinStatus } from '@companyos/twin-core';
+import type { CaptureChannelState, CapturePermission, TwinConfig, TwinStatus } from '@companyos/twin-core';
 import { h, type Child } from '../dom.js';
+import { SPEECH_MODEL_ID } from '../speech-model.js';
 import { button, chip, exclusionEditor, toggleRow } from '../components/ui.js';
-import { formatBytes } from '../format.js';
-import { layaState, layaStateLabel } from '../labels.js';
+import { formatBytes, plural } from '../format.js';
+import { captureChannelNote, layaState, layaStateLabel, modelState, modelStateLabel } from '../labels.js';
+import { TEXT_KEPT_DAYS } from '../recall-model.js';
 import { act, bridge, confirmDeleteAll, pending, saveConfig, setNotice, state } from '../store.js';
+import { forgetRecall } from './recall.js';
 import { openSetup } from './setup.js';
 
 type Theme = TwinConfig['theme'];
 type InstalledModel = TwinStatus['config']['installedModels'][number];
-type SectionId = 'capture' | 'automations' | 'models' | 'appearance' | 'data';
+type RetentionDays = TwinConfig['frameRetentionDays'];
+type SectionId = 'capture' | 'recall' | 'automations' | 'models' | 'appearance' | 'data';
 
 const SECTIONS: ReadonlyArray<{ id: SectionId; label: string }> = [
   { id: 'capture', label: 'Capture' },
+  { id: 'recall', label: 'Screen and audio' },
   { id: 'automations', label: 'Automations' },
   { id: 'models', label: 'Models' },
   { id: 'appearance', label: 'Appearance' },
@@ -23,6 +28,9 @@ const THEMES: Array<{ value: Theme; label: string; testid: string }> = [
   { value: 'light', label: 'Light', testid: 'settings-theme-light' },
   { value: 'dark', label: 'Dark', testid: 'settings-theme-dark' },
 ];
+
+/** The days a screen image can be kept, as the config allows them. */
+const RETENTION_OPTIONS: ReadonlyArray<RetentionDays> = [1, 3, 7, 14];
 
 const LEVELS: Array<{ value: 3 | 4; label: string; note?: string }> = [
   { value: 3, label: 'Level 3 · Run with you', note: 'One click per run' },
@@ -58,7 +66,14 @@ export function settingsView(status: TwinStatus): HTMLElement {
       h(
         'div',
         { class: 'settings-card' },
-        capturePanel(config.watchBrowsers, config.excludedApps, config.idleGapMs),
+        capturePanel(
+          config.watchBrowsers,
+          config.excludedApps,
+          config.idleGapMs,
+          config.screenCaptureEnabled,
+          config.audioCaptureEnabled && config.installedModels.some(model => model.id === SPEECH_MODEL_ID),
+        ),
+        recallPanel(status),
         automationsPanel(config),
         modelsPanel(status),
         appearancePanel(config.theme),
@@ -194,9 +209,25 @@ function appearancePanel(current: Theme): HTMLElement {
   );
 }
 
-function capturePanel(watchBrowsers: boolean, excluded: readonly string[], idleGapMs: number): HTMLElement {
+function capturePanel(
+  watchBrowsers: boolean,
+  excluded: readonly string[],
+  idleGapMs: number,
+  screenOn: boolean,
+  micOn: boolean,
+): HTMLElement {
   return sectionCard(
-    { id: 'capture', testid: 'settings-capture', title: 'Capture', note: 'App names and timing only. No titles, keystrokes or screenshots.' },
+    {
+      id: 'capture',
+      testid: 'settings-capture',
+      title: 'Capture',
+      // With screen or microphone text on, the note cannot say only app names and timing are kept, so it says what is recorded.
+      note: screenOn
+        ? 'Screen text is being recorded. Set it in Screen and audio below.'
+        : micOn
+          ? 'Microphone text is being recorded. Set it in Screen and audio below.'
+          : 'App names and timing only. No titles, keystrokes or screenshots.',
+    },
     row(
       toggleRow({
         testid: 'settings-browsers',
@@ -209,7 +240,7 @@ function capturePanel(watchBrowsers: boolean, excluded: readonly string[], idleG
     block(
       textBlock(
         'Excluded apps',
-        'The twin forgets anything it recorded from an excluded app and never records it again. Handoff records saved by an earlier version may still name the app until they are removed after 90 days, or until you delete everything.',
+        'The twin forgets anything it recorded from an excluded app and never records it again. Screen text read from an excluded app\'s window while another app was in front is stored under that other app, and it is not forgotten. Handoff records saved by an earlier version may still name the app until they are removed after 90 days, or until you delete everything.',
       ),
       exclusionEditor('exclusions:settings', excluded, 'settings-exclusions', next =>
         void saveConfig('exclusions:settings', { excludedApps: next }),
@@ -220,6 +251,163 @@ function capturePanel(watchBrowsers: boolean, excluded: readonly string[], idleG
       h('span', { class: 'settings-value mono' }, `${Math.round(idleGapMs / 60_000)} min`),
     ),
   );
+}
+
+/**
+ * Screen text, microphone text and the local API. All three are off until the person turns them on. Each switch saves
+ * at once, and the token stays in the main process: the page only copies it or rotates it.
+ */
+function recallPanel(status: TwinStatus): HTMLElement {
+  const config = status.config;
+  const capture = status.capture;
+  // Microphone text needs the speech model. The switch can only be on while the model is installed.
+  const speechInstalled = config.installedModels.some(model => model.id === SPEECH_MODEL_ID);
+  return sectionCard(
+    {
+      id: 'recall',
+      testid: 'settings-recall',
+      title: 'Screen and audio',
+      note: 'Both are off until you turn them on. Their text is encrypted on this device and searched on the Recall page.',
+    },
+    row(
+      toggleRow({
+        testid: 'settings-screen',
+        label: 'Read text on screen',
+        note: 'Reads the whole primary display when what is on it changes. A browser, an excluded app or a password field is skipped only when it has focus, so a window of one visible behind another app can still be read. Paused or locked capture is skipped. On macOS it needs Screen Recording permission.',
+        checked: config.screenCaptureEnabled,
+        onChange: checked => void saveConfig('screen-capture', { screenCaptureEnabled: checked }),
+      }),
+    ),
+    permissionRow('screen', capture.screenState),
+    row(
+      toggleRow({
+        testid: 'settings-audio',
+        label: 'Transcribe the microphone',
+        note: speechInstalled
+          ? 'Turns speech into text on this device, in 30-second parts. It also hears people nearby and on calls, so check the recording rules where you work first.'
+          : 'Needs the speech model below. Until it is installed, the microphone is not heard.',
+        checked: config.audioCaptureEnabled && speechInstalled,
+        disabled: !speechInstalled,
+        onChange: checked => void saveConfig('audio-capture', { audioCaptureEnabled: checked }),
+      }),
+    ),
+    speechRow(status),
+    permissionRow('microphone', capture.audioState),
+    row(
+      textBlock(
+        'Keep screen images for',
+        `Images are the largest part of the store, so they have their own period. Their text is kept for ${TEXT_KEPT_DAYS} days, as the rest of the history is.`,
+      ),
+      retentionSelect(config.frameRetentionDays),
+    ),
+    row(
+      toggleRow({
+        testid: 'settings-local-api',
+        label: 'Local API on this device',
+        note: 'Off by default. Other programs on this device can search the stored text and read the stored screen images, with a token. It listens on 127.0.0.1 only.',
+        checked: config.localApiEnabled,
+        onChange: checked => void saveConfig('local-api', { localApiEnabled: checked }),
+      }),
+    ),
+    apiRow(config.localApiEnabled, capture.apiState),
+    row(
+      textBlock(
+        'Stored on this device',
+        `${plural(capture.screenCount, 'screen item')} and ${plural(capture.audioCount, 'microphone item')}, with ${formatBytes(capture.mediaBytes)} of screen images.`,
+      ),
+      button('Delete screen and audio text', {
+        variant: 'danger-outline',
+        testid: 'settings-delete-capture',
+        disabled: pending('capture-delete'),
+        onClick: () =>
+          void act('capture-delete', async () => {
+            // The main process asks the person first. The page drops what it had read, whether or not it went ahead.
+            await bridge().deleteCapture();
+            forgetRecall();
+          }),
+      }),
+    ),
+  );
+}
+
+/** How many days a screen image is kept. The text is kept longer, as the copy says. */
+function retentionSelect(current: RetentionDays): HTMLElement {
+  const select = h(
+    'select',
+    {
+      class: 'select',
+      'data-testid': 'settings-retention',
+      'aria-label': 'Keep screen images for',
+      disabled: pending('retention'),
+      onchange: () => {
+        const days = Number(select.value) as RetentionDays;
+        void saveConfig('retention', { frameRetentionDays: days });
+      },
+    },
+    ...RETENTION_OPTIONS.map(days => h('option', { value: String(days) }, days === 1 ? '1 day' : `${days} days`)),
+  );
+  select.value = String(current);
+  return select;
+}
+
+/** Shows the API's state, and the token's two actions. The actions need the API on, and the token never reaches the page. */
+function apiRow(enabled: boolean, apiState: TwinStatus['capture']['apiState']): HTMLElement {
+  const note =
+    apiState === 'failed'
+      ? 'The API could not start. Another program on this device may be using its port.'
+      : 'Copy the token to give to a program on this device. Rotating it stops the old token at once.';
+  return row(
+    textBlock('API token', enabled ? note : 'Turn the local API on to get a token.'),
+    h(
+      'div',
+      { class: 'actions' },
+      button('Copy token', {
+        testid: 'settings-api-copy',
+        disabled: !enabled || pending('api-copy'),
+        onClick: () =>
+          void act('api-copy', async () => {
+            await bridge().copyApiToken();
+            setNotice('Token copied to the clipboard.', 'info');
+          }),
+      }),
+      button('Rotate token', {
+        variant: 'danger-outline',
+        testid: 'settings-api-rotate',
+        disabled: !enabled || pending('api-rotate'),
+        onClick: () => void act('api-rotate', () => bridge().rotateApiToken()),
+      }),
+    ),
+  );
+}
+
+/**
+ * A row for a channel that cannot record until the operating system allows it. The row offers the two ways to ask.
+ * Other states get a short note when they need one, and none otherwise.
+ */
+function permissionRow(permission: CapturePermission, channel: CaptureChannelState): HTMLElement | undefined {
+  const name = permission === 'screen' ? 'Screen Recording' : 'Microphone';
+  if (channel === 'needs_permission') {
+    const key = `permission:${permission}`;
+    return row(
+      textBlock(`${name} permission`, captureChannelNote(channel) ?? ''),
+      h(
+        'div',
+        { class: 'actions' },
+        button('Allow', {
+          testid: `settings-permission-${permission}`,
+          disabled: pending(key),
+          onClick: () => void act(key, () => bridge().requestPermission(permission)),
+        }),
+        button('Privacy settings', {
+          testid: `settings-privacy-${permission}`,
+          disabled: pending(`privacy:${permission}`),
+          onClick: () => void act(`privacy:${permission}`, () => bridge().openPrivacySettings(permission)),
+        }),
+      ),
+    );
+  }
+  const note = captureChannelNote(channel);
+  return note ? row(textBlock(name, note)) : undefined;
 }
 
 function automationsPanel(config: TwinConfig): HTMLElement {
@@ -319,6 +507,48 @@ function levelButton(level: (typeof LEVELS)[number], current: number): HTMLEleme
   );
 }
 
+/**
+ * The speech model that microphone text needs. It is installed and removed like the other models: the download is checked
+ * against its pinned digests, and the record is kept only when every file matches.
+ */
+function speechRow(status: TwinStatus): HTMLElement {
+  const current = modelState(status, SPEECH_MODEL_ID);
+  return h(
+    'div',
+    { class: 'settings-row settings-model', 'data-testid': 'settings-speech', 'data-state': current },
+    h(
+      'div',
+      { class: 'settings-model-main' },
+      h(
+        'span',
+        { class: 'mono settings-model-id' },
+        `${SPEECH_MODEL_ID} (speech model, Whisper tiny, English)`,
+      ),
+      h('span', { class: 'settings-row-note mono', 'data-label-speech': 'true' }, modelStateLabel(status, SPEECH_MODEL_ID)),
+    ),
+    current === 'downloading'
+      ? button('Cancel', {
+          testid: 'settings-speech-cancel',
+          onClick: () => void act('speech-cancel', () => bridge().cancelDownload(SPEECH_MODEL_ID)),
+        })
+      : undefined,
+    current === 'not_installed' || current === 'cancelled' || current === 'failed'
+      ? button(current === 'not_installed' ? 'Install' : 'Retry install', {
+          testid: 'settings-speech-install',
+          disabled: pending('speech-install'),
+          onClick: () => void act('speech-install', () => bridge().installModel(SPEECH_MODEL_ID)),
+        })
+      : undefined,
+    current === 'installed'
+      ? button('Remove', {
+          testid: 'settings-speech-remove',
+          disabled: pending('speech-remove'),
+          onClick: () => void act('speech-remove', () => bridge().removeModel(SPEECH_MODEL_ID)),
+        })
+      : undefined,
+  );
+}
+
 function modelsPanel(status: TwinStatus): HTMLElement {
   const installed = status.config.installedModels;
   return sectionCard(
@@ -336,8 +566,8 @@ function modelsPanel(status: TwinStatus): HTMLElement {
       h(
         'div',
         { class: 'actions', 'data-testid': 'settings-setup' },
-        button('Choose models again', { onClick: () => void openSetup(3) }),
-        button('Decision model', { testid: 'settings-laya-setup', onClick: () => void openSetup(4) }),
+        button('Choose models again', { onClick: () => void openSetup(4) }),
+        button('Decision model', { testid: 'settings-laya-setup', onClick: () => void openSetup(5) }),
         button('Run setup again', { onClick: () => void openSetup(1) }),
       ),
     ),

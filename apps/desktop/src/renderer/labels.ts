@@ -1,4 +1,4 @@
-import type { AutomationView, EffectClass, Fit, LayaBundleView, Param, RunRecord, Step, TwinStatus } from '@companyos/twin-core';
+import type { AutomationView, CaptureChannelState, EffectClass, Fit, LayaBundleView, Param, RunRecord, Step, TwinStatus } from '@companyos/twin-core';
 import { formatBytes, formatDecimalBytes, clamp01 } from './format.js';
 
 export const LEVEL_NAMES = ['Observe', 'Suggest', 'Draft', 'Run with you', 'On its own', 'External'];
@@ -151,6 +151,30 @@ const CAPTURE_TITLES: Record<TwinStatus['capture']['state'], string> = {
 
 export function captureTitle(state: TwinStatus['capture']['state']): string {
   return CAPTURE_TITLES[state];
+}
+
+/** The state of screen text or microphone text, in a word or two. */
+const CHANNEL_TITLES: Record<CaptureChannelState, string> = {
+  off: 'Off',
+  on: 'On',
+  paused: 'Paused',
+  needs_permission: 'Needs permission',
+  unsupported: 'Not available',
+};
+
+export function captureChannelLabel(state: CaptureChannelState): string {
+  return CHANNEL_TITLES[state];
+}
+
+/** A sentence that explains a channel state that needs one. Off and on need none. */
+const CHANNEL_NOTES: Partial<Record<CaptureChannelState, string>> = {
+  paused: 'Paused with capture. It records again once capture resumes.',
+  needs_permission: 'The operating system has not allowed companyOS to use it yet.',
+  unsupported: 'Not available on this system.',
+};
+
+export function captureChannelNote(state: CaptureChannelState): string | undefined {
+  return CHANNEL_NOTES[state];
 }
 
 export type ModelState = 'not_installed' | 'downloading' | 'installed' | 'cancelled' | 'failed';
