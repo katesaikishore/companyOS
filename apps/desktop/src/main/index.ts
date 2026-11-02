@@ -219,6 +219,8 @@ function registerIpc(): void {
   });
   // The agent checks the input against a strict schema, so the page cannot add a field or a step of its own.
   handle(IPC.createMenuAutomation, input => requireRuntime().createMenuAutomation(input));
+  // Takes no input: the plan is made from the automations at level 3 or above, and the person confirms it.
+  handle(IPC.planAndRun, () => requireRuntime().planAndRun());
   handle(IPC.setLevel, (id, level) => requireRuntime().setLevel(automationId(id), AutonomyLevelSchema.parse(level)));
   handle(IPC.promote, id => requireRuntime().promote(automationId(id)));
   handle(IPC.dryRun, id => requireRuntime().dryRun(automationId(id)));
@@ -358,6 +360,25 @@ async function approveStep(automation: Automation, step: Step, decision: Decisio
     title: automation.name,
     message,
     detail: decision.reason,
+  };
+  const parent = parentWindow();
+  const result = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
+  return result.response === 0;
+}
+
+/**
+ * Asks the person once before a plan's runs start, naming each automation. Saying yes starts them together; each one
+ * still asks before any step that acts on an app. The default and cancel answer is Not now.
+ */
+async function confirmPlan(names: string[]): Promise<boolean> {
+  const options: MessageBoxOptions = {
+    type: 'question',
+    buttons: ['Run them', 'Not now'],
+    defaultId: 1,
+    cancelId: 1,
+    title: 'companyOS plan',
+    message: names.length === 1 ? 'Run this automation now?' : `Run these ${names.length} automations now?`,
+    detail: `${names.map(name => `• ${name}`).join('\n')}\n\nThey run together. Each one still asks before any step that acts on an app.`,
   };
   const parent = parentWindow();
   const result = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
@@ -562,6 +583,7 @@ async function boot(): Promise<void> {
       // Test-only, and ignored in a packaged build: a local server stands in for Hugging Face in the end-to-end test.
       laya: !app.isPackaged && process.env.COMPANYOS_TEST_LAYA_FIXTURE ? readLayaFixture(process.env.COMPANYOS_TEST_LAYA_FIXTURE) : undefined,
       approve: approveStep,
+      confirmPlan,
       // The test platform has no real input device, so idle time is pinned to zero for it.
       idleSeconds: () => (!app.isPackaged && process.env.COMPANYOS_TEST_FAKE_PLATFORM ? 0 : powerMonitor.getSystemIdleTime()),
       onBattery: () => powerMonitor.onBatteryPower,

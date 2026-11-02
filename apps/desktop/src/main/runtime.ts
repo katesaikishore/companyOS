@@ -14,6 +14,9 @@ import {
   effectsOf,
   modelWorkAllowed,
   planSetup,
+  planRuns,
+  chooseChatModel,
+  routineApps,
   resolveStep,
   type AudioRead,
   type Automation,
@@ -28,6 +31,11 @@ import {
   type Executor,
   type HardwareProfile,
   type KeystrokeState,
+  type LocalModelClient,
+  type PlanCandidate,
+  type PlanRunView,
+  type PlanView,
+  type RunPlan,
   type LocalApiState,
   type NetworkEntry,
   type PipeGate,
@@ -67,7 +75,8 @@ import { secureInputState } from './secure-input';
 import { detectHardware } from './hardware';
 import { LayaBundleManager, type LayaTestOptions } from './laya';
 import { LayaDecisionModel } from './decision-laya';
-import { ModelManager, createRoutineNamer } from './models';
+import { ModelManager, SharedModelClients, createRoutineNamer } from './models';
+import { InputLock } from './input-lock';
 import { browserCapturePaths, installNativeHost, isBrowserCaptureSupported, removeNativeHost } from './native-host-install';
 import { AgentDesktopSession, cursorFor, handsExecutor } from './agent-desktop';
 import { choosePlatform, executorFor, type Platform } from './platform';
@@ -79,6 +88,11 @@ export interface RuntimeOptions {
   userData: string;
   /** Asks a person to approve one step. The main process shows a native dialog. */
   approve: (automation: Automation, step: Step, decision: Decision) => Promise<boolean>;
+  /**
+   * Asks the person once whether to start a plan's runs, naming each automation. The main process shows a native dialog.
+   * Saying yes starts the runs; each one still asks before any step that acts on an app.
+   */
+  confirmPlan: (names: string[]) => Promise<boolean>;
   /** Seconds since the last keyboard or mouse input. */
   idleSeconds: () => number;
   /** True when the device runs on battery. Model work waits for AC power or idleness (plan §5.5). */
@@ -159,6 +173,19 @@ export class TwinRuntime {
   private activeRuns = 0;
   /** The one agent-desktop session the menu clicks share, so each automation keeps its own named cursor across runs. */
   private readonly handsSession = new AgentDesktopSession(() => ({ binary: this.agent.configuration.agentDesktopPath.trim() }));
+  /**
+   * Sole use of the desktop's input for one step at a time, so runs that overlap take turns for focus changes, key presses
+   * and menu clicks. Each turn is logged with the run's cursor id and how long it waited and held the input.
+   */
+  private readonly inputLock = new InputLock(entry =>
+    console.info(`[input] agent=${entry.owner} waited=${entry.waitedMs}ms held=${entry.heldMs}ms`),
+  );
+  /** The local model's clients, shared by naming and planning, so both use one worker and one copy of the model. */
+  private readonly modelClients: SharedModelClients;
+  /** Model files the planner has checked against the catalogue's hash, so each one is hashed once. */
+  private readonly plannerVerified = new Set<string>();
+  /** The latest plan, for the status. Kept in memory only. */
+  private lastPlan: PlanView | undefined;
   /** Screen and microphone capture. Each starts only while its setting is on. */
   private readonly screen: ScreenCaptureService;
   private readonly audio: AudioCaptureService;
@@ -283,10 +310,11 @@ export class TwinRuntime {
       fetchImpl: options.fetchImpl,
       ...options.laya,
     });
+    this.modelClients = new SharedModelClients({ models: this.models, workerPath: join(__dirname, 'llm-worker.js') });
     this.namer = createRoutineNamer({
       agent: this.agent,
       models: this.models,
-      workerPath: join(__dirname, 'llm-worker.js'),
+      clients: this.modelClients,
       idleSeconds: options.idleSeconds,
       onBattery: options.onBattery,
       preferredModelId: async () => (await this.setupPlan()).chat?.spec.id,
@@ -464,6 +492,8 @@ export class TwinRuntime {
       pipeOutputs: this.pipeOutputSummaries(config.pipes),
       assignedTasks: this.agent.assignedTasks(),
       taskRuns: this.agent.taskRuns(),
+      ...(this.lastPlan ? { lastPlan: this.lastPlan } : {}),
+      activeRuns: this.activeRuns,
       stats: {
         routinesLearned: suggestions.length + automations.length,
         waiting: suggestions.length + drafts,
@@ -579,13 +609,15 @@ export class TwinRuntime {
       if (!platform) throw new Error('App control is not available on this system yet.');
       const automation = this.agent.automations().find(view => view.automation.id === automationId)?.automation;
       if (!automation) throw new Error('Unknown automation.');
-      return this.agent.run(
-        automationId,
-        {
-          mode: 'supervised',
-          approve: (step, decision) => this.options.approve(automation, step, decision),
-        },
-        this.runExecutor(platform, automation),
+      return this.logged(automation, 'supervised', () =>
+        this.agent.run(
+          automationId,
+          {
+            mode: 'supervised',
+            approve: (step, decision) => this.options.approve(automation, step, decision),
+          },
+          this.runExecutor(platform, automation),
+        ),
       );
     });
   }
@@ -597,19 +629,136 @@ export class TwinRuntime {
    * no error message, is.
    */
   private runExecutor(platform: Platform, automation?: { id: string; name: string }): Executor {
+    const cursor = automation ? cursorFor(automation.id, automation.name) : undefined;
+    // Each step's action and its check take the desktop's input in turn, so overlapping runs cannot move focus under
+    // each other. The lock is entered after the step's approval, never while a person is being asked.
+    const exclusive = <T>(work: () => Promise<T>): Promise<T> => this.inputLock.run(cursor?.agentId ?? 'run', work);
     const native = executorFor(platform);
     const binary = this.agent.configuration.agentDesktopPath.trim();
-    if (binary === '') return native;
-    return handsExecutor(native, {
-      binary,
-      // The automation's own cursor, named after it, so several runs can be told apart on screen.
-      ...(automation ? { cursor: cursorFor(automation.id, automation.name) } : {}),
-      session: this.handsSession,
-      record: entry => {
-        const code = entry.code === undefined ? '' : ` code=${entry.code}`;
-        console.info(`[agent-desktop] ${entry.step} exit=${entry.exit}${code} duration=${entry.durationMs}ms`);
-      },
+    if (binary === '') return { ...native, exclusive };
+    return {
+      ...handsExecutor(native, {
+        binary,
+        // The automation's own cursor, named after it and coloured, so several runs can be told apart on screen.
+        ...(cursor ? { cursor } : {}),
+        session: this.handsSession,
+        record: entry => {
+          const code = entry.code === undefined ? '' : ` code=${entry.code}`;
+          console.info(`[agent-desktop] ${entry.step} agent=${entry.agent ?? '-'} exit=${entry.exit}${code} duration=${entry.durationMs}ms`);
+        },
+      }),
+      exclusive,
+    };
+  }
+
+  /**
+   * Runs one automation and writes its start and end to the log, with ids, the mode and the step outcomes only: never a
+   * name, a label or an error's text. Several runs can overlap, so each line names its automation and cursor.
+   */
+  private async logged(automation: Automation, mode: 'supervised' | 'unattended', run: () => Promise<RunResult>): Promise<RunResult> {
+    const agentId = cursorFor(automation.id, automation.name).agentId;
+    const started = Date.now();
+    console.info(`[run] start automation=${automation.id} agent=${agentId} mode=${mode}`);
+    try {
+      const result = await run();
+      const outcomes = result.steps.map(step => step.outcome).join(',') || '-';
+      console.info(
+        `[run] end automation=${automation.id} status=${result.status} steps=${outcomes} duration=${Date.now() - started}ms`,
+      );
+      return result;
+    } catch (error) {
+      console.info(`[run] refused automation=${automation.id} duration=${Date.now() - started}ms`);
+      throw error;
+    }
+  }
+
+  /**
+   * Plans which of the person's automations at level 3 or above to run now, asks the person once, then starts the chosen
+   * runs together. The local model chooses when the chat model is installed, checks out and loads, and only among those
+   * automations; otherwise the Recall ranking chooses. The person asked for the plan, so it is not held back by the
+   * battery and idle rule that background model work follows. Each run keeps its own level check, approvals and named
+   * cursor, and steps that act on an app take turns for the desktop's input.
+   */
+  async planAndRun(): Promise<PlanRunView> {
+    if (!this.agent.configuration.automationsEnabled) throw new Error('Automations are stopped. Resume them in settings first.');
+    if (!this.platform) throw new Error('App control is not available on this system yet.');
+    const views = this.agent.automations().filter(view => view.state.level >= 3);
+    if (views.length === 0) throw new Error('No automation is at level 3 or above yet. Raise one, then plan again.');
+    const ranked = new Map(this.agent.assignedTasks().map(task => [task.automationId, task]));
+    const candidates: PlanCandidate[] = views.map(view => {
+      const task = ranked.get(view.automation.id);
+      return {
+        automationId: view.automation.id,
+        name: view.automation.name,
+        apps: routineApps(view.automation),
+        observations: task?.observations ?? 0,
+        priority: task?.priority ?? 0,
+        ...(view.automation.estimate ? { minutesPerWeek: view.automation.estimate.minutesPerWeek } : {}),
+      };
     });
+
+    const started = Date.now();
+    const plan = await this.choosePlan(candidates);
+    const made: PlanView = {
+      at: started,
+      source: plan.source,
+      ...(plan.source === 'rules' ? { reason: plan.reason } : {}),
+      candidates: candidates.length,
+      automationIds: plan.automationIds,
+      durationMs: Date.now() - started,
+    };
+    this.lastPlan = made;
+    console.info(
+      `[plan] source=${made.source}${made.reason ? ` reason=${made.reason}` : ''} candidates=${made.candidates} ` +
+        `chosen=${made.automationIds.join(',') || '-'} duration=${made.durationMs}ms`,
+    );
+    this.options.onChange();
+
+    const chosen = made.automationIds
+      .map(id => views.find(view => view.automation.id === id))
+      .filter((view): view is AutomationView => view !== undefined);
+    const confirmed = chosen.length > 0 && (await this.options.confirmPlan(chosen.map(view => view.automation.name)));
+    this.lastPlan = { ...made, confirmed };
+    console.info(`[plan] confirmed=${confirmed}`);
+    this.options.onChange();
+    if (!confirmed) return { plan: this.lastPlan, runs: [] };
+
+    const settled = await Promise.allSettled(chosen.map(view => this.supervisedRun(view.automation.id)));
+    return {
+      plan: this.lastPlan,
+      runs: settled.map((outcome, index) => ({
+        automationId: chosen[index].automation.id,
+        ...(outcome.status === 'fulfilled'
+          ? { result: outcome.value }
+          : { error: outcome.reason instanceof Error ? outcome.reason.message : 'The run could not start.' }),
+      })),
+    };
+  }
+
+  /** The local model's plan when it is ready, otherwise the Recall ranking's. A model that cannot load is a model error. */
+  private async choosePlan(candidates: PlanCandidate[]): Promise<RunPlan> {
+    const model = await this.planningModel();
+    if (!model) return planRuns(candidates);
+    try {
+      // Loading can take minutes on a slow disk, so it happens before the plan's own time limit starts.
+      await model.warm();
+    } catch {
+      const ranked = await planRuns(candidates);
+      return { source: 'rules', reason: 'model_error', automationIds: ranked.automationIds };
+    }
+    return planRuns(candidates, { completer: model });
+  }
+
+  /** The chat model for planning: the same choice and file check as naming, through the shared clients. */
+  private async planningModel(): Promise<LocalModelClient | undefined> {
+    const spec = chooseChatModel(this.agent.configuration.installedModels, (await this.setupPlan()).chat?.spec.id);
+    if (!spec) return undefined;
+    const path = this.models.pathFor(spec);
+    if (!this.plannerVerified.has(path)) {
+      if (!(await this.models.hasVerifiedFile(spec))) return undefined;
+      this.plannerVerified.add(path);
+    }
+    return this.modelClients.open(path, spec.template ?? 'chat');
   }
 
   /**
@@ -655,13 +804,8 @@ export class TwinRuntime {
     if (!platform) return;
     const automation = this.agent.automations().find(view => view.automation.id === automationId)?.automation;
     try {
-      const result = await this.withRun(() =>
-        this.agent.run(
-          automationId,
-          { mode: 'unattended' },
-          this.runExecutor(platform, automation),
-        ),
-      );
+      const unattended = () => this.agent.run(automationId, { mode: 'unattended' }, this.runExecutor(platform, automation));
+      const result = await this.withRun(() => (automation ? this.logged(automation, 'unattended', unattended) : unattended()));
       this.options.onUnattendedRun?.(result);
     } catch {
       // A concurrent settings change can invalidate the run before its first step. Keep capture alive and fail closed.
