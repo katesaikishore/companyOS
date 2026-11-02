@@ -171,6 +171,11 @@ export class TwinRuntime {
   private pending: PendingRunView[] = [];
   /** Runs in progress. No offers are made while one runs, so the run's own app switches cannot trigger one. */
   private activeRuns = 0;
+  /**
+   * True from the start of a plan until its runs start or it is declined. No offers are made meanwhile, so an offer cannot
+   * start a run beside the plan the person is being asked about.
+   */
+  private planning = false;
   /** The one agent-desktop session the menu clicks share, so each automation keeps its own named cursor across runs. */
   private readonly handsSession = new AgentDesktopSession(() => ({ binary: this.agent.configuration.agentDesktopPath.trim() }));
   /**
@@ -684,6 +689,31 @@ export class TwinRuntime {
     if (!this.platform) throw new Error('App control is not available on this system yet.');
     const views = this.agent.automations().filter(view => view.state.level >= 3);
     if (views.length === 0) throw new Error('No automation is at level 3 or above yet. Raise one, then plan again.');
+    if (this.planning) throw new Error('A plan is already waiting for your answer.');
+    this.planning = true;
+    let answered: { plan: PlanView; chosen: AutomationView[] };
+    try {
+      answered = await this.makePlan(views);
+    } finally {
+      this.planning = false;
+    }
+    const { plan, chosen } = answered;
+    if (!plan.confirmed) return { plan, runs: [] };
+
+    const settled = await Promise.allSettled(chosen.map(view => this.supervisedRun(view.automation.id)));
+    return {
+      plan,
+      runs: settled.map((outcome, index) => ({
+        automationId: chosen[index].automation.id,
+        ...(outcome.status === 'fulfilled'
+          ? { result: outcome.value }
+          : { error: outcome.reason instanceof Error ? outcome.reason.message : 'The run could not start.' }),
+      })),
+    };
+  }
+
+  /** Chooses the runs and asks the person about them. The plan it made is kept as lastPlan, with the answer. */
+  private async makePlan(views: AutomationView[]): Promise<{ plan: PlanView; chosen: AutomationView[] }> {
     const ranked = new Map(this.agent.assignedTasks().map(task => [task.automationId, task]));
     const candidates: PlanCandidate[] = views.map(view => {
       const task = ranked.get(view.automation.id);
@@ -718,21 +748,11 @@ export class TwinRuntime {
       .map(id => views.find(view => view.automation.id === id))
       .filter((view): view is AutomationView => view !== undefined);
     const confirmed = chosen.length > 0 && (await this.options.confirmPlan(chosen.map(view => view.automation.name)));
-    this.lastPlan = { ...made, confirmed };
+    const answered = { ...made, confirmed };
+    this.lastPlan = answered;
     console.info(`[plan] confirmed=${confirmed}`);
     this.options.onChange();
-    if (!confirmed) return { plan: this.lastPlan, runs: [] };
-
-    const settled = await Promise.allSettled(chosen.map(view => this.supervisedRun(view.automation.id)));
-    return {
-      plan: this.lastPlan,
-      runs: settled.map((outcome, index) => ({
-        automationId: chosen[index].automation.id,
-        ...(outcome.status === 'fulfilled'
-          ? { result: outcome.value }
-          : { error: outcome.reason instanceof Error ? outcome.reason.message : 'The run could not start.' }),
-      })),
-    };
+    return { plan: answered, chosen };
   }
 
   /** The local model's plan when it is ready, otherwise the Recall ranking's. A model that cannot load is a model error. */
@@ -768,7 +788,7 @@ export class TwinRuntime {
   observeFocus(app: string): void {
     // A focus change is a good moment for a screen frame. The frame still passes every check, so an excluded app is not read.
     if (this.agent.configuration.screenCaptureEnabled) void this.screen.requestFrame('focus');
-    if (this.activeRuns > 0) return;
+    if (this.activeRuns > 0 || this.planning) return;
     this.expireOffers();
     if (this.pending.length > 0) return;
     const config = this.agent.configuration;
