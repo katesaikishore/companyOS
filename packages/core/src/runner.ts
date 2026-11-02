@@ -48,6 +48,12 @@ export interface Executor {
    * agent-desktop program is set but unusable.
    */
   blockedReason?(op: 'focus_app' | 'press_shortcut' | 'choose_menu'): string | undefined;
+  /**
+   * Runs one step's action and its postcondition with sole use of the desktop's input, so two runs never interleave focus
+   * changes, key presses and menu clicks, and one run cannot move focus between another's action and its check. The
+   * runner enters it after the step's approval, never while a person is being asked. Absent means no lock.
+   */
+  exclusive?<T>(work: () => Promise<T>): Promise<T>;
 }
 
 export type RunMode = 'dry_run' | 'supervised' | 'unattended';
@@ -187,6 +193,11 @@ export async function runAutomation(automation: Automation, request: RunRequest,
     postconditionsPassed: passed,
     postconditionsFailed: failed,
   });
+  const livePolicy = (): PolicyContext =>
+    request.currentPolicy?.() ?? {
+      ...request.policy,
+      level: request.currentLevel ? request.currentLevel() : request.policy.level,
+    };
 
   for (const [index, step] of resolved.entries()) {
     const record = (outcome: StepOutcome, reason: string, failureReason?: string): void => {
@@ -222,11 +233,7 @@ export async function runAutomation(automation: Automation, request: RunRequest,
         return finish('blocked');
       }
 
-      const livePolicy = request.currentPolicy?.() ?? {
-        ...request.policy,
-        level: request.currentLevel ? request.currentLevel() : request.policy.level,
-      };
-      decision = evaluateStep(step, { ...livePolicy, unattended: request.mode === 'unattended' });
+      decision = evaluateStep(step, { ...livePolicy(), unattended: request.mode === 'unattended' });
       if (decision.decision === 'deny') {
         record('blocked', decision.reason);
         return finish('blocked');
@@ -241,81 +248,116 @@ export async function runAutomation(automation: Automation, request: RunRequest,
       // Settings may have changed while the native approval dialog was open. Loop and re-check them.
     }
 
-    if (step.op === 'focus_app') {
-      let ok = false;
-      let failureReason: string | undefined;
-      try {
-        ok = await executor.focusApp(step.app);
-      } catch (error) {
-        // A thrown error is an ordinary failure. Its text may contain paths or scripts, so only a StepRefusedError keeps it.
-        failureReason = refusalMessage(error);
+    // The step's action and its postcondition hold the desktop's input, so another run cannot move focus or open a menu
+    // between them. The approval above was asked outside the lock, so a person is never waited on while holding it.
+    const act = async (): Promise<RunResult['status'] | undefined> => {
+      // The lock may have been held by another run for a while. A stop pressed meanwhile, or a policy change, still wins.
+      if (request.shouldStop?.()) {
+        record('blocked', 'Automations were stopped.');
+        return 'blocked';
       }
-      if (!ok) {
-        // A refusal means nothing was done, so the run is blocked and not failed. Only a failed run lowers the level.
-        if (failureReason !== undefined) {
-          record('blocked', 'The app could not be focused.', failureReason);
-          return finish('blocked');
+      const recheck = evaluateStep(step, { ...livePolicy(), unattended: request.mode === 'unattended' });
+      if (recheck.decision === 'deny' || (recheck.decision === 'ask' && !approved)) {
+        record('blocked', recheck.decision === 'deny' ? recheck.reason : 'Not approved.');
+        return 'blocked';
+      }
+      return performStep();
+    };
+
+    const performStep = async (): Promise<RunResult['status'] | undefined> => {
+      if (step.op === 'focus_app') {
+        let ok = false;
+        let failureReason: string | undefined;
+        try {
+          ok = await executor.focusApp(step.app);
+        } catch (error) {
+          // A thrown error is an ordinary failure. Its text may contain paths or scripts, so only a StepRefusedError keeps it.
+          failureReason = refusalMessage(error);
         }
-        record('failed', 'The app could not be focused.');
-        return finish('failed');
+        if (!ok) {
+          // A refusal means nothing was done, so the run is blocked and not failed. Only a failed run lowers the level.
+          if (failureReason !== undefined) {
+            record('blocked', 'The app could not be focused.', failureReason);
+            return 'blocked';
+          }
+          record('failed', 'The app could not be focused.');
+          return 'failed';
+        }
+        record('executed', decision.reason);
+        return undefined;
       }
-      record('executed', decision.reason);
-      continue;
-    }
 
-    if (step.op === 'choose_menu') {
-      // A headless menu click does not need the app in front, so the postcondition is the adapter's own: the menu opened,
-      // the item's click was delivered, and the menu closed. A refusal blocks the run, and any other failure fails it, as
-      // for the open and key steps.
-      const performed = await perform(step, executor);
-      if (performed.ok) {
-        passed++;
-        record('passed', 'Done. The menu item was chosen and the menu closed.');
-        continue;
-      }
-      if (performed.failureReason !== undefined) {
-        record('blocked', FAILED_REASON[step.op], performed.failureReason);
-        return finish('blocked');
-      }
-      record('failed', FAILED_REASON[step.op]);
-      return finish('failed');
-    }
-
-    if (step.op === 'open_url' || step.op === 'open_file' || step.op === 'press_shortcut') {
-      // One action, then its postcondition: the expected app is in front once the action has run.
-      const performed = await perform(step, executor);
-      if (!performed.ok) {
+      if (step.op === 'choose_menu') {
+        // The approval dialog takes focus, so the app is brought forward again first, as a person would before choosing.
+        // Nothing has been chosen if that fails, so the run is blocked rather than failed.
+        let front = false;
+        let focusRefusal: string | undefined;
+        try {
+          front = await executor.focusApp(step.app);
+        } catch (error) {
+          focusRefusal = refusalMessage(error);
+        }
+        if (!front) {
+          record('blocked', 'The app could not be brought forward to choose the menu.', focusRefusal);
+          return 'blocked';
+        }
+        // A headless menu click does not need the app in front, so the postcondition is the adapter's own: the menu opened,
+        // the item's click was delivered, and the menu closed. A refusal blocks the run, and any other failure fails it, as
+        // for the open and key steps.
+        const performed = await perform(step, executor);
+        if (performed.ok) {
+          passed++;
+          record('passed', 'Done. The menu item was chosen and the menu closed.');
+          return undefined;
+        }
         if (performed.failureReason !== undefined) {
           record('blocked', FAILED_REASON[step.op], performed.failureReason);
-          return finish('blocked');
+          return 'blocked';
         }
         record('failed', FAILED_REASON[step.op]);
-        return finish('failed');
+        return 'failed';
       }
-      if (await settlesInFront(executor, step.app, request.settleMs ?? DEFAULT_SETTLE_MS)) {
-        passed++;
-        record('passed', 'Done. The expected app is in front.');
-        continue;
-      }
-      failed++;
-      record('check_failed', 'A different app is in front.');
-      return finish('failed');
-    }
 
-    let front: string | undefined;
-    try {
-      front = await executor.frontmostApp();
-    } catch {
-      front = undefined;
-    }
-    if (sameApp(front, step.app)) {
-      passed++;
-      record('passed', 'Expected app is in front.');
-    } else {
-      failed++;
-      record('check_failed', 'A different app is in front.');
-      return finish('failed');
-    }
+      if (step.op === 'open_url' || step.op === 'open_file' || step.op === 'press_shortcut') {
+        // One action, then its postcondition: the expected app is in front once the action has run.
+        const performed = await perform(step, executor);
+        if (!performed.ok) {
+          if (performed.failureReason !== undefined) {
+            record('blocked', FAILED_REASON[step.op], performed.failureReason);
+            return 'blocked';
+          }
+          record('failed', FAILED_REASON[step.op]);
+          return 'failed';
+        }
+        if (await settlesInFront(executor, step.app, request.settleMs ?? DEFAULT_SETTLE_MS)) {
+          passed++;
+          record('passed', 'Done. The expected app is in front.');
+          return undefined;
+        }
+        failed++;
+        record('check_failed', 'A different app is in front.');
+        return 'failed';
+      }
+
+      let front: string | undefined;
+      try {
+        front = await executor.frontmostApp();
+      } catch {
+        front = undefined;
+      }
+      if (sameApp(front, step.app)) {
+        passed++;
+        record('passed', 'Expected app is in front.');
+      } else {
+        failed++;
+        record('check_failed', 'A different app is in front.');
+        return 'failed';
+      }
+      return undefined;
+    };
+
+    const outcome = executor.exclusive ? await executor.exclusive(act) : await act();
+    if (outcome !== undefined) return finish(outcome);
   }
   return finish(request.mode === 'dry_run' ? 'dry_run' : 'completed');
 }
