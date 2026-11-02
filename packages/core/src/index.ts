@@ -33,3 +33,4 @@ export * from './capture-text';
 export * from './workbook/sheet';
 export * from './workbook/brain';
 export * from './workbook/search';
+export * from './mail/gmail';

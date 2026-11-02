@@ -82,7 +82,8 @@ export interface DownloadState {
 /** A network call the twin made. Recorded so the person can see exactly what left the device. */
 export interface NetworkEntry {
   ts: number;
-  purpose: 'model_download' | 'update_check';
+  /** `mail_sync` is a read of message metadata from Gmail. The ledger's copy must say what it sends before it is wired in. */
+  purpose: 'model_download' | 'update_check' | 'mail_sync' | 'sign_in';
   /** Model downloads only. */
   modelId?: string;
   host: string;
