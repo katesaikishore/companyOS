@@ -1,0 +1,55 @@
+name: installers
+
+# Builds unsigned installers for macOS and Windows and keeps them as workflow artifacts, so anyone can try a build
+# without installing the toolchain. Nothing here signs, notarises or publishes. Signed release builds are in release.yml,
+# which runs only for version tags. Runs on a push to main and on demand.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  installers:
+    name: installers (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      # Unsigned on purpose. Without this, electron-builder would sign with any identity found on the runner.
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      # The app runs on the CPU, so the CUDA provider (gigabytes) is not downloaded.
+      ONNXRUNTIME_NODE_INSTALL_CUDA: 'skip'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install (also downloads the Electron binary)
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Installers, unsigned
+        run: npm run dist
+
+      - name: Upload the installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-unsigned-${{ runner.os }}
+          path: |
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.zip
+            apps/desktop/release/*.exe
+          if-no-files-found: error
+          retention-days: 14
