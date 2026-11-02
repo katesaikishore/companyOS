@@ -223,14 +223,14 @@ export class EncryptedStore {
    * parsed. With no terms, every item in range is returned.
    */
   /** Screen and audio observations per app since a time: how many, and when the newest was. Holds no text. */
-  captureEvidence(sinceTs: number): Array<{ app: string; count: number; latest: number }> {
+  captureEvidence(sinceTs: number, recentSinceTs: number): Array<{ app: string; count: number; recent: number; latest: number }> {
     if (!this.hasCaptureIndex()) return [];
     return this.conn()
       .prepare(
-        `SELECT app, COUNT(*) AS count, MAX(ts) AS latest FROM capture_fts
+        `SELECT app, COUNT(*) AS count, SUM(CASE WHEN ts >= ? THEN 1 ELSE 0 END) AS recent, MAX(ts) AS latest FROM capture_fts
          WHERE app IS NOT NULL AND ts >= ? AND kind IN ('screen', 'audio') GROUP BY app`,
       )
-      .all(sinceTs) as Array<{ app: string; count: number; latest: number }>;
+      .all(recentSinceTs, sinceTs) as Array<{ app: string; count: number; recent: number; latest: number }>;
   }
 
   searchCapture(query: CaptureQuery): CaptureHit[] {

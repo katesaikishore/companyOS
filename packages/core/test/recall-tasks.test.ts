@@ -44,14 +44,14 @@ describe('assignRecallTasks', () => {
 
   it('ignores observations older than the window', () => {
     const routine = automation('a', [{ op: 'focus_app', app: 'Slack' }]);
-    const old = [{ app: 'slack', count: 40, latest: NOW - (RECALL_TASK_WINDOW_DAYS + 1) * DAY }];
+    const old = [{ app: 'slack', count: 40, recent: 0, latest: NOW - (RECALL_TASK_WINDOW_DAYS + 1) * DAY }];
     expect(assignRecallTasks([{ automation: routine, level: 2 }], old, NOW)).toEqual([]);
   });
 
   it('ranks by recency-weighted observations times the time the routine saves', () => {
     const quick = automation('quick', [{ op: 'focus_app', app: 'Slack' }], 10);
     const slow = automation('slow', [{ op: 'focus_app', app: 'Slack' }], 60);
-    const evidence = [{ app: 'slack', count: 4, latest: NOW - 1000 }];
+    const evidence = [{ app: 'slack', count: 4, recent: 4, latest: NOW - 1000 }];
     const tasks = assignRecallTasks(
       [
         { automation: quick, level: 3 },
@@ -68,9 +68,17 @@ describe('assignRecallTasks', () => {
 
   it('counts an observation older than a day at half weight', () => {
     const routine = automation('a', [{ op: 'focus_app', app: 'Slack' }]);
-    const older = [{ app: 'slack', count: 4, latest: NOW - 3 * DAY }];
+    const older = [{ app: 'slack', count: 4, recent: 0, latest: NOW - 3 * DAY }];
     const tasks = assignRecallTasks([{ automation: routine, level: 2 }], older, NOW);
     expect(tasks[0].priority).toBe(2);
+  });
+
+  it('weights each observation by its own age, so one recent glance does not count older ones in full', () => {
+    const routine = automation('a', [{ op: 'focus_app', app: 'Slack' }]);
+    const mixed = [{ app: 'slack', count: 1001, recent: 1, latest: NOW - 1000 }];
+    const tasks = assignRecallTasks([{ automation: routine, level: 2 }], mixed, NOW);
+    expect(tasks[0].observations).toBe(1001);
+    expect(tasks[0].priority).toBe(501);
   });
 });
 

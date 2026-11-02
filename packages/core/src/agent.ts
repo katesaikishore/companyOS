@@ -32,7 +32,7 @@ import {
 } from './autonomy';
 import { runAutomation, type Executor, type RunMode, type RunRequest, type RunResult } from './runner';
 import { segment, type Segment } from './segment';
-import { assignRecallTasks, RECALL_TASK_WINDOW_DAYS, taskRunsByDay } from './recall-tasks';
+import { assignRecallTasks, RECALL_RECENT_MS, RECALL_TASK_WINDOW_DAYS, taskRunsByDay } from './recall-tasks';
 import { EncryptedStore, type CaptureRecord } from './store';
 import { PIPE_ID, PipeOutputSchema, type PipeOutput } from './pipes';
 import {
@@ -1135,7 +1135,7 @@ export class TwinAgent {
    */
   assignedTasks(now = this.now()): AssignedTaskView[] {
     const ranked = this.automations().map(view => ({ automation: view.automation, level: view.state.level }));
-    const evidence = this.store.captureEvidence(now - RECALL_TASK_WINDOW_DAYS * DAY_MS);
+    const evidence = this.store.captureEvidence(now - RECALL_TASK_WINDOW_DAYS * DAY_MS, now - RECALL_RECENT_MS);
     return assignRecallTasks(ranked, evidence, now);
   }
 

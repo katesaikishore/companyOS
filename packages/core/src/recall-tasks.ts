@@ -12,12 +12,14 @@ export const TASK_RUN_DAYS = 14;
 
 const DAY_MS = 86_400_000;
 /** An observation this recent counts in full. Older ones, still inside the window, count half. A design value. */
-const RECENT_MS = DAY_MS;
+export const RECALL_RECENT_MS = DAY_MS;
 
-/** One app's stored Recall observations: how many, and when the newest was. Holds no text. */
+/** One app's stored Recall observations: how many, how many of them are recent, and when the newest was. Holds no text. */
 export interface RecallEvidence {
   app: string;
   count: number;
+  /** How many of the observations are within RECALL_RECENT_MS of now. The rest count half. */
+  recent: number;
   latest: number;
 }
 
@@ -64,7 +66,11 @@ export function assignRecallTasks(
     const matched = inWindow.filter(item => apps.has(item.app));
     if (matched.length === 0) continue;
     const observations = matched.reduce((sum, item) => sum + item.count, 0);
-    const weighted = matched.reduce((sum, item) => sum + item.count * (now - item.latest <= RECENT_MS ? 1 : 0.5), 0);
+    // Each observation is weighted by its own age, so one recent glance does not count a week of older ones in full.
+    const weighted = matched.reduce((sum, item) => {
+      const recent = Math.min(Math.max(item.recent, 0), item.count);
+      return sum + recent + (item.count - recent) * 0.5;
+    }, 0);
     const minutes = Math.max(1, automation.estimate?.minutesPerWeek ?? 1);
     tasks.push({
       automationId: automation.id,
