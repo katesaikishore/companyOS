@@ -49,6 +49,14 @@ export interface LocalApi {
   stop(): Promise<void>;
 }
 
+/**
+ * The hits the API may serve. Typed text is searched on the Recall page only, so a hit of that kind is left out here, whatever
+ * the request asked for. The runtime passes every search through this.
+ */
+export function withoutTypedText<Hit extends { kind: CaptureKind }>(hits: readonly Hit[]): Hit[] {
+  return hits.filter(hit => hit.kind !== 'keystroke');
+}
+
 export function createLocalApi(options: LocalApiOptions): LocalApi {
   let server: Server | undefined;
 

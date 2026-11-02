@@ -1,12 +1,13 @@
 ---
 title: "Recall"
-description: "Search the text the twin reads on your screen and hears on your microphone. Off by default, and kept encrypted on this device"
+description: "Search the text the twin reads on your screen, hears on your microphone and, if you turn it on, the text you type. Off by default, and kept encrypted on this device"
 ---
 
-Recall keeps two kinds of text and lets you search them on the **Recall** page. Both are off until you turn them on, in setup or in **Settings**, under **Screen and audio**.
+Recall keeps three kinds of text and lets you search them on the **Recall** page. All three are off until you turn them on. Screen and microphone text are switched on in setup or in **Settings**, under **Screen, audio and typed text**. Typed text is switched on only in Settings.
 
 - **Screen text** is the text read from each display, kept with a small image of the screen.
 - **Microphone text** is speech turned into text on this device, in 30-second parts.
+- **Typed text** is the text you type into apps, kept as finished pieces. It has its own rules, which are set out in [Typed text](/privacy#typed-text).
 
 Recall is a preview. Its Screen Recording and microphone prompts have not yet been checked on a Mac with a password field on screen, so keep it off unless you are testing it.
 
@@ -18,6 +19,8 @@ Setup has a Recall step with both switches off:
 - **Transcribe the microphone** turns speech into text on this device. It needs the speech model, which you install in Settings under Screen and audio. Until it is installed, the switch is disabled.
 
 Each switch saves at once, and you can change either one later in Settings.
+
+**Tell speakers apart** is in Settings only, and it is off until you turn it on. It needs the speaker model, which you install under the same switches. A voice is biometric data. Read [Privacy](/privacy#voices) before you turn it on.
 
 ## What is read
 
@@ -33,6 +36,8 @@ Nothing is read in these cases:
 
 Microphone text is read in 30-second parts, and a part that is almost silent is dropped. Nothing is heard while capture is paused, the screen is locked, or you are away. The microphone also picks up people nearby and on calls, so check the recording rules where you work first. System audio is recorded only when you turn on **Record system audio**. It is the sound the computer plays, so it includes the other people on calls and any video. It is transcribed on this device and kept apart from microphone text by its source.
 
+When **Tell speakers apart** is on, each microphone and system segment is labelled with the speaker's name, or with "Speaker 2" for a voice nobody has named. A result with an unnamed label has a **Name speaker 2** button. Type the name and press Enter or Save. Earlier segments from that speaker in the same session take the name too. A label from an earlier session cannot be named, because its voice was held in memory only and is gone. A name can be wrong, or a voice can go unnamed, so check it before you rely on it.
+
 Screen text is whatever OCR reads from the screen, together with the text the focused window exposes to accessibility tools. The accessibility text is read on Windows and macOS only, and password fields are skipped. On macOS it needs the Accessibility permission. When a window's text cannot be read this way, the screen is still read by OCR. OCR reads everything visible, including window titles, chat messages, and any password shown as plain text. Password managers are excluded by default. The checks on the app in front, the pause, the lock and the idle check are the only protection. They do not cover what is visible behind the app in front: a browser window or an excluded app there is read, and its text is stored under the name of the app in front. Excluding that browser or excluded app later does not remove that text. Excluding the app in front does remove it. So these checks are not complete.
 
 ## Where it is kept
@@ -46,17 +51,18 @@ Screen text is whatever OCR reads from the screen, together with the text the fo
 
 ## Search
 
-Open **Recall** in the sidebar. Type words and press Enter, or pick a range to list what was recorded. The range is **Today** or **Last 7 days**. Filter by **Everything**, **Screen** or **Microphone**. Results are grouped by hour. Click a screen result to see its image, if the image is still kept.
+Open **Recall** in the sidebar. Type words and press Enter, or pick a range to list what was recorded. The range is **Today** or **Last 7 days**. Filter by **Everything**, **Screen**, **Microphone** or **Typed**. Results are grouped by hour. Click a screen result to see its image, if the image is still kept. A typed result shows the piece as it was kept, after its card-like numbers and key-like tokens were replaced.
 
 ## Delete
 
-- **Delete screen and audio text** in Settings removes every stored screen and microphone item, with its text and its images. Your activity and automations are not touched.
+- **Delete screen, audio and typed text** in Settings removes every stored screen, microphone and typed-text item, with its text and its images. Your activity and automations are not touched.
 - **Delete everything** removes them too.
-- An export shows only the number of screen and microphone items and their date range. It holds no text and no images.
+- **Forget speakers** in Settings deletes every saved voice. Deleting screen, audio and typed text does not, since voices are not text. The names on past segments stay.
+- An export shows only the number of screen, microphone and typed items and their date range. It holds no text and no images.
 
 ## Local API
 
-The local API is off by default. When it is on, programs on this device can search the stored text and read the screen images, with a token. It listens on `127.0.0.1` only. It refuses a request whose host is not `127.0.0.1` or `localhost`, and any request that carries a browser `Origin` header.
+The local API is off by default. When it is on, programs on this device can search the stored screen and microphone text and read the screen images, with a token. Typed text is not included in any search they make, so it is only searched on the Recall page. It listens on `127.0.0.1` only. It refuses a request whose host is not `127.0.0.1` or `localhost`, and any request that carries a browser `Origin` header.
 
 Every route is `GET` only. Every route except `/health` needs the token. `/health` says only that the API is running. The routes are `/v1/status`, `/v1/search` and `/v1/frames/:id`.
 

@@ -27,6 +27,8 @@ export const IPC = {
   searchCapture: 'twin:search-capture',
   frameImage: 'twin:frame-image',
   deleteCapture: 'twin:delete-capture',
+  nameSpeaker: 'twin:name-speaker',
+  forgetSpeakers: 'twin:forget-speakers',
   copyApiToken: 'twin:copy-api-token',
   rotateApiToken: 'twin:rotate-api-token',
   requestPermission: 'twin:request-permission',

@@ -8,7 +8,7 @@ import type { CaptureKind } from './types';
  * 'handoffs' is no longer written, since the OpenMausBot integration was removed. Its rows from earlier versions are
  * pruned once they are past the retention window, and the data export carries the rest as stored. Nothing else reads them.
  * 'renamedAutomations' holds the ids of automations the person renamed. Their names are typed, so the export replaces them.
- * 'screenText' and 'audioText' hold captured text. They are written only through appendCapture, which indexes the text
+ * 'screenText', 'audioText' and 'keystrokeText' hold captured text. They are written only through appendCapture, which indexes the text
  * for search in the same transaction, so the index cannot fall out of step with the records.
  */
 export const COLLECTIONS = [
@@ -20,16 +20,23 @@ export const COLLECTIONS = [
   'handoffs',
   'taskDecisions',
   'renamedAutomations',
+  // Voice profiles for speaker identification: a name and a centroid vector, encrypted with the rest. See speaker/match.ts.
+  'speakers',
   'screenText',
   'audioText',
+  'keystrokeText',
 ] as const;
 export type Collection = (typeof COLLECTIONS)[number];
 
 /** The collections that hold captured text. Their rows are changed only by appendCapture, pruneCapture and deleteAllCapture. */
-export const CAPTURE_COLLECTIONS = ['screenText', 'audioText'] as const;
+export const CAPTURE_COLLECTIONS = ['screenText', 'audioText', 'keystrokeText'] as const;
 export type CaptureCollection = (typeof CAPTURE_COLLECTIONS)[number];
 
-const CAPTURE_COLLECTION_OF: Readonly<Record<CaptureKind, CaptureCollection>> = { screen: 'screenText', audio: 'audioText' };
+const CAPTURE_COLLECTION_OF: Readonly<Record<CaptureKind, CaptureCollection>> = {
+  screen: 'screenText',
+  audio: 'audioText',
+  keystroke: 'keystrokeText',
+};
 
 /** The most hits one search returns. A larger limit is cut down to this. */
 export const MAX_CAPTURE_HITS = 500;
@@ -65,6 +72,8 @@ export interface CaptureQuery {
   from: number;
   to: number;
   app?: string;
+  /** Only audio items labelled with this speaker name or session label. */
+  speaker?: string;
   /** At most this many hits, newest first. Capped at MAX_CAPTURE_HITS. */
   limit: number;
 }
@@ -76,6 +85,8 @@ export interface CaptureHit {
   app: string | null;
   /** A short piece of the stored text: around the first match when there is one, otherwise from the start. */
   snippet: string;
+  /** The speaker label of an audio item, when it has one. Null for every other item. */
+  speaker?: string | null;
 }
 
 const DATABASE_FILE = 'twin.db';
@@ -207,6 +218,10 @@ export class EncryptedStore {
       where.push('app = ?');
       values.push(query.app);
     }
+    if (query.speaker !== undefined) {
+      where.push(`(SELECT json_extract(r.body, '$.speaker') FROM records r WHERE r.id = capture_fts.rowid) = ?`);
+      values.push(query.speaker);
+    }
     let snippet = `substr(text, 1, ${CAPTURE_SCAN_CHARS})`;
     if (terms.length > 0) {
       where.unshift('capture_fts MATCH ?');
@@ -218,11 +233,31 @@ export class EncryptedStore {
       if (!this.hasCaptureIndex()) return [];
       return this.conn()
         .prepare(
-          `SELECT kind, recordId AS id, ts, app, ${snippet} AS snippet
+          `SELECT kind, recordId AS id, ts, app, ${snippet} AS snippet,
+             (SELECT json_extract(r.body, '$.speaker') FROM records r WHERE r.id = capture_fts.rowid) AS speaker
            FROM capture_fts WHERE ${where.join(' AND ')}
            ORDER BY ts DESC, rowid DESC LIMIT ?`,
         )
         .all(...values, limit) as CaptureHit[];
+    });
+  }
+
+  /**
+   * Sets the speaker of audio items, by their item ids, in one statement. Only the speaker field changes: the text, its index
+   * and every other item are left alone. Returns how many items changed.
+   */
+  relabelCaptureSpeaker(itemIds: readonly string[], speaker: string): number {
+    if (itemIds.length === 0) return 0;
+    const marks = itemIds.map(() => '?').join(', ');
+    return this.guard(() => {
+      if (!this.hasCaptureIndex()) return 0;
+      const result = this.conn()
+        .prepare(
+          `UPDATE records SET body = json_set(body, '$.speaker', ?)
+           WHERE collection = 'audioText' AND id IN (SELECT rowid FROM capture_fts WHERE kind = 'audio' AND recordId IN (${marks}))`,
+        )
+        .run(speaker, ...itemIds);
+      return Number(result.changes);
     });
   }
 
@@ -266,7 +301,7 @@ export class EncryptedStore {
             )
             .all() as Array<{ mediaId: string }>
         ).map(row => row.mediaId);
-        db.prepare(`DELETE FROM records WHERE collection IN ('screenText', 'audioText')`).run();
+        db.prepare(`DELETE FROM records WHERE collection IN ('screenText', 'audioText', 'keystrokeText')`).run();
         if (this.hasCaptureIndex()) db.prepare('DELETE FROM capture_fts').run();
         return { mediaIds };
       })();
@@ -336,6 +371,16 @@ export class EncryptedStore {
         .all() as Array<{ collection: CaptureCollection; n: number }>;
       const count = (collection: CaptureCollection): number => rows.find(row => row.collection === collection)?.n ?? 0;
       return { screen: count('screenText'), audio: count('audioText') };
+    });
+  }
+
+  /** How many typed-text items are stored. Kept apart from captureCounts, whose shape the screen and audio counts pin. */
+  keystrokeCount(): number {
+    return this.guard(() => {
+      const row = this.conn().prepare(`SELECT count(*) AS n FROM records WHERE collection = 'keystrokeText'`).get() as {
+        n: number;
+      };
+      return row.n;
     });
   }
 

@@ -17,7 +17,8 @@ import type {
   KnownRoutinesView,
 } from './contract';
 import { knownRoutinesView } from './known';
-import { normalizeSignal } from './redact';
+import { normalizeSignal, redactTypedText } from './redact';
+import { normaliseTyped } from './keystroke-text';
 import {
   promotionCheck,
   promote as promoteState,
@@ -31,6 +32,8 @@ import {
 import { runAutomation, type Executor, type RunMode, type RunRequest, type RunResult } from './runner';
 import { segment, type Segment } from './segment';
 import { EncryptedStore } from './store';
+import { SPEAKER_EMBEDDING_DIM } from './models/speaker';
+import { bestProfile, isSessionSpeakerLabel, isSpeakerName, SessionSpeakers, SPEAKER_NAME_MAX_CHARS, unitVector, type SpeakerProfile } from './speaker/match';
 import { dayKeyOf, decisionFits, parseTaskDecision, TaskDecisionSchema, tasksForDay, type TaskDecision } from './tasks';
 import type { InstalledModel, NetworkEntry } from './models/types';
 import {
@@ -81,12 +84,36 @@ const ScreenReadSchema = z
     mediaId: z.string().regex(MEDIA_ID).nullable(),
   })
   .strict();
+/** A speaker name the person gave, or a session label such as 'Speaker 2'. Anything else is refused. */
+const SpeakerLabelSchema = z
+  .string()
+  .max(SPEAKER_NAME_MAX_CHARS)
+  .refine(value => isSpeakerName(value) || isSessionSpeakerLabel(value), 'Invalid speaker label.');
+const INVALID_SPEAKER = 'Invalid speaker: the label or name is not allowed.';
+/** A stored speaker profile. Its centroid is checked for length and finiteness when it is read. */
+const StoredSpeakerSchema = z.object({
+  id: z.string().min(1).max(64),
+  name: z.string().min(1).max(SPEAKER_NAME_MAX_CHARS),
+  centroid: z.array(z.number()).max(SPEAKER_EMBEDDING_DIM),
+});
+/** Most audio items kept per session label, so a name given later can relabel them. The oldest are dropped first. */
+const MAX_SESSION_ITEMS = 500;
 const AudioReadSchema = z
   .object({
     ts: TimeSchema,
     durationMs: z.number().int().nonnegative().max(MAX_SEGMENT_MS),
     text: z.string().max(MAX_RAW_TEXT_CHARS),
     source: z.enum(['microphone', 'system']).default('microphone'),
+    speaker: SpeakerLabelSchema.optional(),
+  })
+  .strict();
+/** Typed text, one finished piece. The app is required: a piece with no app cannot be checked against the exclusions. */
+const KeystrokeReadSchema = z
+  .object({
+    ts: TimeSchema,
+    app: z.string().min(1).max(200),
+    windowClass: z.enum(WINDOW_CLASSES),
+    text: z.string().max(MAX_RAW_TEXT_CHARS),
   })
   .strict();
 const CaptureSearchSchema = z
@@ -94,6 +121,7 @@ const CaptureSearchSchema = z
     text: z.string().max(MAX_SEARCH_CHARS),
     kind: z.enum(CAPTURE_KINDS).optional(),
     app: z.string().max(200).optional(),
+    speaker: SpeakerLabelSchema.optional(),
     from: TimeSchema,
     to: TimeSchema,
   })
@@ -117,6 +145,22 @@ export interface AudioRead {
   source?: 'microphone' | 'system';
   ts: number;
   durationMs: number;
+  text: string;
+  /**
+   * The speaker's name or session label, when speaker identification named one. Kept only when the setting is on. The
+   * voice itself is never passed in or stored. See identifySpeaker.
+   */
+  speaker?: string;
+}
+
+/**
+ * One finished piece of typed text, from the keystroke buffer. The app and the window kind are the ones the text was typed
+ * into. A piece that carries any other field is refused.
+ */
+export interface KeystrokeRead {
+  ts: number;
+  app: string;
+  windowClass: WindowClass;
   text: string;
 }
 
@@ -195,6 +239,12 @@ export class TwinAgent {
   private readonly routineKinds = new Map<string, KindLabeling>();
   /** Offers and declines. The declines are loaded from the config when the agent starts, and written back when they change. */
   private readonly gate: TriggerGate;
+  /** Voice profiles the person named, loaded from the encrypted store. Their centroids stay in this process. */
+  private speakers: SpeakerProfile[] = [];
+  /** Session speakers nobody has named. Memory only: a restart starts again from Speaker 1. */
+  private readonly sessionSpeakers = new SessionSpeakers();
+  /** The audio item ids of each session label, oldest first, so naming the speaker can relabel them. */
+  private readonly sessionItems = new Map<string, string[]>();
 
   constructor(options: AgentOptions) {
     this.store = new EncryptedStore(options.dataDir, options.dataKey);
@@ -203,6 +253,7 @@ export class TwinAgent {
     const saved = this.store.readAll<unknown>('settings').at(-1);
     this.config = saved ? TwinConfigSchema.parse(withoutRetiredKeys(saved)) : { ...DEFAULT_CONFIG };
     this.gate = new TriggerGate(this.now, this.config.declinedRoutines);
+    this.speakers = this.loadSpeakers();
   }
 
   /** Closes the encrypted store. Windows will not delete the store's files while it is open, so tests close before cleanup. */
@@ -325,14 +376,48 @@ export class TwinAgent {
     const text = normaliseTranscript(parsed.data.text);
     if (text === '') return false;
     const { ts, durationMs } = parsed.data;
+    // A label is kept only while speaker identification is on, so switching it off stops new labels at once.
+    const speaker = this.config.speakerIdentificationEnabled ? parsed.data.speaker : undefined;
+    const id = newId();
     this.store.appendCapture({
       collection: 'audioText',
       kind: 'audio',
-      id: newId(),
+      id,
       ts,
       app: null,
       text,
-      body: { ts, durationMs, source: parsed.data.source },
+      body: speaker === undefined ? { ts, durationMs, source: parsed.data.source } : { ts, durationMs, source: parsed.data.source, speaker },
+    });
+    if (speaker !== undefined && isSessionSpeakerLabel(speaker)) this.rememberSessionItem(speaker, id);
+    return true;
+  }
+
+  /**
+   * Stores one finished piece of typed text. Nothing is stored when typed-text capture is off, when the app is excluded or a
+   * browser, when the window kind is excluded, or when the text is empty once cleaned. The text is redacted before it is
+   * stored: card-like numbers and key-like tokens are replaced (see redactTypedText). The lock, pause, idle, permission and
+   * secure-input checks are made by keystrokeDecision before a piece is ended. Returns whether the piece was stored.
+   */
+  ingestKeystrokes(read: KeystrokeRead): boolean {
+    const parsed = KeystrokeReadSchema.safeParse(read);
+    if (!parsed.success) throw new Error(INVALID_CAPTURE);
+    const { ts, windowClass } = parsed.data;
+    const app = normalizeAppName(parsed.data.app);
+    if (!app) return false;
+    if (!this.config.keystrokeCaptureEnabled) return false;
+    if (windowClass === 'browser' || isBrowserApp(app)) return false;
+    if (this.config.excludedWindowClasses.includes(windowClass)) return false;
+    if (isExcludedApp(app, this.config.excludedApps)) return false;
+    const text = redactTypedText(normaliseTyped(parsed.data.text));
+    if (text === '') return false;
+    this.store.appendCapture({
+      collection: 'keystrokeText',
+      kind: 'keystroke',
+      id: newId(),
+      ts,
+      app,
+      text,
+      body: { ts, windowClass },
     });
     return true;
   }
@@ -350,19 +435,91 @@ export class TwinAgent {
         terms: searchTerms(parsed.data.text),
         kind: parsed.data.kind,
         app,
+        speaker: parsed.data.speaker,
         from: parsed.data.from,
         to: parsed.data.to,
         limit: CAPTURE_SEARCH_LIMIT,
       })
-      .filter(hit => hit.app === null || !isExcludedApp(hit.app, this.config.excludedApps));
+      .filter(hit => hit.app === null || !isExcludedApp(hit.app, this.config.excludedApps))
+      .map(({ speaker, ...hit }) => (speaker ? { ...hit, speaker } : hit));
   }
 
   /**
-   * Deletes every stored screen and microphone item, with its text. Returns the image ids, so the caller deletes those
-   * files too.
+   * Deletes every stored screen, microphone and typed-text item, with its text. Returns the image ids, so the caller deletes those
+   * files too. Speaker profiles are not items: they stay until forgetSpeakers.
    */
   deleteAllCapture(): string[] {
+    this.sessionItems.clear();
     return this.store.deleteAllCapture().mediaIds;
+  }
+
+  /**
+   * Says which speaker a microphone or system segment came from, from its voice embedding: the enrolled speaker when the
+   * similarity reaches the match threshold, otherwise a session label such as 'Speaker 2'. Undefined when speaker
+   * identification is off, or the embedding is not usable. The embedding is compared here and then dropped. Only the name or
+   * the label is returned, and only the name or label is ever stored.
+   */
+  identifySpeaker(embedding: ArrayLike<number>): string | undefined {
+    if (!this.config.speakerIdentificationEnabled) return undefined;
+    const vector = unitVector(embedding, SPEAKER_EMBEDDING_DIM);
+    if (!vector) return undefined;
+    const match = bestProfile(vector, this.speakers);
+    return match ? match.name : this.sessionSpeakers.assign(vector);
+  }
+
+  /**
+   * Gives a session speaker a name. The voice becomes a profile, encrypted in the store, that later segments are matched
+   * against. The audio items already labelled with that session label are relabelled to the name. Refused while speaker
+   * identification is off, for a label or name that is not allowed, and for a speaker that is no longer in this session.
+   */
+  nameSessionSpeaker(label: string, name: string): void {
+    if (!this.config.speakerIdentificationEnabled) throw new Error('Speaker identification is off.');
+    const trimmed = name.trim();
+    if (!isSessionSpeakerLabel(label) || !isSpeakerName(trimmed)) throw new Error(INVALID_SPEAKER);
+    const centroid = this.sessionSpeakers.centroidOf(label);
+    if (!centroid) throw new Error('That speaker is not in this session any more.');
+    const id = newId();
+    this.store.append('speakers', { id, name: trimmed, centroid: Array.from(centroid), createdAt: this.now() });
+    this.speakers = [...this.speakers, { id, name: trimmed, centroid }];
+    this.sessionSpeakers.remove(label);
+    const items = this.sessionItems.get(label) ?? [];
+    this.sessionItems.delete(label);
+    this.store.relabelCaptureSpeaker(items, trimmed);
+  }
+
+  /**
+   * Deletes every speaker profile and forgets the session speakers, so no voice is matched or labelled from now on. The
+   * names already on past audio items are text, and they stay.
+   */
+  forgetSpeakers(): void {
+    this.store.replaceAll('speakers', []);
+    this.speakers = [];
+    this.sessionSpeakers.clear();
+    this.sessionItems.clear();
+  }
+
+  /** How many speaker profiles the person has named. The profiles and their voices are never returned. */
+  speakerProfileCount(): number {
+    return this.speakers.length;
+  }
+
+  private rememberSessionItem(label: string, id: string): void {
+    const items = this.sessionItems.get(label) ?? [];
+    items.push(id);
+    if (items.length > MAX_SESSION_ITEMS) items.splice(0, items.length - MAX_SESSION_ITEMS);
+    this.sessionItems.set(label, items);
+  }
+
+  /** Reads the stored profiles. A row that does not have the right shape, or a vector of the wrong length, is skipped. */
+  private loadSpeakers(): SpeakerProfile[] {
+    const profiles: SpeakerProfile[] = [];
+    for (const row of this.store.readAll<unknown>('speakers')) {
+      const parsed = StoredSpeakerSchema.safeParse(row);
+      if (!parsed.success) continue;
+      const centroid = unitVector(parsed.data.centroid, SPEAKER_EMBEDDING_DIM);
+      if (centroid) profiles.push({ id: parsed.data.id, name: parsed.data.name, centroid });
+    }
+    return profiles;
   }
 
   /**
@@ -389,21 +546,32 @@ export class TwinAgent {
   }
 
   /**
-   * How many screen and microphone items are stored, and the first and the last time one was captured. Holds no text, so the
-   * export can show it.
+   * How many screen, microphone and typed-text items are stored, and the first and the last time one was captured. Holds no
+   * text, so the export can show it.
    */
-  captureSummary(): { screenCount: number; audioCount: number; oldest: string | null; newest: string | null } {
+  captureSummary(): {
+    screenCount: number;
+    audioCount: number;
+    keystrokeCount: number;
+    oldest: string | null;
+    newest: string | null;
+  } {
     const counts = this.store.captureCounts();
+    const keystrokeCount = this.store.keystrokeCount();
     const times = [
       ...this.store.readAll<{ ts?: unknown }>('screenText'),
       ...this.store.readAll<{ ts?: unknown }>('audioText'),
+      ...this.store.readAll<{ ts?: unknown }>('keystrokeText'),
     ].flatMap(body => (typeof body.ts === 'number' ? [body.ts] : []));
-    if (times.length === 0) return { screenCount: counts.screen, audioCount: counts.audio, oldest: null, newest: null };
+    if (times.length === 0) {
+      return { screenCount: counts.screen, audioCount: counts.audio, keystrokeCount, oldest: null, newest: null };
+    }
     const first = times.reduce((min, ts) => Math.min(min, ts), Infinity);
     const last = times.reduce((max, ts) => Math.max(max, ts), -Infinity);
     return {
       screenCount: counts.screen,
       audioCount: counts.audio,
+      keystrokeCount,
       oldest: new Date(first).toISOString(),
       newest: new Date(last).toISOString(),
     };
@@ -890,13 +1058,17 @@ export class TwinAgent {
    * Everything the twin holds about the person, for the person. Handoff rows from earlier versions are included as they
    * were stored, so the export does not lose them. Nothing else reads them. The export is plain text, so a name the
    * person typed, for a task or an automation, is replaced by a placeholder. A cleared task name holds no typed text.
-   * Captured screen and microphone text is not exported, only its counts and the first and last capture times.
+   * Captured screen, microphone and typed text is not exported, only its counts and the first and last capture times.
    */
   exportAll(): object {
     const renamed = this.renamedAutomationIds();
     return {
       exportedAt: new Date(this.now()).toISOString(),
-      config: this.configuration,
+      // A pipe's name and search are typed by the person, so the plain-text export replaces them, as it does automation names.
+      config: {
+        ...this.configuration,
+        pipes: this.config.pipes.map(pipe => ({ ...pipe, name: TYPED_NAME_NOT_EXPORTED, query: pipe.query === '' ? '' : TYPED_NAME_NOT_EXPORTED })),
+      },
       events: this.store.readAll<TwinEvent>('events'),
       automations: this.readAutomations().map(automation =>
         renamed.has(automation.id) ? { ...automation, name: TYPED_NAME_NOT_EXPORTED } : automation,
@@ -908,12 +1080,17 @@ export class TwinAgent {
         decision.kind === 'rename' && decision.name !== '' ? { ...decision, name: TYPED_NAME_NOT_EXPORTED } : decision,
       ),
       screenCapture: this.captureSummary(),
+      // How many voices were named. The names and the voice vectors are not exported.
+      speakers: { profiles: this.speakers.length },
     };
   }
 
   /** Removes all stored data. The caller must also destroy the data key to make recovery impossible. */
   wipe(): void {
     this.store.wipe();
+    this.speakers = [];
+    this.sessionSpeakers.clear();
+    this.sessionItems.clear();
   }
 
   /** Dismissed by id, or a near copy of a dismissed routine (see matchesDismissed). */

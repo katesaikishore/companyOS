@@ -85,6 +85,11 @@ const automationId = (value: unknown) => text(value, /^auto_[a-f0-9]{12}$/, 'Inv
 const routineId = (value: unknown) => text(value, /^[a-f0-9]{12}$/, 'Invalid routine id.');
 const modelId = (value: unknown) => text(value, /^[a-z0-9.-]{1,80}$/, 'Invalid model id.');
 const mediaId = (value: unknown) => text(value, /^[0-9a-f]{32}$/, 'Invalid image id.');
+const speakerLabel = (value: unknown) => text(value, /^Speaker [1-9][0-9]{0,2}$/, 'Invalid speaker label.');
+const speakerName = (value: unknown) => {
+  if (typeof value !== 'string' || value.length > 40) throw new Error('Invalid speaker name.');
+  return value;
+};
 
 function handle(channel: string, fn: (...args: unknown[]) => unknown): void {
   ipcMain.handle(channel, (_event, ...args) => fn(...args));
@@ -238,10 +243,23 @@ function registerIpc(): void {
       buttons: ['Delete', 'Cancel'],
       defaultId: 1,
       cancelId: 1,
-      message: 'Delete all screen images and microphone text?',
-      detail: 'Every stored screen image, and every line of screen and microphone text, is removed. The local API stops returning them. Your activity history, automations and settings are kept. It cannot be undone.',
+      message: 'Delete all screen images, microphone text and typed text?',
+      detail: 'Every stored screen image, and every line of screen, microphone and typed text, is removed. The local API stops returning them. Your activity history, automations and settings are kept. It cannot be undone.',
     });
     if (approved) await requireRuntime().deleteCapture();
+  });
+  // The engine checks the label and the name again. Here only their shape is checked, so a page cannot send anything else.
+  handle(IPC.nameSpeaker, (label, name) => requireRuntime().nameSpeaker(speakerLabel(label), speakerName(name)));
+  handle(IPC.forgetSpeakers, async () => {
+    const approved = await confirmed({
+      type: 'warning',
+      buttons: ['Forget', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      message: 'Forget every speaker?',
+      detail: 'Every voice profile you named is deleted from this device, and voices are no longer matched to names. Names already on past audio are kept as text. It cannot be undone.',
+    });
+    if (approved) requireRuntime().forgetSpeakers();
   });
   handle(IPC.copyApiToken, () => requireRuntime().copyApiToken(value => clipboard.writeText(value)));
   handle(IPC.rotateApiToken, async () => {
@@ -544,6 +562,11 @@ async function boot(): Promise<void> {
           title: 'companyOS Twin',
           body,
         }).show();
+      },
+      // A pipe's notice holds a count and app names, never item text. See pipes.ts.
+      onPipeNotice: text => {
+        if (!Notification.isSupported()) return;
+        new Notification({ title: 'companyOS Twin', body: text }).show();
       },
     });
   } catch (error) {

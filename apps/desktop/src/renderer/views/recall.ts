@@ -15,6 +15,7 @@ import {
   type RecallKind,
   type RecallRange,
 } from '../recall-model.js';
+import { isUnnamedSpeaker } from '../speaker-model.js';
 import { act, bridge, pending, requestRender, state } from '../store.js';
 
 /** The search's key. While the words have focus the page is not rebuilt, so typing is not lost. */
@@ -53,6 +54,7 @@ function channelsLine(status: TwinStatus): HTMLElement {
   const channels: Array<{ label: string; channel: CaptureChannelState }> = [
     { label: RECALL_COPY.screenChannel, channel: capture.screenState },
     { label: RECALL_COPY.audioChannel, channel: capture.audioState },
+    { label: RECALL_COPY.keystrokeChannel, channel: capture.keystrokeState },
   ];
   return h(
     'section',
@@ -179,8 +181,8 @@ function resultsPanel(status: TwinStatus): HTMLElement {
   if (hits === undefined) {
     body = emptyState(RECALL_COPY.promptTitle, RECALL_COPY.prompt);
   } else if (hits.length === 0) {
-    const anyOn = capture.screenState === 'on' || capture.audioState === 'on';
-    const nothingStored = capture.screenCount + capture.audioCount === 0;
+    const anyOn = capture.screenState === 'on' || capture.audioState === 'on' || capture.keystrokeState === 'on';
+    const nothingStored = capture.screenCount + capture.audioCount + capture.keystrokeCount === 0;
     body = !anyOn && nothingStored
       ? emptyState(RECALL_COPY.offTitle, RECALL_COPY.offText)
       : emptyState(RECALL_COPY.noMatchTitle, RECALL_COPY.noMatch);
@@ -210,6 +212,7 @@ function hourBlock(group: HourGroup): HTMLElement {
 
 function hitRow(hit: CaptureHitView): HTMLElement {
   const screen = hit.kind === 'screen';
+  const speaker = hit.kind === 'audio' ? hit.speaker : undefined;
   return h(
     'li',
     { class: 'recall-hit', 'data-testid': 'recall-hit', 'data-kind': hit.kind },
@@ -219,10 +222,76 @@ function hitRow(hit: CaptureHitView): HTMLElement {
       h('span', { class: 'mono small' }, clock(hit.ts)),
       chip(KIND_LABEL[hit.kind], 'neutral'),
       hit.app ? h('span', { class: 'muted small recall-app' }, titleCase(hit.app)) : undefined,
+      speaker ? h('span', { class: 'mono small recall-speaker', 'data-testid': 'recall-speaker' }, speaker) : undefined,
     ),
     h('p', { class: 'recall-snippet' }, hit.snippet),
     screen ? imageControl(hit) : undefined,
+    speaker && isUnnamedSpeaker(speaker) ? speakerControl(speaker) : undefined,
   );
+}
+
+/** The label whose name is being typed, and the draft. The draft is read on save, so typing does not rebuild the page. */
+let namingLabel: string | undefined;
+let nameDraft = '';
+
+/** The button that starts naming a session speaker, or, while naming, the field and its save and cancel buttons. */
+function speakerControl(label: string): HTMLElement {
+  if (namingLabel !== label) {
+    return h(
+      'div',
+      { class: 'recall-naming' },
+      button(`Name ${label.toLowerCase()}`, {
+        testid: 'recall-name-speaker',
+        onClick: () => {
+          namingLabel = label;
+          nameDraft = '';
+          requestRender();
+        },
+      }),
+    );
+  }
+  const field = h('input', {
+    class: 'input recall-input',
+    type: 'text',
+    maxlength: '40',
+    placeholder: 'Their name',
+    'aria-label': `Name for ${label}`,
+    'data-testid': 'recall-speaker-name',
+    oninput: (event: Event) => {
+      nameDraft = (event.target as HTMLInputElement).value;
+    },
+    onkeydown: (event: KeyboardEvent) => {
+      if (event.key === 'Enter') void saveSpeakerName(label);
+      if (event.key === 'Escape') cancelNaming();
+    },
+  });
+  return h(
+    'div',
+    { class: 'recall-naming' },
+    field,
+    button('Save', { testid: 'recall-speaker-save', disabled: pending('name-speaker'), onClick: () => void saveSpeakerName(label) }),
+    button('Cancel', { testid: 'recall-speaker-cancel', onClick: () => cancelNaming() }),
+  );
+}
+
+function cancelNaming(): void {
+  namingLabel = undefined;
+  nameDraft = '';
+  requestRender();
+}
+
+/**
+ * Stores the name for the session speaker, then searches again so the relabelled items show their name. The engine checks the
+ * name. A name it refuses shows as a notice, and the form stays open.
+ */
+function saveSpeakerName(label: string): Promise<void> {
+  const name = nameDraft.trim();
+  return act('name-speaker', async () => {
+    await bridge().nameSpeaker(label, name);
+    namingLabel = undefined;
+    nameDraft = '';
+    await runSearch();
+  });
 }
 
 /** The button that shows a screen item's image. The image is read from the store only when it is first shown. */

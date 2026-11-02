@@ -1,11 +1,23 @@
-import type { CaptureChannelState, CapturePermission, TwinConfig, TwinStatus } from '@companyos/twin-core';
+import type { CaptureChannelState, CapturePermission, Pipe, TwinConfig, TwinStatus } from '@companyos/twin-core';
 import { h, type Child } from '../dom.js';
 import { SPEECH_MODEL_ID } from '../speech-model.js';
+import { SPEAKER_MODEL_ID } from '../speaker-model.js';
 import { button, chip, exclusionEditor, toggleRow } from '../components/ui.js';
 import { formatBytes, plural } from '../format.js';
+import { KEYSTROKE_COPY, keystrokeNote } from '../keystroke-copy.js';
 import { captureChannelNote, layaState, layaStateLabel, modelState, modelStateLabel } from '../labels.js';
 import { TEXT_KEPT_DAYS } from '../recall-model.js';
 import { WINDOW_KIND_IDS, WINDOW_KIND_LABELS, type WindowKindId } from '../window-kinds.js';
+import {
+  PIPE_ACTION_CHOICES,
+  PIPE_INTERVALS,
+  PIPE_SOURCES,
+  PIPE_LIMITS,
+  pipeFormProblem,
+  pipeFromForm,
+  pipeSummary,
+  type PipeForm,
+} from '../pipes-model.js';
 import { act, bridge, confirmDeleteAll, pending, saveConfig, setNotice, state } from '../store.js';
 import { forgetRecall } from './recall.js';
 import { openSetup } from './setup.js';
@@ -13,12 +25,13 @@ import { openSetup } from './setup.js';
 type Theme = TwinConfig['theme'];
 type InstalledModel = TwinStatus['config']['installedModels'][number];
 type RetentionDays = TwinConfig['frameRetentionDays'];
-type SectionId = 'capture' | 'recall' | 'automations' | 'models' | 'appearance' | 'data';
+type SectionId = 'capture' | 'recall' | 'automations' | 'pipes' | 'models' | 'appearance' | 'data';
 
 const SECTIONS: ReadonlyArray<{ id: SectionId; label: string }> = [
   { id: 'capture', label: 'Capture' },
   { id: 'recall', label: 'Screen and audio' },
   { id: 'automations', label: 'Automations' },
+  { id: 'pipes', label: 'Pipes' },
   { id: 'models', label: 'Models' },
   { id: 'appearance', label: 'Appearance' },
   { id: 'data', label: 'Your data' },
@@ -77,6 +90,7 @@ export function settingsView(status: TwinStatus): HTMLElement {
         ),
         recallPanel(status),
         automationsPanel(config),
+        pipesPanel(config.pipes),
         modelsPanel(status),
         appearancePanel(config.theme),
         dataPanel(),
@@ -276,20 +290,21 @@ function capturePanel(
 }
 
 /**
- * Screen text, microphone text and the local API. All three are off until the person turns them on. Each switch saves
- * at once, and the token stays in the main process: the page only copies it or rotates it.
+ * Screen text, microphone text, typed text and the local API. All four are off until the person turns them on. Each switch
+ * saves at once, and the token stays in the main process: the page only copies it or rotates it.
  */
 function recallPanel(status: TwinStatus): HTMLElement {
   const config = status.config;
   const capture = status.capture;
   // Microphone text needs the speech model. The switch can only be on while the model is installed.
   const speechInstalled = config.installedModels.some(model => model.id === SPEECH_MODEL_ID);
+  const speakerInstalled = config.installedModels.some(model => model.id === SPEAKER_MODEL_ID);
   return sectionCard(
     {
       id: 'recall',
       testid: 'settings-recall',
-      title: 'Screen and audio',
-      note: 'Both are off until you turn them on. Their text is encrypted on this device and searched on the Recall page.',
+      title: 'Screen, audio and typed text',
+      note: 'All three are off until you turn them on. Their text is encrypted on this device and searched on the Recall page.',
     },
     row(
       toggleRow({
@@ -326,7 +341,29 @@ function recallPanel(status: TwinStatus): HTMLElement {
       }),
     ),
     speechRow(status),
+    speakerRow(status),
+    row(
+      toggleRow({
+        testid: 'settings-speakers',
+        label: 'Tell speakers apart',
+        note: speakerNote(speakerInstalled),
+        checked: config.speakerIdentificationEnabled && speakerInstalled,
+        disabled: !speakerInstalled,
+        onChange: checked => void saveConfig('speakers', { speakerIdentificationEnabled: checked }),
+      }),
+    ),
+    speakerForgetRow(status),
     permissionRow('microphone', capture.audioState),
+    row(
+      toggleRow({
+        testid: 'settings-keystrokes',
+        label: KEYSTROKE_COPY.label,
+        note: keystrokeNote(capture.keystrokeState),
+        checked: config.keystrokeCaptureEnabled && capture.keystrokeState !== 'unsupported',
+        disabled: capture.keystrokeState === 'unsupported',
+        onChange: checked => void saveConfig('keystrokes', { keystrokeCaptureEnabled: checked }),
+      }),
+    ),
     row(
       textBlock(
         'Keep screen images for',
@@ -338,7 +375,7 @@ function recallPanel(status: TwinStatus): HTMLElement {
       toggleRow({
         testid: 'settings-local-api',
         label: 'Local API on this device',
-        note: 'Off by default. Other programs on this device can search the stored text and read the stored screen images, with a token. It listens on 127.0.0.1 only.',
+        note: 'Off by default. Other programs on this device can search the stored screen and microphone text and read the stored screen images, with a token. Typed text is not given to them. It listens on 127.0.0.1 only.',
         checked: config.localApiEnabled,
         onChange: checked => void saveConfig('local-api', { localApiEnabled: checked }),
       }),
@@ -347,9 +384,9 @@ function recallPanel(status: TwinStatus): HTMLElement {
     row(
       textBlock(
         'Stored on this device',
-        `${plural(capture.screenCount, 'screen item')} and ${plural(capture.audioCount, 'microphone item')}, with ${formatBytes(capture.mediaBytes)} of screen images.`,
+        `${plural(capture.screenCount, 'screen item')}, ${plural(capture.audioCount, 'microphone item')} and ${plural(capture.keystrokeCount, 'typed item')}, with ${formatBytes(capture.mediaBytes)} of screen images.`,
       ),
-      button('Delete screen and audio text', {
+      button(KEYSTROKE_COPY.deleteLabel, {
         variant: 'danger-outline',
         testid: 'settings-delete-capture',
         disabled: pending('capture-delete'),
@@ -483,6 +520,156 @@ function automationsPanel(config: TwinConfig): HTMLElement {
   );
 }
 
+/**
+ * Pipes: saved searches that run on a schedule. The list is saved with the other settings, and each add, remove or switch
+ * saves the whole list, so the engine checks the list as one.
+ */
+function pipesPanel(pipes: readonly Pipe[]): HTMLElement {
+  return sectionCard(
+    {
+      id: 'pipes',
+      testid: 'settings-pipes',
+      title: 'Pipes',
+      note: 'A pipe is a saved search that runs on a schedule and does one thing with the result. It reads only text the twin has already stored, and it never reaches the network.',
+    },
+    row(
+      textBlock(
+        'What a pipe keeps',
+        'A notify pipe shows the number of new matches and the app names, never the text. A write pipe saves the matching text as a plain Markdown file in the companyOS data folder. That file is not encrypted, and each run replaces it. Deleting screen and audio text, or changing the excluded apps or window kinds, removes these files.',
+      ),
+    ),
+    row(
+      textBlock(
+        'When a pipe waits',
+        'A pipe waits while automations are stopped, capture is paused, the screen is locked, you are away, or a password field may have focus, or the system cannot say whether one has. It runs at the next check once the wait ends, which is at most a minute later.',
+      ),
+    ),
+    pipes.length === 0
+      ? row(h('p', { class: 'muted small', 'data-testid': 'settings-pipes-empty' }, 'No pipes yet.'))
+      : pipes.map(pipe => pipeRow(pipe, pipes)),
+    block(pipeForm(pipes)),
+  );
+}
+
+function pipeRow(pipe: Pipe, pipes: readonly Pipe[]): HTMLElement {
+  const key = `pipe:${pipe.id}`;
+  return h(
+    'div',
+    { class: 'settings-row settings-pipe', 'data-testid': 'settings-pipe', 'data-pipe-id': pipe.id, 'data-enabled': String(pipe.enabled) },
+    h(
+      'div',
+      { class: 'settings-model-main' },
+      h('span', { class: 'settings-row-title' }, pipe.name),
+      h('span', { class: 'settings-row-note mono' }, pipeSummary(pipe)),
+    ),
+    chip(pipe.enabled ? 'on' : 'off', pipe.enabled ? 'teal' : 'neutral'),
+    button(pipe.enabled ? 'Turn off' : 'Turn on', {
+      testid: 'settings-pipe-toggle',
+      disabled: pending(key),
+      onClick: () => void saveConfig(key, { pipes: pipes.map(item => (item.id === pipe.id ? { ...item, enabled: !item.enabled } : item)) }),
+    }),
+    button('Remove', {
+      variant: 'danger-outline',
+      testid: 'settings-pipe-remove',
+      disabled: pending(key),
+      onClick: () => void saveConfig(key, { pipes: pipes.filter(item => item.id !== pipe.id) }),
+    }),
+  );
+}
+
+/** The add form. Its inputs are a dirty form while they hold text, so a background refresh does not wipe them. */
+function pipeForm(pipes: readonly Pipe[]): HTMLElement {
+  const key = 'pipe-add';
+  const markDirty = (): void => {
+    state.dirty.add(key);
+  };
+  const problem = h('p', { class: 'settings-note', role: 'alert', 'data-testid': 'settings-pipe-problem' });
+  const field = (label: string, control: HTMLElement): HTMLElement =>
+    h('label', { class: 'settings-field' }, h('span', { class: 'settings-field-label' }, label), control);
+  const name = h('input', {
+    class: 'input',
+    type: 'text',
+    maxlength: PIPE_LIMITS.nameMax,
+    autocomplete: 'off',
+    spellcheck: false,
+    placeholder: 'Standup notes',
+    'data-testid': 'settings-pipe-name',
+    oninput: markDirty,
+  });
+  const query = h('input', {
+    class: 'input mono',
+    type: 'text',
+    maxlength: PIPE_LIMITS.queryMax,
+    autocomplete: 'off',
+    spellcheck: false,
+    placeholder: 'Words to find, or empty for everything',
+    'data-testid': 'settings-pipe-query',
+    oninput: markDirty,
+  });
+  const kind = h(
+    'select',
+    { class: 'input', 'data-testid': 'settings-pipe-kind', oninput: markDirty },
+    ...PIPE_SOURCES.map(choice => h('option', { value: choice.value }, choice.label)),
+  );
+  const app = h('input', {
+    class: 'input',
+    type: 'text',
+    maxlength: PIPE_LIMITS.appMax,
+    autocomplete: 'off',
+    spellcheck: false,
+    placeholder: 'Any app, for example Slack',
+    'data-testid': 'settings-pipe-app',
+    oninput: markDirty,
+  });
+  const interval = h(
+    'select',
+    { class: 'input', 'data-testid': 'settings-pipe-interval' },
+    ...PIPE_INTERVALS.map(choice => h('option', { value: String(choice.minutes) }, choice.label)),
+  );
+  interval.value = '60';
+  const action = h(
+    'select',
+    { class: 'input', 'data-testid': 'settings-pipe-action' },
+    ...PIPE_ACTION_CHOICES.map(choice => h('option', { value: choice.value }, choice.label)),
+  );
+  const submit = (): void => {
+    const form: PipeForm = {
+      name: name.value,
+      query: query.value,
+      kind: kind.value,
+      app: app.value,
+      intervalMinutes: Number(interval.value),
+      action: action.value,
+    };
+    const message = pipeFormProblem(form, pipes.length);
+    problem.textContent = message ?? '';
+    if (message !== undefined) return;
+    state.dirty.delete(key);
+    void saveConfig(key, { pipes: [...pipes, pipeFromForm(form, crypto.randomUUID())] });
+  };
+  return h(
+    'div',
+    { class: 'settings-pipe-form', 'data-testid': 'settings-pipe-form', style: { display: 'grid', gap: '10px', width: '100%' } },
+    field('Name', name),
+    field('Search words', query),
+    field('Stored text', kind),
+    field('App (optional)', app),
+    field('How often', interval),
+    field('What it does with the matches', action),
+    problem,
+    h(
+      'div',
+      { class: 'actions' },
+      button('Add pipe', {
+        variant: 'primary',
+        testid: 'settings-pipe-add',
+        disabled: pending(key) || pipes.length >= PIPE_LIMITS.maxPipes,
+        onClick: submit,
+      }),
+    ),
+  );
+}
+
 /** The optional agent-desktop program for focus and key steps. Blank keeps the built-in adapters. */
 function agentDesktopBlock(path: string): HTMLElement {
   const key = 'agent-desktop-settings';
@@ -545,6 +732,66 @@ function levelButton(level: (typeof LEVELS)[number], current: number): HTMLEleme
  * The speech model that microphone text needs. It is installed and removed like the other models: the download is checked
  * against its pinned digests, and the record is kept only when every file matches.
  */
+/**
+ * The copy for the speaker switch. It says what is compared, where, and that a voice is biometric data. The legal review of
+ * that is not done, so the copy does not claim more than the code does.
+ */
+function speakerNote(installed: boolean): string {
+  if (!installed) return 'Needs the speaker model below. Until it is installed, voices are not compared.';
+  return 'Compares voices in microphone and system audio on this device, so each segment can carry a name or a label such as "Speaker 2". A voice is biometric data. It is compared here only and is never sent anywhere. A voice is stored only after you name its speaker, encrypted on this device, and Forget speakers deletes every one. Names are kept with the text, and search can filter by them. Off until you turn it on.';
+}
+
+function speakerRow(status: TwinStatus): HTMLElement {
+  const current = modelState(status, SPEAKER_MODEL_ID);
+  return h(
+    'div',
+    { class: 'settings-row settings-model', 'data-testid': 'settings-speaker-model', 'data-state': current },
+    h(
+      'div',
+      { class: 'settings-model-main' },
+      h('span', { class: 'mono settings-model-id' }, `${SPEAKER_MODEL_ID} (speaker model, Wespeaker ResNet34, 26.5 MB)`),
+      h('span', { class: 'settings-row-note mono', 'data-label-speaker': 'true' }, modelStateLabel(status, SPEAKER_MODEL_ID)),
+    ),
+    current === 'downloading'
+      ? button('Cancel', {
+          testid: 'settings-speaker-cancel',
+          onClick: () => void act('speaker-cancel', () => bridge().cancelDownload(SPEAKER_MODEL_ID)),
+        })
+      : undefined,
+    current === 'not_installed' || current === 'cancelled' || current === 'failed'
+      ? button(current === 'not_installed' ? 'Install' : 'Retry install', {
+          testid: 'settings-speaker-install',
+          disabled: pending('speaker-install'),
+          onClick: () => void act('speaker-install', () => bridge().installModel(SPEAKER_MODEL_ID)),
+        })
+      : undefined,
+    current === 'installed'
+      ? button('Remove', {
+          testid: 'settings-speaker-remove',
+          disabled: pending('speaker-remove'),
+          onClick: () => void act('speaker-remove', () => bridge().removeModel(SPEAKER_MODEL_ID)),
+        })
+      : undefined,
+  );
+}
+
+/** How many voices the person has named, and the button that deletes every one. The confirmation is asked by the main process. */
+function speakerForgetRow(status: TwinStatus): HTMLElement {
+  const profiles = status.speakerProfiles ?? 0;
+  return row(
+    h(
+      'p',
+      { class: 'settings-row-note', 'data-testid': 'settings-speakers-count' },
+      profiles === 0 ? 'No speakers named yet.' : `${plural(profiles, 'speaker')} named. Their voices are kept on this device, encrypted.`,
+    ),
+    button('Forget speakers', {
+      testid: 'settings-forget-speakers',
+      disabled: profiles === 0 || pending('forget-speakers'),
+      onClick: () => void act('forget-speakers', () => bridge().forgetSpeakers()),
+    }),
+  );
+}
+
 function speechRow(status: TwinStatus): HTMLElement {
   const current = modelState(status, SPEECH_MODEL_ID);
   return h(

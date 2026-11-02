@@ -71,3 +71,30 @@ export function normalizeSignal(input: unknown, options: NormalizeOptions): Twin
     ...(urlTemplate ? { urlTemplate } : {}),
   };
 }
+
+const KEY_PLACEHOLDER = '[key]';
+const CARD_PLACEHOLDER = '[card number]';
+/** A card number: 13 to 19 digits, with a single space or dash allowed between them. */
+const CARD_NUMBER = /(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)/g;
+const PRIVATE_KEY_HEADER = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/g;
+/** Known vendor key shapes: AWS access keys, GitHub, OpenAI and Anthropic style keys, Slack and Google API keys. */
+const VENDOR_KEY =
+  /(?<![A-Za-z0-9])(?:AKIA|ASIA)[0-9A-Z]{16}(?![A-Za-z0-9])|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{30,}/g;
+/** A JSON web token: three base64url parts, the first starting as a JSON header. */
+const JSON_WEB_TOKEN = /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g;
+/** A run of 20 or more characters with no space, holding both a letter and a digit: a random key, a token or a hash. */
+const KEY_LIKE_RUN = /(?<![A-Za-z0-9_+/=-])(?=[A-Za-z0-9_+/=-]*\d)(?=[A-Za-z0-9_+/=-]*[A-Za-z])[A-Za-z0-9_+/=-]{20,}(?![A-Za-z0-9_+/=-])/g;
+
+/**
+ * Replaces key-like tokens and card-like numbers in text the person typed, before it is stored. The rules are broad on
+ * purpose: a false match loses a little text, and a missed key or card keeps a secret. They are not a password detector,
+ * so a password typed into an ordinary text box is caught only when it has one of these shapes.
+ */
+export function redactTypedText(text: string): string {
+  return text
+    .replace(PRIVATE_KEY_HEADER, KEY_PLACEHOLDER)
+    .replace(VENDOR_KEY, KEY_PLACEHOLDER)
+    .replace(JSON_WEB_TOKEN, KEY_PLACEHOLDER)
+    .replace(KEY_LIKE_RUN, KEY_PLACEHOLDER)
+    .replace(CARD_NUMBER, CARD_PLACEHOLDER);
+}

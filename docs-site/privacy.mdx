@@ -10,18 +10,50 @@ Your activity is stored on this device and nowhere else. Apart from the calls li
 - The name of the app in front, its window type, and whether you are idle.
 - With browser capture on, which host and path shape the active tab used. Titles and query strings are dropped. The extension skips private and incognito windows, so no page address is recorded for them. The browser's name is still recorded as the app in front, as for any app.
 
-Activity capture never records window titles, page text, typed text, the clipboard or keystrokes.
+Activity capture never records window titles, page text, the clipboard or the keys you press. Typed text is kept only when you turn on **Record typed text**, which is off by default. See [Typed text](#typed-text) below.
 
 Screen text and screen images are recorded only when you turn on **Read text on screen**, and microphone text only when you turn on **Transcribe the microphone**, and system audio only when you turn on **Record system audio**. Both are off by default, and they are described in [Recall](/recall). Screen text is what OCR reads from each display, and the text the focused window exposes to accessibility tools, so it can include window titles and page text that are visible on screen. That includes browser and excluded-app windows visible behind the app in front. Screen text is not read while a password field may have focus, or when the app cannot check for one. Password managers are excluded by default.
 
-The only text you type that the app keeps is a name you give inside companyOS itself: a task in the end-of-day review, or an automation you rename. It stays in the encrypted store and is never captured from another app. An export shows a placeholder in its place.
+Names you type inside companyOS itself are kept too: a task in the end-of-day review, an automation you rename, or the name and search words of a pipe. They stay in the encrypted store, and an export shows a placeholder in their place.
+
+## Typed text
+
+Typed text is off until you turn on **Record typed text** in Settings. When it is on, the app keeps the text you type into apps, as finished pieces. A piece ends when you press Enter or Tab, when the app in front changes, when you press a key that moves the cursor (arrows, Home, End, Escape, forward Delete and the function keys), or after five seconds with no key. Backspace removes the last character of the open piece, so a corrected typo is not kept. A piece is kept under the app it was typed into, for 90 days, encrypted with the rest of the history, and you can find it on [Recall](/recall).
+
+Nothing is kept, and what you typed is dropped as you type it, when:
+
+- a password or other secure field may have focus, or the app cannot tell whether one does (on a system where that cannot be checked, typed text is never kept);
+- the screen is locked, capture is paused, or you are away;
+- the app is on the exclusion list, or its kind of window is excluded;
+- the window is a browser, because private windows cannot be told apart;
+- a shortcut with Command or Control is pressed. The shortcut is never kept as text, and the text before it ends its piece.
+
+A password field is checked for as you type and again before each piece is saved. That check is not made for every key, so characters typed in a password field between two checks can still be kept. Turn the setting off before you type a password.
+
+Before a piece is saved, a card-like number (13 to 19 digits, with a space or a dash allowed between digits) is replaced with `[card number]`. A token that looks like a key is replaced with `[key]`: a vendor key such as an AWS, GitHub, OpenAI-style or Slack key, a JSON web token, a private key header, or any run of 20 or more letters and digits with no space. These are pattern checks. A password typed into an ordinary text box, with none of those shapes, is kept.
+
+The app is checked for the app in front every few seconds, so a switch is seen only then. Keys typed just after a switch can be filed under the app you left, unless the new app is excluded: a piece never ends across a switch to an excluded app. This build includes no keyboard hook for any system, so this setting cannot take effect yet, and Settings says so.
+
+## Voices
+
+Speaker identification is off by default. When you turn on **Tell speakers apart** in Settings, the twin compares the voices in microphone and system audio on this device, so a segment can carry a name, or a label such as "Speaker 2" for a voice nobody has named.
+
+A voice is biometric data. In practice:
+
+- It is computed and compared on this device. It is never sent anywhere.
+- A voice is kept only after you name its speaker. Then it is stored encrypted, in the same database as the rest, so the name can be recognised later. A voice nobody has named is held in memory only, and it is gone when the app restarts.
+- A segment keeps only the name or the label as text. Search results and the export never contain a voice or any of its numbers. The export shows only how many speakers you have named.
+- **Forget speakers** in Settings deletes every saved voice. Deleting screen, audio and typed text does not delete voices, because they are not text. A name already on a past segment stays there as text.
+
+Speaker identification can be wrong. A voice can go unnamed, and a segment can carry the wrong name, so check a name before you rely on it. A piece of speech shorter than one second gets no speaker. Laws about biometric data differ from place to place, so check the rules where you work before you turn this on.
 
 ## Where it is kept
 
 - One encrypted database (SQLCipher). Its 32-byte key is sealed by the operating system's keychain.
 - If the keychain cannot protect the key, the app does not start, rather than storing data unprotected.
 - Raw events are kept for 90 days, then removed. Routines and automations are kept until you remove them.
-- Screen text and microphone text are kept in the same database for 90 days, then removed. Screen images are sealed with a key derived from the data key, kept in a folder only your user account can read, and removed after 1, 3, 7 or 14 days, which you choose. The folder holds up to 2 GB, and the oldest images go first.
+- Screen text, microphone text and typed text are kept in the same database for 90 days, then removed.
+- Pipe files. Only if you add a pipe that writes a file: its matching text is saved as a plain Markdown file, which is not encrypted, in the `pipes` folder inside the app's data folder. The database's 90 days do not apply to these files. [Pipes](/pipes) says when each one is removed. Screen images are sealed with a key derived from the data key, kept in a folder only your user account can read, and removed after 1, 3, 7 or 14 days, which you choose. The folder holds up to 2 GB, and the oldest images go first.
 - Handoff records saved by an earlier version of the app are no longer read or shown. They are kept for 90 days from when they were sent, then removed. Delete everything removes them at once.
 
 ## What leaves the device
@@ -29,6 +61,7 @@ The only text you type that the app keeps is a name you give inside companyOS it
 - **Model downloads.** Only when you install a model. The download comes from Hugging Face hosts, and its SHA-256 digest is checked before the model is used.
 - **Decision model download.** Only if you choose it in setup or in Settings. It is five files, about 1.7 GB, from the `receptron/laya-onnx` repository on `huggingface.co`, taken from one fixed commit. Hugging Face serves them from its own `*.hf.co` hosts. Each file's SHA-256 is checked against a digest stored in the app, and a file that does not match is deleted. No account or token is sent. An interrupted download keeps what it fetched and continues from there. Once it is installed, it labels a routine that includes an app companyOS does not know, and it runs on this device. The app sends it only app names, and it sends nothing over the network to answer.
 - **Speech model download.** Only when you install the speech model for microphone text. It is Whisper tiny.en, about 44 MB in seven files, from the `onnx-community/whisper-tiny.en` repository on `huggingface.co`, taken from one fixed commit. Hugging Face may serve the files from its own `*.hf.co` hosts, and the network ledger records the host that served each one. Each file's SHA-256 is checked before it is used, and each file is recorded in the network ledger. The speech model runs on this device, and no recording or text is sent to answer.
+- **Speaker model download.** Only when you install the speaker model for **Tell speakers apart**. It is the Wespeaker ResNet34 model, about 26.5 MB in one file, from the `Wespeaker/wespeaker-voxceleb-resnet34` repository on `huggingface.co`, taken from one fixed commit. Its SHA-256 is checked before it is used, and the network ledger records the download. The model runs on this device, and no voice is sent to answer.
 - **Update checks.** Only in a packaged build with an HTTPS update feed set. No feed is configured yet. A feed may redirect, as a GitHub Release does, and the ledger lists only the first address. See [Releasing](/releasing#update-feed).
 
 Update files downloaded automatically after a check are not listed in the network ledger. The model and update hosts see the connection, including your IP address, but they receive no activity data.
@@ -39,16 +72,16 @@ The ledger lists every model download and update check the device made, as it wa
 
 ## Export and delete
 
-- **Export** writes a plain JSON file, after a warning that it is unencrypted. It includes any handoff records saved by an earlier version, with their replies. For screen and microphone text it includes only the number of items and their date range, never the text or the images.
-- **Delete screen and audio text** in Settings removes every stored screen and microphone item, with its text and its images.
-- **Delete everything** removes the database, the data key, the installed model files, including the decision model and any partial download of it, and every screen image. It also cancels any download in progress. An export you saved elsewhere is yours, and it is not touched.
+- **Export** writes a plain JSON file, after a warning that it is unencrypted. It includes any handoff records saved by an earlier version, with their replies. For screen, microphone and typed text it includes only the number of items and their date range, never the text or the images. A pipe's name and search words are replaced by a placeholder.
+- **Delete screen, audio and typed text** in Settings removes every stored screen, microphone and typed-text item, with its text and its images. It also removes every pipe file.
+- **Delete everything** removes the database, the data key, the installed model files, including the decision model and any partial download of it, and every screen image and every pipe file. It also cancels any download in progress. An export you saved elsewhere is yours, and it is not touched.
 
 ## Local API
 
-The local API is off by default. When it is on, programs on this device can search stored screen and microphone text, and read screen images, with a token that you can rotate. It listens on `127.0.0.1` only and refuses browser requests. Nothing on it leaves the device. Search and image requests are refused while **Read text on screen** is off, microphone text included.
+The local API is off by default. When it is on, programs on this device can search stored screen and microphone text, and read screen images, with a token that you can rotate. It listens on `127.0.0.1` only and refuses browser requests. Nothing on it leaves the device. Typed text is not included in any search it makes, so it is not given to those programs. Search and image requests are refused while **Read text on screen** is off, microphone text included.
 
 See [Recall](/recall#local-api).
 
 ## Excluded apps
 
-An excluded app is not recorded from then on, and its recent events are removed. Screen text read while it was the app in front is removed as well. Microphone text is not linked to any app, so an exclusion does not remove it. Screen text read from its windows while another app was in front is stored under that other app, and it is not removed. Handoff records saved by an earlier version may still name the app until they are removed after 90 days, or until you delete everything.
+An excluded app is not recorded from then on, and its recent events are removed. Screen text read while it was the app in front is removed as well. Microphone text is not linked to any app, so an exclusion does not remove it. Typed text is linked to the app it was typed into, so an exclusion removes it as it removes screen text. Screen text read from its windows while another app was in front is stored under that other app, and it is not removed. Handoff records saved by an earlier version may still name the app until they are removed after 90 days, or until you delete everything.

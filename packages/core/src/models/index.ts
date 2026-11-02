@@ -5,3 +5,4 @@ export * from './hardware';
 export * from './download';
 export * from './bundle-download';
 export * from './whisper';
+export * from './speaker';

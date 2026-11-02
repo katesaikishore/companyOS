@@ -27,8 +27,10 @@ import {
   type DraftStep,
   type Executor,
   type HardwareProfile,
+  type KeystrokeState,
   type LocalApiState,
   type NetworkEntry,
+  type PipeGate,
   type RunResult,
   type ScreenRead,
   type SetupPlan,
@@ -41,16 +43,19 @@ import {
   type WindowClass,
   normalizeAppName,
 } from '@companyos/twin-core';
-import { WHISPER_MODEL_ID } from '@companyos/twin-core';
+import { SPEAKER_MIN_SAMPLES, SPEAKER_MODEL_ID, WHISPER_MODEL_ID } from '@companyos/twin-core';
 import { app, desktopCapturer, systemPreferences } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { BROWSER_APP_NAMES, startBrowserBridge, type BrowserBridge, type BrowserVisit } from './browser-bridge';
 import { CaptureService } from './capture';
-import { AudioCaptureService, WhisperTranscriber, microphoneGranted } from './audio-capture';
+import { createKeyboardSource } from './keyboard';
+import { KeystrokeService } from './keystroke-service';
+import { AudioCaptureService, WhisperTranscriber, microphoneGranted, type SpeakerIdentifier } from './audio-capture';
+import { SpeakerEmbedder } from './speaker-embedder';
 import { destroyStoredSecrets, loadOrCreateApiToken, loadOrCreateDataKey, rotateApiToken as replaceApiToken } from './keys';
-import { LOCAL_API_HOST, LOCAL_API_PORT, createLocalApi, type LocalApi } from './local-api';
+import { LOCAL_API_HOST, LOCAL_API_PORT, createLocalApi, withoutTypedText, type LocalApi } from './local-api';
 import { MediaStore } from './media-store';
 import { readAccessibleText } from './accessibility';
 import { electronFrameSource, forkOcrWorker, ScreenCaptureService, type Frame, type ScreenContext } from './screen-capture';
@@ -62,6 +67,7 @@ import { ModelManager, createRoutineNamer } from './models';
 import { browserCapturePaths, installNativeHost, isBrowserCaptureSupported, removeNativeHost } from './native-host-install';
 import { handsExecutor } from './agent-desktop';
 import { choosePlatform, executorFor, type Platform } from './platform';
+import { PipeScheduler, pipeOutputFolder, pruneOutputs, writePipeOutput } from './pipes';
 
 export interface RuntimeOptions {
   userData: string;
@@ -79,6 +85,8 @@ export interface RuntimeOptions {
   onOffer: (offer: PendingRunView) => void;
   /** Called after a level 4 run so the owner can see that it ran or stopped. */
   onUnattendedRun?: (result: RunResult) => void;
+  /** Called when a pipe with the notify action finds new matches. The text holds a count and app names, never item text. */
+  onPipeNotice?: (text: string) => void;
   /** The native messaging host script shipped with the app. Browser capture cannot start without it. */
   browserHostScript?: string;
   fetchImpl?: typeof fetch;
@@ -121,6 +129,8 @@ const MAX_FRAME_BYTES = 512 * 1024;
 export class TwinRuntime {
   private readonly agent: TwinAgent;
   private readonly capture: CaptureService;
+  /** Typed text, off until the person turns it on. See keystroke-service.ts. */
+  private readonly keystrokes: KeystrokeService;
   private readonly platform: Platform | undefined;
   private readonly models: ModelManager;
   /** The optional decision-model bundle. Nothing in the app asks it for a decision. */
@@ -145,6 +155,8 @@ export class TwinRuntime {
   private readonly screen: ScreenCaptureService;
   private readonly audio: AudioCaptureService;
   private readonly systemAudio: AudioCaptureService;
+  /** The speaker model's process. Started by the first segment when speaker identification is on, and stopped when idle. */
+  private readonly speakerEmbedder: SpeakerEmbedder;
   /** The speech model state the microphone was last decided on. Undefined until the first decision. */
   private speechWasInstalled: boolean | undefined;
   /** The daily sweep of expired text and images. Cleared on stop, so a stopped app does not keep a timer. */
@@ -156,7 +168,7 @@ export class TwinRuntime {
   /** The app in front, from the last check. Undefined when it could not be named. */
   private frontApp: string | undefined;
   /** How many screen and microphone items are stored. Kept here, so a status read does not decrypt every row. */
-  private counts = { screen: 0, audio: 0 };
+  private counts = { screen: 0, audio: 0, keystroke: 0 };
   private mediaBytes = 0;
   private mediaSizedAt = 0;
   /** Image ids whose file could not be removed. The agent has already forgotten them, so every sweep tries them again. */
@@ -166,6 +178,8 @@ export class TwinRuntime {
   private apiToken: string | undefined;
   /** API and token changes run one at a time, as browser capture changes do. */
   private apiChanges: Promise<void> = Promise.resolve();
+  /** Runs the saved pipes on their schedules. It starts and stops with the runtime. Its last-run times stay in memory. */
+  private readonly pipeScheduler: PipeScheduler;
 
   private constructor(
     private readonly options: RuntimeOptions,
@@ -182,6 +196,13 @@ export class TwinRuntime {
       // removed is kept in unremovedImages, and the next sweep tries it again.
       deleteMedia: mediaIds => void this.removeImages(mediaIds),
     });
+    this.keystrokes = new KeystrokeService({
+      source: createKeyboardSource(process.platform),
+      frontApp: () => this.platform?.frontmost().catch(() => undefined) ?? Promise.resolve(undefined),
+      secureInput: () => secureInputState(),
+      state: app => this.keystrokeState(app),
+      ingest: piece => this.keepKeystrokes(piece),
+    });
     this.capture = new CaptureService(
       {
         agent: this.agent,
@@ -189,6 +210,7 @@ export class TwinRuntime {
         idleSeconds: options.idleSeconds,
         bridgeRunning: () => this.browserBridge !== undefined,
         onFocus: app => this.observeFocus(app),
+        onFrontApp: app => this.keystrokes.noteFront(app),
       },
       detail,
     );
@@ -206,11 +228,18 @@ export class TwinRuntime {
       workerPath: join(__dirname, 'transcribe-worker.js'),
       modelsDir: join(options.userData, 'models'),
     });
-    this.audio = new AudioCaptureService({ transcriber, sink: { ingestAudio: segment => this.keepAudioSegment(segment) } });
+    // Voices are compared in a process of their own, and only while the person has turned speaker identification on.
+    this.speakerEmbedder = new SpeakerEmbedder({
+      workerPath: join(__dirname, 'speaker-worker.js'),
+      modelsDir: join(options.userData, 'models'),
+    });
+    const speakers: SpeakerIdentifier = { identify: samples => this.identifySpeaker(samples) };
+    this.audio = new AudioCaptureService({ transcriber, sink: { ingestAudio: segment => this.keepAudioSegment(segment) }, speakers });
     this.systemAudio = new AudioCaptureService({
       transcriber,
       sink: { ingestAudio: segment => this.keepAudioSegment(segment) },
       source: 'system',
+      speakers,
     });
     this.models = new ModelManager({
       modelsDir: join(options.userData, 'models'),
@@ -247,6 +276,16 @@ export class TwinRuntime {
       available: () => this.laya.view().status === 'installed',
       allowed: () => modelWorkAllowed({ onBattery: options.onBattery(), idleSeconds: options.idleSeconds() }),
     });
+    // A pipe reads only the stored text, through the engine's search, which leaves out excluded apps. The gates are read per run.
+    this.pipeScheduler = new PipeScheduler({
+      now: () => Date.now(),
+      pipes: () => this.agent.configuration.pipes,
+      gate: () => this.pipeGate(),
+      search: request => this.agent.searchCapture(request),
+      notify: text => options.onPipeNotice?.(text),
+      writeOutput: (pipeId, markdown) => writePipeOutput(pipeOutputFolder(options.userData), pipeId, markdown),
+      pruneOutputs: keep => pruneOutputs(pipeOutputFolder(options.userData), keep),
+    });
   }
 
   static async create(options: RuntimeOptions): Promise<TwinRuntime> {
@@ -272,6 +311,7 @@ export class TwinRuntime {
       });
     }
     this.namer.start();
+    this.pipeScheduler.start();
     this.startKindLabels();
     this.sweepTimer = setInterval(() => void this.sweepMedia(), DAY_MS);
     this.sweepTimer.unref();
@@ -281,11 +321,13 @@ export class TwinRuntime {
     clearInterval(this.sweepTimer);
     this.sweepTimer = undefined;
     this.capture.stop();
+    this.keystrokes.stop();
     void this.stopCapture();
     void this.setLocalApi(false);
     this.browserBridge?.stop();
     this.browserBridge = undefined;
     this.namer.stop();
+    this.pipeScheduler.stop();
     this.stopKindLabels();
   }
 
@@ -364,6 +406,7 @@ export class TwinRuntime {
       },
       browserCaptureSupported: isBrowserCaptureSupported(),
       config,
+      speakerProfiles: this.agent.speakerProfileCount(),
       usage: this.agent.appUsage(7),
       suggestions,
       automations,
@@ -412,6 +455,10 @@ export class TwinRuntime {
     this.capture.setPaused(saved.capturePaused);
     // Removing an app from the captured text happens when the exclusion list changes, so the counts are read again.
     if (changed.excludedApps !== undefined) this.refreshCaptureCounts();
+    // A pipe's file may hold text from an app or a kind of window that is now excluded, so the files go. The next run writes them again.
+    if (changed.excludedApps !== undefined || changed.excludedWindowClasses !== undefined) {
+      void this.clearPipeOutputs();
+    }
     // A shorter image period takes effect now, not at the next sweep.
     if (changed.frameRetentionDays !== undefined) void this.sweepMedia();
     this.refreshCapture();
@@ -627,6 +674,7 @@ export class TwinRuntime {
     await this.laya.wipe();
     await this.models.wipe();
     await this.media.wipe();
+    await pruneOutputs(pipeOutputFolder(this.options.userData), new Set());
     this.agent.wipe();
     this.apiToken = undefined;
     destroyStoredSecrets(this.options.userData);
@@ -656,9 +704,10 @@ export class TwinRuntime {
     return `data:image/jpeg;base64,${bytes.toString('base64')}`;
   }
 
-  /** Deletes every stored screen image and all captured text. Activity history, automations and settings are kept. */
+  /** Deletes every stored screen image and all captured text, including typed text. Activity history, automations and settings are kept. */
   async deleteCapture(): Promise<void> {
-    // A read in progress ends first, so nothing new is stored after the delete.
+    // A read in progress ends first, so nothing new is stored after the delete. The open piece of typed text is dropped too.
+    this.keystrokes.discard();
     await this.stopCapture();
     try {
       await this.media.remove(this.agent.deleteAllCapture());
@@ -666,7 +715,17 @@ export class TwinRuntime {
       this.refreshCaptureCounts();
       await this.refreshMediaBytes();
       this.startCapture();
+      // Pipe files hold the same text, so deleting the text deletes them as well. This runs last, so a failure here
+      // cannot stop the capture from starting again, and a failure reaches the page.
+      await pruneOutputs(pipeOutputFolder(this.options.userData), new Set());
     }
+  }
+
+  /** Removes every pipe file. Each run of a write pipe writes its file again. A failure is logged as a fixed sentence. */
+  private clearPipeOutputs(): Promise<void> {
+    return pruneOutputs(pipeOutputFolder(this.options.userData), new Set()).catch(() => {
+      console.error('The pipe files could not be removed. Their text is not logged.');
+    });
   }
 
   /** Copies the local API token through the given function. The token itself never reaches the page. */
@@ -701,15 +760,17 @@ export class TwinRuntime {
     return locked || paused || idle;
   }
 
-  /** The two channels' states and counts, and the local API's state. Holds no text, so the status and the API can return it. */
+  /** The channels' states and counts, and the local API's state. Holds no text, so the status and the API can return it. */
   private captureChannels(): Omit<TwinStatus['capture'], 'state' | 'detail'> {
     return {
       screenState: this.screenState(),
       audioState: this.audioState(),
+      keystrokeState: this.keystrokeChannelState(),
       apiState: this.apiState,
       mediaBytes: this.mediaBytes,
       screenCount: this.counts.screen,
       audioCount: this.counts.audio,
+      keystrokeCount: this.counts.keystroke,
     };
   }
 
@@ -721,9 +782,71 @@ export class TwinRuntime {
     return this.heldBack() ? 'paused' : 'on';
   }
 
+  /**
+   * Typed text. 'unsupported' when this system has no keyboard hook, so the setting cannot take effect. The policy also refuses
+   * every piece on a system that cannot check secure input, so the channel is shown as on only where both are in place.
+   */
+  private keystrokeChannelState(): CaptureChannelState {
+    if (!this.agent.configuration.keystrokeCaptureEnabled) return 'off';
+    if (!this.keystrokes.available) return 'unsupported';
+    if (!this.keystrokes.permissionGranted) return 'needs_permission';
+    return this.heldBack() ? 'paused' : 'on';
+  }
+
+  /**
+   * The policy's inputs for typed text, for the app the text would be typed into. An app that cannot be named is treated as
+   * excluded, and so is the twin itself. Secure input is added by the keystroke service.
+   */
+  private keystrokeState(app: string | undefined): Omit<KeystrokeState, 'secureInput'> {
+    const config = this.agent.configuration;
+    return {
+      enabled: config.keystrokeCaptureEnabled,
+      ...this.captureFlags(),
+      permissionGranted: this.keystrokes.permissionGranted,
+      appExcluded: app === undefined || isOwnApp(app) || isExcludedApp(app, config.excludedApps),
+      windowClass: windowClassOf(app),
+      windowExcluded: config.excludedWindowClasses.includes(windowClassOf(app)),
+    };
+  }
+
+  /** Stores one finished piece of typed text. The agent checks it again, so this never stores what the policy refused. */
+  private keepKeystrokes(piece: { ts: number; app: string; text: string }): boolean {
+    const stored = this.agent.ingestKeystrokes({ ...piece, windowClass: windowClassOf(piece.app) });
+    if (stored) this.counts.keystroke += 1;
+    return stored;
+  }
+
   /** True when the speech model is installed. Its record is kept only after every file has been checked against its pin. */
   private speechInstalled(): boolean {
     return this.agent.configuration.installedModels.some(model => model.id === WHISPER_MODEL_ID);
+  }
+
+  /** True when the speaker model is installed. Like the speech model, its record is kept only after every file is checked. */
+  private speakerInstalled(): boolean {
+    return this.agent.configuration.installedModels.some(model => model.id === SPEAKER_MODEL_ID);
+  }
+
+  /**
+   * Says who is speaking in one segment, when speaker identification is on and its model is installed. The voice is computed
+   * in the speaker process and compared in the engine. Only the name or the session label comes back.
+   */
+  private async identifySpeaker(samples: Float32Array): Promise<string | undefined> {
+    if (!this.agent.configuration.speakerIdentificationEnabled || !this.speakerInstalled()) return undefined;
+    // A segment shorter than a second is too short to tell voices apart, so it gets no speaker.
+    if (samples.length < SPEAKER_MIN_SAMPLES) return undefined;
+    const voice = await this.speakerEmbedder.embed(samples);
+    return voice === undefined ? undefined : this.agent.identifySpeaker(voice);
+  }
+
+  /** Gives a session speaker a name, from the Recall page. The engine checks the label and the name. */
+  nameSpeaker(label: string, name: string): void {
+    this.agent.nameSessionSpeaker(label, name);
+  }
+
+  /** Deletes every speaker profile and forgets the session speakers. The speaker process is stopped first, so nothing is matched after it. */
+  forgetSpeakers(): void {
+    this.speakerEmbedder.stop();
+    this.agent.forgetSpeakers();
   }
 
   /** Restarts the microphone decision when the speech model is installed or removed, and does nothing otherwise. */
@@ -755,6 +878,21 @@ export class TwinRuntime {
       windowClass: windowClassOf(front),
       windowExcluded: config.excludedWindowClasses.includes(windowClassOf(front)),
       permissionGranted: screenPermissionGranted(),
+    };
+  }
+
+  /**
+   * The gates a pipe run waits for, read from the same holds the capture channels use. Secure input is probed here, once
+   * a pipe is due, so the probe is not run on every tick.
+   */
+  private async pipeGate(): Promise<PipeGate> {
+    const holds = this.capture.holds();
+    return {
+      automationsEnabled: this.agent.configuration.automationsEnabled,
+      paused: holds.paused,
+      locked: holds.locked,
+      idle: holds.idle,
+      secureInput: await secureInputState(),
     };
   }
 
@@ -796,6 +934,9 @@ export class TwinRuntime {
   private refreshCapture(): void {
     this.learnLockState();
     const config = this.agent.configuration;
+    // Typed text starts or stops with its setting, and an open piece is dropped as soon as the policy refuses.
+    this.keystrokes.setEnabled(config.keystrokeCaptureEnabled);
+    this.keystrokes.refresh();
     // Microphone text needs the speech model. Without it, audio is not kept or transcribed.
     this.audio.setContext({ enabled: config.audioCaptureEnabled && this.speechInstalled(), ...this.captureFlags() });
     this.systemAudio.setContext({ enabled: config.systemAudioCaptureEnabled && this.speechInstalled(), ...this.captureFlags() });
@@ -823,6 +964,7 @@ export class TwinRuntime {
     this.captureTimer = undefined;
     this.audio.stop();
     this.systemAudio.stop();
+    this.speakerEmbedder.stop();
     return this.screen.stop();
   }
 
@@ -853,7 +995,7 @@ export class TwinRuntime {
 
   private refreshCaptureCounts(): void {
     const summary = this.agent.captureSummary();
-    this.counts = { screen: summary.screenCount, audio: summary.audioCount };
+    this.counts = { screen: summary.screenCount, audio: summary.audioCount, keystroke: summary.keystrokeCount };
   }
 
   private async refreshMediaBytes(): Promise<void> {
@@ -943,7 +1085,8 @@ export class TwinRuntime {
         host: LOCAL_API_HOST,
         port: LOCAL_API_PORT,
         token: () => this.apiToken ?? '',
-        search: request => this.agent.searchCapture(request),
+        // Typed text is not served to other programs on this device. It is searched on the Recall page only.
+        search: request => withoutTypedText(this.agent.searchCapture(request)),
         frameImage: id => this.readFrame(id),
         status: () => this.captureChannels(),
       });

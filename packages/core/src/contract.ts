@@ -292,18 +292,24 @@ export interface CaptureSearchRequest {
   text: string;
   kind?: CaptureKind;
   app?: string;
+  /** Only audio items with this speaker name or session label. Left out, every speaker is searched. */
+  speaker?: string;
   /** Inclusive bounds, in ms. */
   from: number;
   to: number;
 }
 
-/** One captured item that matched. For a screen item, `id` names its image, which frameImage reads. The snippet is a short piece of the stored text. */
+/**
+ * One captured item that matched. For a screen item, `id` names its image, which frameImage reads. The snippet is a short piece of the stored text.
+ * `speaker` is set on an audio item that was labelled, with a name or a session label such as 'Speaker 2'. It is never a voice.
+ */
 export interface CaptureHitView {
   kind: CaptureKind;
   id: string;
   ts: number;
   app: string | null;
   snippet: string;
+  speaker?: string;
 }
 
 export interface TwinStatus {
@@ -316,15 +322,20 @@ export interface TwinStatus {
     detail: string;
     screenState: CaptureChannelState;
     audioState: CaptureChannelState;
+    /** Typed text. 'unsupported' when this system has no keyboard hook, so the setting cannot take effect. */
+    keystrokeState: CaptureChannelState;
     apiState: LocalApiState;
     /** Bytes on disk for the sealed screen images. */
     mediaBytes: number;
     screenCount: number;
     audioCount: number;
+    keystrokeCount: number;
   };
   /** Whether browser capture can run on this system. The browser bridge is available on macOS and Linux only. */
   browserCaptureSupported: boolean;
   config: TwinConfig;
+  /** How many speaker profiles the person has named. The profiles themselves are never sent to a page. */
+  speakerProfiles?: number;
   usage: AppUsageView[];
   suggestions: SuggestionView[];
   automations: AutomationView[];
@@ -372,6 +383,14 @@ export interface TwinBridge {
   setPaused(paused: boolean): Promise<void>;
   updateConfig(patch: Partial<TwinConfig>): Promise<TwinConfig>;
   stopAllAutomations(): Promise<void>;
+
+  /**
+   * Gives a session speaker a name, such as 'Speaker 2' to 'Ada'. The voice is stored as a profile, encrypted on this device,
+   * and the audio items with that label are relabelled. Refused while speaker identification is off.
+   */
+  nameSpeaker(label: string, name: string): Promise<void>;
+  /** Deletes every speaker profile and forgets the session speakers. Names already on past audio items stay as they are. */
+  forgetSpeakers(): Promise<void>;
 
   acceptRoutine(routineId: string, name?: string): Promise<AutomationView>;
   dismissRoutine(routineId: string): Promise<void>;

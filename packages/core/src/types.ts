@@ -78,9 +78,62 @@ export const MAX_DECLINE_STREAK = 32;
 /** The longest dismissed-routine signature kept. A longer one is not stored, so its routine is hidden by id only. */
 export const MAX_SIGNATURE_CHARS = 2048;
 
-/** The two kinds of captured item: text read from the screen, and text from the microphone. */
-export const CAPTURE_KINDS = ['screen', 'audio'] as const;
+/** The kinds of captured item: text read from the screen, text from the microphone, and text the person typed. */
+export const CAPTURE_KINDS = ['screen', 'audio', 'keystroke'] as const;
 export type CaptureKind = (typeof CAPTURE_KINDS)[number];
+
+/** Most pipes one config holds. */
+export const MAX_PIPES = 20;
+export const PIPE_NAME_MAX = 60;
+export const PIPE_QUERY_MAX = 200;
+export const PIPE_INTERVAL_MIN_MINUTES = 15;
+export const PIPE_INTERVAL_MAX_MINUTES = 1440;
+/** What a pipe does with its matches. 'notify' shows a count and app names. 'write' saves the text to a file. */
+export const PIPE_ACTIONS = ['notify', 'write'] as const;
+export type PipeAction = (typeof PIPE_ACTIONS)[number];
+/** The text a pipe may search. Typed text is not one of them, so a pipe never reads what the person typed. */
+export const PIPE_KINDS = ['screen', 'audio'] as const;
+export type PipeKind = (typeof PIPE_KINDS)[number];
+/** No control characters, so a name or search cannot break a line of the Markdown file it may be written to. */
+const NO_CONTROL_CHARACTERS = /^[^\p{Cc}]*$/u;
+const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u;
+
+/**
+ * A pipe: a saved search that runs on a schedule and does one local thing with the result. The strict schema refuses any
+ * other field, so a pipe cannot carry code, a command or a destination. The id is a file name, so it is limited to letters,
+ * digits and dashes.
+ */
+export const PipeSchema = z
+  .object({
+    id: z.string().regex(/^[A-Za-z0-9-]{8,40}$/),
+    name: z.string().trim().min(1).max(PIPE_NAME_MAX).regex(NO_CONTROL_CHARACTERS),
+    /** Empty lists everything in the range. Otherwise it must hold a letter or a digit, or every item would match. */
+    query: z
+      .string()
+      .trim()
+      .max(PIPE_QUERY_MAX)
+      .regex(NO_CONTROL_CHARACTERS)
+      .refine(query => query === '' || LETTER_OR_DIGIT.test(query)),
+    kind: z.enum(PIPE_KINDS).optional(),
+    app: z.string().trim().min(1).max(200).regex(NO_CONTROL_CHARACTERS).optional(),
+    intervalMinutes: z.number().int().min(PIPE_INTERVAL_MIN_MINUTES).max(PIPE_INTERVAL_MAX_MINUTES),
+    action: z.enum(PIPE_ACTIONS),
+    enabled: z.boolean(),
+  })
+  .strict();
+export type Pipe = z.infer<typeof PipeSchema>;
+
+/** The saved pipes, checked as one list: at most MAX_PIPES, and each id once. */
+export const PipesSchema = z
+  .array(PipeSchema)
+  .max(MAX_PIPES)
+  .superRefine((pipes, context) => {
+    const ids = new Set<string>();
+    for (const pipe of pipes) {
+      if (ids.has(pipe.id)) context.addIssue({ code: 'custom', message: 'Each pipe needs its own id.' });
+      ids.add(pipe.id);
+    }
+  });
 
 export const TwinConfigSchema = z
   .object({
@@ -122,12 +175,18 @@ export const TwinConfigSchema = z
     audioCaptureEnabled: z.boolean().default(false),
     /** Whether the sound the computer plays is transcribed. Off until the person turns it on. */
     systemAudioCaptureEnabled: z.boolean().default(false),
+    /** Whether voices in microphone and system audio are compared, so segments get a name. Off until the person turns it on. See speaker/match.ts. */
+    speakerIdentificationEnabled: z.boolean().default(false),
+    /** Text the person types into apps, kept as finished pieces. Off until the person turns it on. See keystroke-text.ts. */
+    keystrokeCaptureEnabled: z.boolean().default(false),
     /** The read-only API on 127.0.0.1 for other programs on this device. Off until the person turns it on. */
     localApiEnabled: z.boolean().default(false),
     /** How many days captured screen images are kept. Their text is kept for the same 90 days as the rest of the history. */
     frameRetentionDays: z.union([z.literal(1), z.literal(3), z.literal(7), z.literal(14)]).default(7),
     /** Whether the person paused screen and microphone capture. Kept here, so a relaunch keeps the pause. Set by the pause control. */
     capturePaused: z.boolean().default(false),
+    /** Saved pipes. Empty until the person adds one. Each runs on its own schedule. See pipes.ts. */
+    pipes: PipesSchema.default([]),
   })
   .strict();
 export type TwinConfig = z.infer<typeof TwinConfigSchema>;
@@ -176,7 +235,10 @@ export const DEFAULT_CONFIG: TwinConfig = {
   screenCaptureEnabled: false,
   audioCaptureEnabled: false,
   systemAudioCaptureEnabled: false,
+  speakerIdentificationEnabled: false,
+  keystrokeCaptureEnabled: false,
   localApiEnabled: false,
   frameRetentionDays: 7,
   capturePaused: false,
+  pipes: [],
 };

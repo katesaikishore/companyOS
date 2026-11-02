@@ -30,6 +30,16 @@ export const CANARIES = {
   screenOcrBrowser: 'CANARY_SCREEN_BROWSER_19D8F4',
   audioTranscript: 'CANARY_AUDIO_TRANSCRIPT_5E27B9',
   searchQuery: 'CANARY_SEARCH_QUERY_E1F4A8',
+  // Typed text (keystroke-service.ts). Each refused piece plants its own canary, so a leak from it is named. The stored piece
+  // is kept only in the encrypted index, once it is redacted: its card-like number and key-like token are planted too, and
+  // must never reach any surface. Letters only, so the redaction rules leave the canary itself alone.
+  keystrokeSecure: 'CANARY_KEYSTROKE_SECURE_QWZX',
+  keystrokeUnknown: 'CANARY_KEYSTROKE_UNKNOWN_VBNM',
+  keystrokeLocked: 'CANARY_KEYSTROKE_LOCKED_RTYU',
+  keystrokeStored: 'CANARY_KEYSTROKE_STORED_PLMK',
+  // A card number and a key-like token typed into an allowed app. The redaction must remove both before anything is stored.
+  keystrokeCard: '4111 1111 1111 1111',
+  keystrokeKey: 'AKIAIOSFODNN7EXAMPLE',
   encodedForms: 'CANARY_FORMS_?>?/B2F90',
 } as const;
 
@@ -41,7 +51,7 @@ export type CanaryName = keyof typeof CANARIES;
  * the copy really is there, so the exception cannot pass on an empty store.
  */
 export const HELD_BY_DESIGN: Readonly<Record<string, readonly CanaryName[]>> = {
-  'store:decrypted:capture': ['screenOcr'],
+  'store:decrypted:capture': ['screenOcr', 'keystrokeStored'],
 };
 
 export type Encoding = 'raw' | 'base64' | 'base64url' | 'hex' | 'percent';

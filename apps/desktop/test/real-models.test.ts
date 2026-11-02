@@ -173,3 +173,50 @@ describe.skipIf(!enabled || !process.env.COMPANYOS_QWEN35_GGUF)(
     }, 600_000);
   },
 );
+
+/**
+ * The speaker model (Wespeaker ResNet34, ONNX), checked the way the speaker process runs it. The pinned bundle is downloaded
+ * with the app's own downloader, which checks the pin, then loaded with onnxruntime-node on the CPU. A tone with noise must give
+ * 256 finite values, the same values on every run, and a different embedding from noise alone. The worker's own file is not
+ * imported, because it reads the parent port when it loads. Its steps are repeated here.
+ */
+describe.skipIf(!enabled)('speaker model (COMPANYOS_REAL_MODELS=1)', () => {
+  it('downloads the pinned bundle, loads it, and gives 256 values that repeat exactly and differ between sounds', async () => {
+    const { HUGGING_FACE_HOSTS, SPEAKER_BUNDLE, cosine, downloadBundle, fbankFeatures, speakerDirectory, speakerModelPath, verifyBundle } =
+      await import('@companyos/twin-core');
+    const { InferenceSession, Tensor } = await import('onnxruntime-node');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const cache = process.env.COMPANYOS_MODEL_CACHE ?? join(tmpdir(), 'companyos-models');
+
+    await downloadBundle({ spec: SPEAKER_BUNDLE, destinationDir: speakerDirectory(cache), allowedHosts: HUGGING_FACE_HOSTS });
+    expect(await verifyBundle(SPEAKER_BUNDLE, speakerDirectory(cache))).toBe(true);
+
+    const session = await InferenceSession.create(speakerModelPath(cache), { executionProviders: ['cpu'], logSeverityLevel: 4 });
+    const embed = async (samples: Float32Array): Promise<Float32Array> => {
+      const features = fbankFeatures(samples);
+      const out = await session.run({ [session.inputNames[0]]: new Tensor('float32', features.data, [1, features.frames, features.bins]) });
+      return Float32Array.from(out[session.outputNames[0]].data as Float32Array);
+    };
+
+    const sample = (seconds: number, seed: number, tone: boolean): Float32Array => {
+      const out = new Float32Array(Math.round(16_000 * seconds));
+      let state = seed;
+      for (let n = 0; n < out.length; n++) {
+        state = (state * 1103515245 + 12345) & 0x7fffffff;
+        const hiss = (state / 0x7fffffff - 0.5) * 0.2;
+        out[n] = tone ? 0.4 * Math.sin((2 * Math.PI * 220 * n) / 16_000) + hiss : hiss;
+      }
+      return out;
+    };
+
+    const signal = sample(2, 5, true);
+    const first = await embed(signal);
+    const second = await embed(signal);
+    expect(first).toHaveLength(256);
+    expect(Array.from(first).every(Number.isFinite)).toBe(true);
+    expect(Array.from(second)).toEqual(Array.from(first));
+    expect(await embed(sample(4, 9, true))).toHaveLength(256);
+    expect(cosine(first, await embed(sample(2, 5, false)))).toBeLessThan(0.99);
+  }, 600_000);
+});

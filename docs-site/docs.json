@@ -16,7 +16,7 @@
       },
       {
         "group": "Using the twin",
-        "pages": ["how-it-works", "recall", "automations", "app-readiness"]
+        "pages": ["how-it-works", "recall", "automations", "pipes", "app-readiness"]
       },
       {
         "group": "Privacy",

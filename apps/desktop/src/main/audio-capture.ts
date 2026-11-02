@@ -45,7 +45,15 @@ export interface Transcriber {
 
 /** Where kept text goes. The twin's agent satisfies this. */
 export interface AudioSink {
-  ingestAudio(segment: { ts: number; durationMs: number; text: string; source?: CaptureSource }): boolean;
+  ingestAudio(segment: { ts: number; durationMs: number; text: string; source?: CaptureSource; speaker?: string }): boolean;
+}
+
+/**
+ * Says who is speaking in one segment: an enrolled name, a session label such as 'Speaker 2', or undefined when it cannot say.
+ * It rejects on failure, and its message never holds speech or a voice. Only the answer is passed on, never the voice.
+ */
+export interface SpeakerIdentifier {
+  identify(samples: Float32Array): Promise<string | undefined>;
 }
 
 export interface AudioCaptureOptions {
@@ -56,6 +64,8 @@ export interface AudioCaptureOptions {
   now?: () => number;
   /** Whether the operating system lets this app use the microphone now. Tests replace it. */
   microphoneGranted?: () => boolean;
+  /** Tells the speakers apart, when the person has turned that on. Left out, segments carry no speaker. */
+  speakers?: SpeakerIdentifier;
 }
 
 interface Segment {
@@ -226,10 +236,28 @@ export class AudioCaptureService {
     }
     // Checked again, because the person may have paused or locked the screen while the segment was being transcribed.
     if (!audioDecision(this.state()).capture) return;
+    // The voice is compared only for a segment that may be kept. A failed check keeps the text, without a speaker.
+    const speaker = await this.identify(segment.samples);
+    if (!audioDecision(this.state()).capture) return;
     try {
-      this.options.sink.ingestAudio({ ts, durationMs: segment.durationMs, text, source: this.source });
+      this.options.sink.ingestAudio({
+        ts,
+        durationMs: segment.durationMs,
+        text,
+        source: this.source,
+        ...(speaker === undefined ? {} : { speaker }),
+      });
     } catch {
       // The store refused the segment. Its reason is not shown, because it can echo the text.
+    }
+  }
+
+  private async identify(samples: Float32Array): Promise<string | undefined> {
+    if (!this.options.speakers) return undefined;
+    try {
+      return await this.options.speakers.identify(samples);
+    } catch {
+      return undefined;
     }
   }
 }

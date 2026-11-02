@@ -1,8 +1,8 @@
 import type { CaptureHitView, CaptureKind, CaptureSearchRequest } from '@companyos/twin-core';
 import { clock, startOfDay } from './format.js';
 
-/** What a search looks at: both kinds, screen text only, or microphone text only. */
-export type RecallKind = 'all' | 'screen' | 'audio';
+/** What a search looks at: every kind, or one kind only (screen text, microphone text or typed text). */
+export type RecallKind = 'all' | CaptureKind;
 
 /** How far back a search looks. Today starts at local midnight. The week is today and the six days before it. */
 export type RecallRange = 'today' | 'week';
@@ -17,6 +17,7 @@ export const KIND_OPTIONS: ReadonlyArray<{ value: RecallKind; label: string }> =
   { value: 'all', label: 'Everything' },
   { value: 'screen', label: 'Screen' },
   { value: 'audio', label: 'Microphone' },
+  { value: 'keystroke', label: 'Typed' },
 ];
 
 export const RANGE_OPTIONS: ReadonlyArray<{ value: RecallRange; label: string }> = [
@@ -28,15 +29,17 @@ export const RANGE_OPTIONS: ReadonlyArray<{ value: RecallRange; label: string }>
 export const KIND_LABEL: Record<CaptureKind, string> = {
   screen: 'Screen',
   audio: 'Microphone',
+  keystroke: 'Typed',
 };
 
 /** Every fixed piece of copy on the Recall page. Kept together so the wording is checked in one place. */
 export const RECALL_COPY = {
   title: 'Recall',
-  note: 'Search the text the twin read on the screen or heard on the microphone. It is encrypted on this device. Nothing is recorded until you turn it on in Settings or setup.',
+  note: 'Search the text the twin read on the screen, heard on the microphone or saw you type. It is encrypted on this device. Nothing is recorded until you turn it on in Settings or setup.',
   channels: 'What is being recorded',
   screenChannel: 'Screen text',
   audioChannel: 'Microphone text',
+  keystrokeChannel: 'Typed text',
   recording: 'Screen text is being recorded.',
   searchLabel: 'Words to search for',
   placeholder: 'Words you remember',
