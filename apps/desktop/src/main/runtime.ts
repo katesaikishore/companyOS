@@ -614,12 +614,15 @@ export class TwinRuntime {
       if (!platform) throw new Error('App control is not available on this system yet.');
       const automation = this.agent.automations().find(view => view.automation.id === automationId)?.automation;
       if (!automation) throw new Error('Unknown automation.');
+      const owner = cursorFor(automation.id, automation.name).agentId;
       return this.logged(automation, 'supervised', () =>
         this.agent.run(
           automationId,
           {
             mode: 'supervised',
-            approve: (step, decision) => this.options.approve(automation, step, decision),
+            // The dialog takes focus, so it has its own turn of the input: it never opens while another run's step acts,
+            // and no step acts while it is open. The runner asks before the step's own turn, so the two never nest.
+            approve: (step, decision) => this.inputLock.run(owner, () => this.options.approve(automation, step, decision)),
           },
           this.runExecutor(platform, automation),
         ),
@@ -636,7 +639,7 @@ export class TwinRuntime {
   private runExecutor(platform: Platform, automation?: { id: string; name: string }): Executor {
     const cursor = automation ? cursorFor(automation.id, automation.name) : undefined;
     // Each step's action and its check take the desktop's input in turn, so overlapping runs cannot move focus under
-    // each other. The lock is entered after the step's approval, never while a person is being asked.
+    // each other. A step's turn starts after its approval, whose dialog had a turn of its own.
     const exclusive = <T>(work: () => Promise<T>): Promise<T> => this.inputLock.run(cursor?.agentId ?? 'run', work);
     const native = executorFor(platform);
     const binary = this.agent.configuration.agentDesktopPath.trim();
@@ -840,6 +843,8 @@ export class TwinRuntime {
   async answerPendingRun(id: string, run: boolean): Promise<void> {
     const offer = this.livePending().find(candidate => candidate.id === id);
     if (!offer) throw new Error('That request has expired.');
+    // An offer made before a plan began stays up, but nothing starts beside the plan the person is being asked about.
+    if (run && this.planning) throw new Error('A plan is waiting for your answer. Answer it, then run this.');
     this.pending = this.pending.filter(candidate => candidate !== offer);
     if (!run) {
       this.agent.recordDecline(offer.automationId);
