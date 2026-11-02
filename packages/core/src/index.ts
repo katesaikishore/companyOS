@@ -44,3 +44,4 @@ export * from './workbook/sheet';
 export * from './workbook/brain';
 export * from './workbook/search';
 export * from './mail/gmail';
+export * from './apps/capabilities';
