@@ -1,4 +1,4 @@
-import type { CaptureChannelState, CapturePermission, Pipe, TwinConfig, TwinStatus } from '@companyos/twin-core';
+import type { CaptureChannelState, CapturePermission, Pipe, PipeOutputSummaryView, TwinConfig, TwinStatus } from '@companyos/twin-core';
 import { h, type Child } from '../dom.js';
 import { SPEECH_MODEL_ID } from '../speech-model.js';
 import { SPEAKER_MODEL_ID } from '../speaker-model.js';
@@ -7,6 +7,19 @@ import { formatBytes, plural } from '../format.js';
 import { KEYSTROKE_COPY, keystrokeNote } from '../keystroke-copy.js';
 import { captureChannelNote, layaState, layaStateLabel, modelState, modelStateLabel } from '../labels.js';
 import { TEXT_KEPT_DAYS } from '../recall-model.js';
+import {
+  CONNECTOR_ADD_LABELS,
+  CONNECTOR_DELETE_COPY,
+  CONNECTOR_LIMITS,
+  CONNECTOR_NEVER_COPY,
+  CONNECTOR_READ_COPY,
+  CONNECTOR_WHERE_COPY,
+  CONNECTORS_NOTE,
+  LOCAL_CONNECTOR_KINDS,
+  connectorStatusLine,
+  connectorsFull,
+  type LocalConnectorKind,
+} from '../connectors-model.js';
 import { WINDOW_KIND_IDS, WINDOW_KIND_LABELS, type WindowKindId } from '../window-kinds.js';
 import {
   PIPE_ACTION_CHOICES,
@@ -15,23 +28,25 @@ import {
   PIPE_LIMITS,
   pipeFormProblem,
   pipeFromForm,
+  pipeKeptLine,
   pipeSummary,
   type PipeForm,
 } from '../pipes-model.js';
-import { act, bridge, confirmDeleteAll, pending, saveConfig, setNotice, state } from '../store.js';
+import { act, bridge, confirmDeleteAll, pending, requestRender, saveConfig, setNotice, state } from '../store.js';
 import { forgetRecall } from './recall.js';
 import { openSetup } from './setup.js';
 
 type Theme = TwinConfig['theme'];
 type InstalledModel = TwinStatus['config']['installedModels'][number];
 type RetentionDays = TwinConfig['frameRetentionDays'];
-type SectionId = 'capture' | 'recall' | 'automations' | 'pipes' | 'models' | 'appearance' | 'data';
+type SectionId = 'capture' | 'recall' | 'automations' | 'pipes' | 'connectors' | 'models' | 'appearance' | 'data';
 
 const SECTIONS: ReadonlyArray<{ id: SectionId; label: string }> = [
   { id: 'capture', label: 'Capture' },
   { id: 'recall', label: 'Screen and audio' },
   { id: 'automations', label: 'Automations' },
   { id: 'pipes', label: 'Pipes' },
+  { id: 'connectors', label: 'Connectors' },
   { id: 'models', label: 'Models' },
   { id: 'appearance', label: 'Appearance' },
   { id: 'data', label: 'Your data' },
@@ -90,7 +105,8 @@ export function settingsView(status: TwinStatus): HTMLElement {
         ),
         recallPanel(status),
         automationsPanel(config),
-        pipesPanel(config.pipes),
+        pipesPanel(config.pipes, status.pipeOutputs ?? {}),
+        connectorsPanel(status),
         modelsPanel(status),
         appearancePanel(config.theme),
         dataPanel(),
@@ -165,6 +181,45 @@ interface SectionOptions {
   note?: string;
   /** Lays the children out as one column with no dividers, for forms. */
   stack?: boolean;
+}
+
+/** Window-kind ticks the person has made and not yet saved, oldest first. The toggles show the saved list with these applied. */
+let kindTicks: { kind: WindowKindId; checked: boolean }[] = [];
+/** Saves run one at a time, so each one is built on the saved list as it stands when its turn comes. */
+let kindQueue: Promise<void> = Promise.resolve();
+
+/** The window kinds to show: the saved list with each unsaved tick applied in order. */
+function shownKinds(saved: readonly string[]): WindowKindId[] {
+  return WINDOW_KIND_IDS.filter(kind => {
+    let on = saved.includes(kind);
+    for (const tick of kindTicks) if (tick.kind === kind) on = tick.checked;
+    return on;
+  });
+}
+
+/** Queues one window-kind tick. The toggles show it at once, and it is saved after the saves queued before it. */
+function queueKindTick(kind: WindowKindId, checked: boolean): void {
+  kindTicks = [...kindTicks, { kind, checked }];
+  requestRender();
+  kindQueue = kindQueue.then(sendNextKindTick);
+}
+
+/**
+ * Saves the oldest queued tick on top of the saved list. saveConfig does not reject: a failure becomes a notice, and its
+ * refresh has read the saved list by the time it returns. The tick leaves the queue either way, so a rejected tick is
+ * never sent again by a later one.
+ */
+async function sendNextKindTick(): Promise<void> {
+  const tick = kindTicks[0];
+  if (!tick) return;
+  const saved: readonly string[] = state.status?.config.excludedWindowClasses ?? [];
+  const next = WINDOW_KIND_IDS.filter(kind => (kind === tick.kind ? tick.checked : saved.includes(kind)));
+  try {
+    await saveConfig(`kinds:${tick.kind}`, { excludedWindowClasses: next });
+  } finally {
+    kindTicks = kindTicks.slice(1);
+    requestRender();
+  }
 }
 
 function sectionCard(options: SectionOptions, ...children: Child[]): HTMLElement {
@@ -272,13 +327,9 @@ function capturePanel(
         toggleRow({
           testid: `settings-kind-${kind}`,
           label: WINDOW_KIND_LABELS[kind],
-          checked: excludedKinds.includes(kind),
-          onChange: checked => {
-            const next: WindowKindId[] = WINDOW_KIND_IDS.filter(
-              other => (other === kind ? checked : excludedKinds.includes(other)),
-            );
-            void saveConfig(`kinds:${kind}`, { excludedWindowClasses: next });
-          },
+          checked: shownKinds(excludedKinds).includes(kind),
+          disabled: pending(`kinds:${kind}`),
+          onChange: checked => queueKindTick(kind, checked),
         }),
       ),
     ),
@@ -524,7 +575,7 @@ function automationsPanel(config: TwinConfig): HTMLElement {
  * Pipes: saved searches that run on a schedule. The list is saved with the other settings, and each add, remove or switch
  * saves the whole list, so the engine checks the list as one.
  */
-function pipesPanel(pipes: readonly Pipe[]): HTMLElement {
+function pipesPanel(pipes: readonly Pipe[], outputs: Record<string, PipeOutputSummaryView>): HTMLElement {
   return sectionCard(
     {
       id: 'pipes',
@@ -535,7 +586,7 @@ function pipesPanel(pipes: readonly Pipe[]): HTMLElement {
     row(
       textBlock(
         'What a pipe keeps',
-        'A notify pipe shows the number of new matches and the app names, never the text. A write pipe saves the matching text as a plain Markdown file in the companyOS data folder. That file is not encrypted, and each run replaces it. Deleting screen and audio text, or changing the excluded apps or window kinds, removes these files.',
+        'A notify pipe shows the number of new matches and the app names, never the text, and keeps nothing. A write pipe keeps the matches of its newest run, encrypted, and each run replaces them. The text is not shown here: Recall searches the same stored text. Deleting screen and audio text, changing the excluded apps or window kinds, turning a pipe off or removing it, and Delete everything each remove what is kept.',
       ),
     ),
     row(
@@ -546,12 +597,12 @@ function pipesPanel(pipes: readonly Pipe[]): HTMLElement {
     ),
     pipes.length === 0
       ? row(h('p', { class: 'muted small', 'data-testid': 'settings-pipes-empty' }, 'No pipes yet.'))
-      : pipes.map(pipe => pipeRow(pipe, pipes)),
+      : pipes.map(pipe => pipeRow(pipe, pipes, outputs)),
     block(pipeForm(pipes)),
   );
 }
 
-function pipeRow(pipe: Pipe, pipes: readonly Pipe[]): HTMLElement {
+function pipeRow(pipe: Pipe, pipes: readonly Pipe[], outputs: Record<string, PipeOutputSummaryView>): HTMLElement {
   const key = `pipe:${pipe.id}`;
   return h(
     'div',
@@ -561,6 +612,7 @@ function pipeRow(pipe: Pipe, pipes: readonly Pipe[]): HTMLElement {
       { class: 'settings-model-main' },
       h('span', { class: 'settings-row-title' }, pipe.name),
       h('span', { class: 'settings-row-note mono' }, pipeSummary(pipe)),
+      h('span', { class: 'settings-row-note', 'data-testid': 'settings-pipe-kept' }, pipeKeptLine(pipe, outputs[pipe.id])),
     ),
     chip(pipe.enabled ? 'on' : 'off', pipe.enabled ? 'teal' : 'neutral'),
     button(pipe.enabled ? 'Turn off' : 'Turn on', {
@@ -671,6 +723,91 @@ function pipeForm(pipes: readonly Pipe[]): HTMLElement {
 }
 
 /** The optional agent-desktop program for focus and key steps. Blank keeps the built-in adapters. */
+/** The Connectors section: the local sources, what each one reads, and the buttons that add, read and remove them. */
+function connectorsPanel(status: TwinStatus): HTMLElement {
+  const sources = status.config.connectors.filter(source => isLocalKind(source.kind));
+  const now = Date.now();
+  return sectionCard(
+    { id: 'connectors', testid: 'settings-connectors', title: 'Connectors', note: CONNECTORS_NOTE },
+    row(textBlock('What is read', CONNECTOR_READ_COPY)),
+    row(textBlock('Where it goes, and what is never sent', `${CONNECTOR_WHERE_COPY} ${CONNECTOR_NEVER_COPY}`)),
+    row(textBlock('Deleting', CONNECTOR_DELETE_COPY)),
+    status.connectorItems === undefined
+      ? null
+      : row(h('p', { class: 'muted small', 'data-testid': 'settings-connectors-total' }, `${plural(status.connectorItems, 'item')} stored from connected sources.`)),
+    sources.length === 0
+      ? row(h('p', { class: 'muted small', 'data-testid': 'settings-connectors-empty' }, 'No sources connected.'))
+      : sources.map(source => connectorRow(source, status, now)),
+    block(connectorAddButtons(status.config.connectors.length)),
+  );
+}
+
+function isLocalKind(kind: string): kind is LocalConnectorKind {
+  return (LOCAL_CONNECTOR_KINDS as readonly string[]).includes(kind);
+}
+
+function connectorRow(source: TwinConfig['connectors'][number], status: TwinStatus, now: number): HTMLElement {
+  const key = `connector:${source.id}`;
+  return h(
+    'div',
+    {
+      class: 'settings-row settings-connector',
+      'data-testid': 'settings-connector',
+      'data-connector-id': source.id,
+      'data-kind': source.kind,
+    },
+    h(
+      'div',
+      { class: 'settings-model-main' },
+      h('span', { class: 'settings-row-title' }, source.label),
+      h(
+        'span',
+        { class: 'settings-row-note', 'data-testid': 'settings-connector-status' },
+        connectorStatusLine(source.kind as LocalConnectorKind, source.lastImportedAt, status.connectorCounts?.[source.id], now),
+      ),
+      h('span', { class: 'settings-row-note mono' }, source.path ?? ''),
+    ),
+    button('Import now', {
+      testid: 'settings-connector-import',
+      disabled: pending(key),
+      onClick: () =>
+        void act(key, async () => {
+          const count = await bridge().importConnector(source.id);
+          setNotice(`Read ${plural(count, 'item')} from ${source.label}.`, 'info');
+        }),
+    }),
+    button('Remove', {
+      variant: 'danger-outline',
+      testid: 'settings-connector-remove',
+      disabled: pending(key),
+      onClick: () => void act(key, () => bridge().removeConnector(source.id)),
+    }),
+  );
+}
+
+/** The four add buttons. They are off while the list is full, so a source past the limit cannot be asked for. */
+function connectorAddButtons(sourceCount: number): HTMLElement {
+  const full = connectorsFull(sourceCount);
+  return h(
+    'div',
+    { class: 'settings-connector-add', 'data-testid': 'settings-connector-add' },
+    ...LOCAL_CONNECTOR_KINDS.map(kind =>
+      button(CONNECTOR_ADD_LABELS[kind], {
+        testid: `settings-connector-add-${kind}`,
+        disabled: full || pending(`connector-add:${kind}`),
+        onClick: () =>
+          void act(`connector-add:${kind}`, async () => {
+            const count = await bridge().addConnector(kind);
+            if (count !== null) setNotice(`Connected. Read ${plural(count, 'item')}.`, 'info');
+          }),
+      }),
+    ),
+    full
+      ? h('p', { class: 'muted small', 'data-testid': 'settings-connectors-full' }, `You can connect at most ${CONNECTOR_LIMITS.maxSources} sources. Remove one first.`)
+      : null,
+  );
+}
+
 function agentDesktopBlock(path: string): HTMLElement {
   const key = 'agent-desktop-settings';
   const program = h('input', {

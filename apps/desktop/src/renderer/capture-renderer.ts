@@ -37,6 +37,25 @@ let listening: Listening | undefined;
 /** Every start and stop changes this, so a start that is still opening the microphone is cancelled by a later stop. */
 let generation = 0;
 
+/** After an acquisition fails, starts are ignored for this long. A refused permission is not asked again every few seconds. */
+export const START_RETRY_MS = 30_000;
+
+/** What the start gate knows: whether an acquisition is under way, and when the last one failed. */
+export interface StartGate {
+  pending: boolean;
+  failedAt: number;
+}
+
+const gate: StartGate = { pending: false, failedAt: Number.NEGATIVE_INFINITY };
+
+/**
+ * Whether a start command may begin an acquisition now. The main process repeats start every few seconds, so a start is
+ * ignored while one is pending, and for START_RETRY_MS after one failed.
+ */
+export function mayStart(state: StartGate, now: number): boolean {
+  return !state.pending && now - state.failedAt >= START_RETRY_MS;
+}
+
 /** Root-mean-square level of a segment: 0 for silence, and near 1 for full-scale sound. */
 export function rmsLevel(samples: Float32Array): number {
   if (samples.length === 0) return 0;
@@ -98,7 +117,8 @@ async function acquire(): Promise<MediaStream> {
 }
 
 async function start(): Promise<void> {
-  if (listening) return;
+  if (listening || !mayStart(gate, Date.now())) return;
+  gate.pending = true;
   const current = ++generation;
   let stream: MediaStream | undefined;
   let context: AudioContext | undefined;
@@ -126,6 +146,10 @@ async function start(): Promise<void> {
     // The microphone could not be opened, or the request was cancelled. Nothing is kept, and no reason is shown.
     stream?.getTracks().forEach(track => track.stop());
     void context?.close().catch(() => undefined);
+    // A stop that cancelled the request is not a failure, so a later start is not held back.
+    if (current === generation) gate.failedAt = Date.now();
+  } finally {
+    gate.pending = false;
   }
 }
 

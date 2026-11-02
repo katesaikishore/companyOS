@@ -16,23 +16,27 @@ Screen text and screen images are recorded only when you turn on **Read text on 
 
 Names you type inside companyOS itself are kept too: a task in the end-of-day review, an automation you rename, or the name and search words of a pipe. They stay in the encrypted store, and an export shows a placeholder in their place.
 
+A folder, Git repository, calendar file or mail archive is imported only when you add it as a [connector](/connectors). Its text is read on this device and stored in the encrypted store. Nothing is sent, and the files are never changed.
+
 ## Typed text
 
-Typed text is off until you turn on **Record typed text** in Settings. When it is on, the app keeps the text you type into apps, as finished pieces. A piece ends when you press Enter or Tab, when the app in front changes, when you press a key that moves the cursor (arrows, Home, End, Escape, forward Delete and the function keys), or after five seconds with no key. Backspace removes the last character of the open piece, so a corrected typo is not kept. A piece is kept under the app it was typed into, for 90 days, encrypted with the rest of the history, and you can find it on [Recall](/recall).
+Typed text is off until you turn on **Record typed text** in Settings. When it is on, the app keeps the text you type into apps, as finished pieces. A piece ends when you press Enter or Tab, when the app in front changes, when you press a key that moves the cursor (arrows, Home, End, Page Up, Page Down, Escape, forward Delete and the function keys), or after five seconds with no key. Backspace removes the last character of the open piece, so a corrected typo is not kept. A piece is kept under the app it was typed into, for 90 days, encrypted with the rest of the history, and you can find it on [Recall](/recall).
 
 Nothing is kept, and what you typed is dropped as you type it, when:
 
-- a password or other secure field may have focus, or the app cannot tell whether one does (on a system where that cannot be checked, typed text is never kept);
+- a password or other secure field may have focus, or the app cannot tell whether one does. Only macOS reports secure input, so on Windows and Linux typed text is never kept;
 - the screen is locked, capture is paused, or you are away;
 - the app is on the exclusion list, or its kind of window is excluded;
 - the window is a browser, because private windows cannot be told apart;
-- a shortcut with Command or Control is pressed. The shortcut is never kept as text, and the text before it ends its piece.
+- a shortcut with Command, Control or Option is pressed. The shortcut is never kept as text, and the text before it ends its piece. On a Mac this includes characters typed with Option, such as some accents, which are not kept.
 
-A password field is checked for as you type and again before each piece is saved. That check is not made for every key, so characters typed in a password field between two checks can still be kept. Turn the setting off before you type a password.
+The check reads whether macOS secure input is on. An app turns it on while a password field has focus, but not every app or password field does, so a password typed into one that does not report it can be kept. The check is made as you type and again before each piece is saved, but not for every key, so characters typed between two checks can still be kept. Turn the setting off before you type a password.
 
-Before a piece is saved, a card-like number (13 to 19 digits, with a space or a dash allowed between digits) is replaced with `[card number]`. A token that looks like a key is replaced with `[key]`: a vendor key such as an AWS, GitHub, OpenAI-style or Slack key, a JSON web token, a private key header, or any run of 20 or more letters and digits with no space. These are pattern checks. A password typed into an ordinary text box, with none of those shapes, is kept.
+Before a piece is saved, a card-like number (13 to 19 digits, with a space or a dash allowed between digits) is replaced with `[card number]`. A token that looks like a key is replaced with `[key]`: a vendor key such as an AWS, GitHub, OpenAI-style or Slack key, a JSON web token, a private key header, or any run of 20 or more letters and digits with no space. These are pattern checks. A password typed into an ordinary text box, with none of those shapes, is kept. The redaction is not a password defence: it looks for those shapes only.
 
-The app is checked for the app in front every few seconds, so a switch is seen only then. Keys typed just after a switch can be filed under the app you left, unless the new app is excluded: a piece never ends across a switch to an excluded app. This build includes no keyboard hook for any system, so this setting cannot take effect yet, and Settings says so.
+The app is checked for the app in front every few seconds, so a switch is seen only then. Keys typed just after a switch can be filed under the app you left, unless the new app is excluded: a piece never ends across a switch to an excluded app. On macOS, the keys are read by a keyboard hook. Turning the setting on asks for Accessibility access in System Settings, under Privacy & Security. Until that access is allowed, the hook cannot start, nothing is kept, and Settings says so.
+
+The hook reads the US keyboard layout only. It reads each key by its place on the keyboard, so on another layout the kept text would be wrong. Windows and Linux keep no typed text in this version, since secure input cannot be checked there, and Settings shows the switch as not available.
 
 ## Voices
 
@@ -53,11 +57,13 @@ Speaker identification can be wrong. A voice can go unnamed, and a segment can c
 - If the keychain cannot protect the key, the app does not start, rather than storing data unprotected.
 - Raw events are kept for 90 days, then removed. Routines and automations are kept until you remove them.
 - Screen text, microphone text and typed text are kept in the same database for 90 days, then removed.
-- Pipe files. Only if you add a pipe that writes a file: its matching text is saved as a plain Markdown file, which is not encrypted, in the `pipes` folder inside the app's data folder. The database's 90 days do not apply to these files. [Pipes](/pipes) says when each one is removed. Screen images are sealed with a key derived from the data key, kept in a folder only your user account can read, and removed after 1, 3, 7 or 14 days, which you choose. The folder holds up to 2 GB, and the oldest images go first.
+- Connector items are kept until you remove their source or delete everything. The 90 days do not apply to them. See [Connectors](/connectors).
+- Pipe results. Only if you add a pipe that keeps its matches: the matches of its newest run are kept encrypted in the same database, one run per pipe, and no pipe result is written to a plain-text file. A kept run is removed when you delete screen and audio text, change the excluded apps or window kinds, turn the pipe off or remove it, or delete everything, and once it is more than 90 days old. [Pipes](/pipes) says how each one is kept and removed. Screen images are sealed with a key derived from the data key, kept in a folder only your user account can read, and removed after 1, 3, 7 or 14 days, which you choose. The folder holds up to 2 GB, and the oldest images go first.
 - Handoff records saved by an earlier version of the app are no longer read or shown. They are kept for 90 days from when they were sent, then removed. Delete everything removes them at once.
 
 ## What leaves the device
 
+- **Connectors.** Nothing. The folder, Git repository, calendar and mail connectors read files on this device and open no network connection. See [Connectors](/connectors).
 - **Model downloads.** Only when you install a model. The download comes from Hugging Face hosts, and its SHA-256 digest is checked before the model is used.
 - **Decision model download.** Only if you choose it in setup or in Settings. It is five files, about 1.7 GB, from the `receptron/laya-onnx` repository on `huggingface.co`, taken from one fixed commit. Hugging Face serves them from its own `*.hf.co` hosts. Each file's SHA-256 is checked against a digest stored in the app, and a file that does not match is deleted. No account or token is sent. An interrupted download keeps what it fetched and continues from there. Once it is installed, it labels a routine that includes an app companyOS does not know, and it runs on this device. The app sends it only app names, and it sends nothing over the network to answer.
 - **Speech model download.** Only when you install the speech model for microphone text. It is Whisper tiny.en, about 44 MB in seven files, from the `onnx-community/whisper-tiny.en` repository on `huggingface.co`, taken from one fixed commit. Hugging Face may serve the files from its own `*.hf.co` hosts, and the network ledger records the host that served each one. Each file's SHA-256 is checked before it is used, and each file is recorded in the network ledger. The speech model runs on this device, and no recording or text is sent to answer.
@@ -72,13 +78,13 @@ The ledger lists every model download and update check the device made, as it wa
 
 ## Export and delete
 
-- **Export** writes a plain JSON file, after a warning that it is unencrypted. It includes any handoff records saved by an earlier version, with their replies. For screen, microphone and typed text it includes only the number of items and their date range, never the text or the images. A pipe's name and search words are replaced by a placeholder.
-- **Delete screen, audio and typed text** in Settings removes every stored screen, microphone and typed-text item, with its text and its images. It also removes every pipe file.
-- **Delete everything** removes the database, the data key, the installed model files, including the decision model and any partial download of it, and every screen image and every pipe file. It also cancels any download in progress. An export you saved elsewhere is yours, and it is not touched.
+- **Export** writes a plain JSON file, after a warning that it is unencrypted. It includes any handoff records saved by an earlier version, with their replies. For screen, microphone and typed text it includes only the number of items and their date range, never the text or the images. A pipe's name and search words are replaced by a placeholder, and pipe results are not included. For connector items it includes only their number and the dates of the oldest and newest, and each source's label and path are replaced by a placeholder.
+- **Delete screen, audio and typed text** in Settings removes every stored screen, microphone and typed-text item, with its text and its images. It also removes every kept pipe run. Connector items stay: remove their source, or use Delete everything.
+- **Delete everything** removes the database, the data key, the installed model files, including the decision model and any partial download of it, and every screen image. The kept pipe runs are in that database, so they go with it, and so does any plain-text pipe file left by an earlier version. It also cancels any download in progress. An export you saved elsewhere is yours, and it is not touched.
 
 ## Local API
 
-The local API is off by default. When it is on, programs on this device can search stored screen and microphone text, and read screen images, with a token that you can rotate. It listens on `127.0.0.1` only and refuses browser requests. Nothing on it leaves the device. Typed text is not included in any search it makes, so it is not given to those programs. Search and image requests are refused while **Read text on screen** is off, microphone text included.
+The local API is off by default. When it is on, programs on this device can search stored screen and microphone text, and read screen images, with a token that you can rotate. Only screen and microphone text is searchable through it. Typed text and imported connector text are kept to the [Recall](/recall) page, so no search through the API returns them. It listens on `127.0.0.1` only and refuses browser requests. Nothing on it leaves the device. While **Read text on screen** is off, a search returns no screen or microphone text, and an image request returns no image.
 
 See [Recall](/recall#local-api).
 

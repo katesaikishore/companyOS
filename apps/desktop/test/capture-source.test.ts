@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CAPTURE_SOURCES, captureUrl, isSystemCaptureUrl } from '../src/main/capture-source';
+import { CAPTURE_SOURCES, captureUrl, isMicrophoneCaptureUrl, isSystemCaptureUrl } from '../src/main/capture-source';
 
 describe('capture sources', () => {
   it('has a microphone source and a system source', () => {
@@ -16,5 +16,13 @@ describe('capture sources', () => {
     expect(isSystemCaptureUrl(captureUrl('microphone'))).toBe(false);
     expect(isSystemCaptureUrl('app://twin/capture.html?source=system&x=1')).toBe(false);
     expect(isSystemCaptureUrl('https://example.com/capture.html?source=system')).toBe(false);
+  });
+
+  it('recognises only the exact microphone page, query included, as the microphone page', () => {
+    expect(isMicrophoneCaptureUrl(captureUrl('microphone'))).toBe(true);
+    expect(isMicrophoneCaptureUrl(captureUrl('system'))).toBe(false);
+    expect(isMicrophoneCaptureUrl('app://twin/capture.html')).toBe(false);
+    expect(isMicrophoneCaptureUrl('app://twin/capture.html?source=microphone&x=1')).toBe(false);
+    expect(isMicrophoneCaptureUrl('https://example.com/capture.html?source=microphone')).toBe(false);
   });
 });

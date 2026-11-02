@@ -4,6 +4,8 @@ import {
   DEFAULT_CONFIG,
   MAX_PIPES,
   PIPE_MATCH_LIMIT,
+  PIPE_OUTPUT_TEXT_MAX,
+  PipeOutputSchema,
   TwinAgent,
   TwinConfigSchema,
   isPipeDue,
@@ -217,7 +219,7 @@ describe('runPipe', () => {
     expect(result.count).toBe(2);
     expect(result.apps).toEqual(['Chrome']);
     expect(result.notice).not.toContain('TYPEDCANARY');
-    expect(result.markdown).not.toContain('TYPEDCANARY');
+    expect(JSON.stringify(result.items)).not.toContain('TYPEDCANARY');
   });
 
   it('keeps the newest matches across the two kinds when the pipe sets no kind', () => {
@@ -225,8 +227,9 @@ describe('runPipe', () => {
     const newest = hit('Slack', 'newest audio', { kind: 'audio', ts: NOW - 1 });
     const { result } = run(base, [...older, newest]);
     expect(result.count).toBe(PIPE_MATCH_LIMIT);
-    expect(result.markdown).toContain('newest audio');
-    expect(result.markdown).not.toContain('old 199');
+    expect(result.items).toHaveLength(PIPE_MATCH_LIMIT);
+    expect(result.items[0].text).toBe('newest audio');
+    expect(result.items.map(item => item.text)).not.toContain('old 199');
   });
 
   it('starts the window no later than now, so a baseline in the future reads nothing older', () => {
@@ -252,10 +255,9 @@ describe('runPipe', () => {
     expect(result.notice).toBe(`Standup: ${PIPE_MATCH_LIMIT} or more new matches in Slack.`);
   });
 
-  it('gives no notice when nothing matched, and says so in the file', () => {
+  it('gives no notice and no items when nothing matched', () => {
     const { result } = run(base, []);
-    expect(result).toMatchObject({ count: 0, notice: '' });
-    expect(result.markdown).toContain('No matches in this run.');
+    expect(result).toMatchObject({ count: 0, notice: '', items: [] });
   });
 
   it('never puts the text of an item in the notice', () => {
@@ -266,19 +268,24 @@ describe('runPipe', () => {
     }
   });
 
-  it('writes the stored text to the file, marked as not encrypted and replaced on each run', () => {
-    const { result } = run({ ...base, action: 'write' }, [hit('Chrome', 'PIPECANARY 4417')]);
-    expect(result.markdown.startsWith('# Standup\n')).toBe(true);
-    expect(result.markdown).toContain('PIPECANARY 4417');
-    expect(result.markdown).toContain('- 2026-11-02T08:59:00.000Z · Chrome · PIPECANARY 4417');
-    expect(result.markdown).toContain('It is not encrypted, and each run replaces it.');
+  it('keeps each match as its time, app, kind and text, for the encrypted store', () => {
+    const { result } = run({ ...base, action: 'write' }, [hit('Chrome', 'PIPECANARY 4417'), hit(null, 'MICCANARY 9981', { kind: 'audio' })]);
+    expect(result.items).toEqual([
+      { ts: NOW - MINUTE, app: 'Chrome', kind: 'screen', text: 'PIPECANARY 4417' },
+      { ts: NOW - MINUTE, app: null, kind: 'audio', text: 'MICCANARY 9981' },
+    ]);
   });
 
-  it('keeps the file to one line for each match, even when the text has line breaks', () => {
+  it('keeps each match to one line, even when the text has line breaks', () => {
     const { result } = run({ ...base, action: 'write' }, [hit('Chrome', 'first line\n\nsecond line')]);
-    const bullets = result.markdown.split('\n').filter(line => line.startsWith('- '));
-    expect(bullets).toHaveLength(1);
-    expect(bullets[0]).toContain('first line second line');
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].text).toBe('first line second line');
+  });
+
+  it('cuts a match text to the kept length, so one run cannot hold an unbounded text', () => {
+    const { result } = run({ ...base, action: 'write' }, [hit('Chrome', 'x'.repeat(5000))]);
+    expect(result.items[0].text).toHaveLength(PIPE_OUTPUT_TEXT_MAX);
+    expect(PipeOutputSchema.safeParse({ ranAt: result.ranAt, items: result.items }).success).toBe(true);
   });
 });
 
@@ -302,9 +309,9 @@ describe('a pipe over the real engine', () => {
     });
     expect(result.count).toBe(1);
     expect(result.apps).toEqual(['pages']);
-    expect(result.markdown).toContain('budget review notes');
-    expect(result.markdown).not.toContain('budget chat message');
-    expect(result.markdown).not.toContain('budget later message');
+    expect(result.items.map(item => item.text)).toEqual(['budget review notes']);
+    expect(JSON.stringify(result.items)).not.toContain('budget chat message');
+    expect(JSON.stringify(result.items)).not.toContain('budget later message');
     expect(result.notice).toBe('Standup: 1 new match in pages.');
   });
 

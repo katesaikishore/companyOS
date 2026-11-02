@@ -1,6 +1,6 @@
 ---
 title: "Pipes"
-description: "Saved searches that run on a schedule and do one local thing with the result: show a count, or write a Markdown file. Pipes read only stored text and never reach the network"
+description: "Saved searches that run on a schedule and do one local thing with the result: show a count, or keep the newest matches encrypted in the app. Pipes read only stored text and never reach the network"
 ---
 
 A pipe is a saved search. It runs on a schedule, looks through the text the twin has already stored, and does one thing with what it finds. A pipe is data, not code. It cannot run a program or a script, and it cannot send anything over the network.
@@ -14,30 +14,35 @@ Pipes are off until you add one. You add and manage them in **Settings**, under 
 - **Stored text**: screen text, microphone text, or both.
 - **App** (optional): only text stored under this app name.
 - **How often**: every 15 minutes, 30 minutes, hour, 2 hours, 4 hours, 8 hours, or once a day.
-- **What it does**: notify, or write a Markdown file.
+- **What it does**: notify, or keep the newest matches encrypted in the app.
 
 You can have up to 20 pipes. Each one can be turned on or off, or removed.
 
 ## What a run does
 
-Every minute the app checks which pipes are due. A pipe is due when its interval has passed since its last run. A new pipe's first run comes one interval after the app first sees it, so it does not search your whole history. Each run covers the text stored since the previous run and keeps the newest 200 matches. The time of each run is kept in memory only, so after the app restarts, a pipe's next run covers only the time since the restart. Matches stored between its last run and the restart are not reported.
+Every minute the app checks which pipes are due. A pipe is due when its interval has passed since its last run. A new pipe's first run comes one interval after the app first sees it, so it does not search your whole history. Each run covers the text stored since the previous run and reads at most the newest 200 matches. The time of each run is kept in memory only, so after the app restarts, a pipe's next run covers only the time since the restart. Matches stored between its last run and the restart are not reported.
 
 ## Notify
 
-A notify pipe shows one system notification when a run finds new matches. It gives the pipe's name, the number of matches, and the names of the apps they came from, for example `Standup: 3 new matches in slack, chrome.` App names appear in lower case, as the twin stores them. The notification never shows the text. A run with no matches shows nothing.
+A notify pipe shows one system notification when a run finds new matches. It gives the pipe's name, the number of matches, and the names of the apps they came from, for example `Standup: 3 new matches in slack, chrome.` App names appear in lower case, as the twin stores them. The notification never shows the text. A run with no matches shows nothing. A notify pipe keeps nothing.
 
-## Write
+## Keep matches
 
-A write pipe saves its matches to a Markdown file. Each pipe has one file, and each run replaces it with that run's matches. Every match gives its time, its app, and a short piece of the stored text.
+A write pipe keeps the matches of its newest run in the app's encrypted store, in the same database as the rest of what the twin keeps. Each pipe has one kept run, and each run replaces it with that run's matches. Every kept match gives its time, its app, whether it came from the screen or the microphone, and a short piece of the stored text on one line. Nothing is kept until a write pipe's first run.
 
-The files are in a `pipes` folder inside the app's data folder, next to the encrypted database. **The files are not encrypted.** Anyone who can open that folder can read their text. A file also keeps its text after the database has removed it, until the file is replaced or removed. Use a write pipe only where that is acceptable.
+Kept matches are not written as plain text to any file. They are encrypted like the rest of the database. Settings shows only when each write pipe's newest run was read and how many matches it kept, never the text. A kept match is a copy of text that [Recall](/recall) already stores and searches. The copy is not indexed for search on its own, so Recall finds the original for as long as Recall keeps it.
 
-## When files are removed
+The data export does not include kept matches.
 
-- Deleting screen and audio text in Settings removes every pipe file.
-- Changing the excluded apps or the excluded window kinds removes every pipe file. Each write pipe writes its file again at its next run, without what is now excluded.
-- A pipe that is turned off, or removed, loses its file at the next check.
-- **Delete everything** removes the pipe files as well.
+## When kept matches are removed
+
+- Deleting screen and audio text in Settings removes every kept run.
+- Changing the excluded apps or the excluded window kinds removes every kept run. Each write pipe keeps its next run from then on, without what is now excluded.
+- A pipe that is turned off, or removed, loses its kept run at once.
+- A kept run more than 90 days old is removed in the daily clean-up, as the text it was copied from is.
+- **Delete everything** removes every kept run, with the database.
+
+An earlier version of the app wrote a write pipe's matches to plain Markdown files in a `pipes` folder inside the app's data folder. The app removes that folder when it starts, and when you delete screen and audio text, so no plain-text copy is left behind.
 
 ## What is kept, and what is not
 

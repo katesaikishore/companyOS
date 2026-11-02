@@ -15,3 +15,8 @@ export function captureUrl(source: CaptureSource): string {
 export function isSystemCaptureUrl(url: string): boolean {
   return url === captureUrl('system');
 }
+
+/** True when a page address is the microphone capture page, query included. Only that page may hold the microphone. */
+export function isMicrophoneCaptureUrl(url: string): boolean {
+  return url === captureUrl('microphone');
+}

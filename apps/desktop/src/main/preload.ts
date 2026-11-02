@@ -42,6 +42,11 @@ const CHANNEL = {
   exportData: 'twin:export-data',
   deleteAll: 'twin:delete-all',
   openMainWindow: 'twin:open-main-window',
+  addConnector: 'twin:add-connector',
+  removeConnector: 'twin:remove-connector',
+  importConnector: 'twin:import-connector',
+  connectCloud: 'twin:connect-cloud',
+  disconnectCloud: 'twin:disconnect-cloud',
   navigate: 'twin:navigate',
 } as const;
 
@@ -83,6 +88,11 @@ const bridge: TwinBridge = {
   exportData: () => ipcRenderer.invoke(CHANNEL.exportData),
   deleteAll: () => ipcRenderer.invoke(CHANNEL.deleteAll),
   openMainWindow: route => ipcRenderer.invoke(CHANNEL.openMainWindow, route),
+  addConnector: kind => ipcRenderer.invoke(CHANNEL.addConnector, kind),
+  removeConnector: id => ipcRenderer.invoke(CHANNEL.removeConnector, id),
+  importConnector: id => ipcRenderer.invoke(CHANNEL.importConnector, id),
+  connectCloud: provider => ipcRenderer.invoke(CHANNEL.connectCloud, provider),
+  disconnectCloud: provider => ipcRenderer.invoke(CHANNEL.disconnectCloud, provider),
   onNavigate: listener => {
     const handler = (_event: unknown, route: unknown) => {
       if (typeof route === 'string' && route.length <= 200) listener(route);

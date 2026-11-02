@@ -178,7 +178,8 @@ export async function fetchGoogleEvents(window: ReadWindow, tokens: Tokens, deps
   const maxPages = deps.maxPages ?? GOOGLE_MAX_PAGES;
   const items: ConnectorItem[] = [];
   let pageToken: string | undefined;
-  for (let page = 0; page < maxPages; page += 1) {
+  let page = 0;
+  do {
     const url = new URL(`${deps.provider.apiBase}/calendars/primary/events`);
     url.searchParams.set('singleEvents', 'true');
     url.searchParams.set('orderBy', 'startTime');
@@ -193,8 +194,10 @@ export async function fetchGoogleEvents(window: ReadWindow, tokens: Tokens, deps
       if (item) items.push(item);
     }
     pageToken = textOf(body?.nextPageToken) || undefined;
-    if (pageToken === undefined) break;
-  }
+    page += 1;
+  } while (pageToken !== undefined && page < maxPages);
+  // Stopped at the cap with pages left. A partial list would replace the stored items with fewer of them, so the read fails.
+  if (pageToken !== undefined) throw new CloudConnectorError('too_large', TOO_MANY_MESSAGE);
   return items;
 }
 
@@ -238,6 +241,9 @@ function githubItem(raw: unknown): ConnectorItem | undefined {
   };
 }
 
+/** Shown when a read stops at its page cap with more pages left. The stored items are kept, so nothing is lost silently. */
+const TOO_MANY_MESSAGE = 'This account has more items than one import reads, so the import was not saved. The earlier import is kept.';
+
 /** Reads the open issues assigned to the person, across pages. Pull requests are not included. */
 export async function fetchGitHubIssues(tokens: Tokens, deps: ClientDeps): Promise<ConnectorItem[]> {
   requireProvider(deps.provider, 'github');
@@ -255,5 +261,7 @@ export async function fetchGitHubIssues(tokens: Tokens, deps: ClientDeps): Promi
     }
     next = nextPageUrl(reply.headers.get('link'), origin);
   }
+  // Stopped at the cap with pages left. A partial list would replace the stored items with fewer of them, so the read fails.
+  if (next !== undefined) throw new CloudConnectorError('too_large', TOO_MANY_MESSAGE);
   return items;
 }

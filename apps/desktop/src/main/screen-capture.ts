@@ -72,6 +72,8 @@ export interface ScreenCaptureDeps {
   secureInput: () => Promise<boolean | 'unknown'>;
   /** The text the focused window exposes to accessibility tools. Read with the OCR text, not instead of it. Empty when none. */
   accessibility?: () => Promise<string>;
+  /** The app in front now, as the agent names it, or null when unknown. Accessibility text is kept only for the frame's own app. */
+  frontApp?: () => Promise<string | null>;
 }
 
 interface Job {
@@ -250,6 +252,10 @@ export class ScreenCaptureService {
   }
 
   private enqueue(job: Job): void {
+    const replaced = this.pending;
+    // A replaced frame from another display is never read or stored. Its fingerprint must not stay as that display's
+    // reference, or the same unchanged screen is skipped there until it changes. A same-display frame supersedes it.
+    if (replaced && replaced.display !== job.display) this.dedupeFor(replaced.display).reset();
     this.pending = job;
     this.draining ??= this.drain();
   }
@@ -272,7 +278,7 @@ export class ScreenCaptureService {
     try {
       const ocrText = await this.deps.ocr.recognise(job.png);
       // Read before the checks below, so a secure field that takes focus during this read is caught by them.
-      const accessible = this.deps.accessibility ? await settleWithin(this.deps.accessibility(), CHECK_TIMEOUT_MS, '') : '';
+      const accessible = await this.accessibleTextOf(job);
       text = normaliseOcr([accessible, ocrText].join('\n'));
     } catch {
       // A dropped frame must not stand as the reference for the next one, or an unchanged screen is never read again.
@@ -317,6 +323,18 @@ export class ScreenCaptureService {
   }
 
   /**
+   * The accessibility text of the window in front. The reader runs after the grab, so the window may have changed by now.
+   * The text is kept only when the app in front is still the frame's own app, so one app's text is never filed under
+   * another app's label. The OCR text of the frame is kept either way.
+   */
+  private async accessibleTextOf(job: Job): Promise<string> {
+    if (!this.deps.accessibility || !this.deps.frontApp) return '';
+    const text = await settleWithin(this.deps.accessibility(), CHECK_TIMEOUT_MS, '');
+    const front = await settleWithin(this.deps.frontApp(), CHECK_TIMEOUT_MS, null);
+    return front !== null && front === job.context.app ? text : '';
+  }
+
+  /**
    * True while the frame's capture generation is current, capture is running, and the policy allows a screen read now.
    * It runs the secure input check again, so a password field that took focus after the frame was grabbed stops the read.
    */
@@ -354,9 +372,10 @@ export function electronFrameSource(): FrameSource {
       const width = Math.min(OCR_WIDTH, physicalWidth);
       const height = Math.max(1, Math.round((physicalHeight * width) / physicalWidth));
       const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width, height } });
-      // Each display is read through its own source. A display with no matching source is not read.
+      // Each display is read through its own source. A display with no matching source is not read. The one-source fallback
+      // is for a single-display machine only: with two displays it would hand one display's pixels to the other.
       const sameDisplay = sources.find(candidate => candidate.display_id === String(display.id));
-      const source = sameDisplay ?? (sources.length === 1 ? sources[0] : undefined);
+      const source = sameDisplay ?? (displays.length === 1 && sources.length === 1 ? sources[0] : undefined);
       if (!source) return null;
       const { thumbnail } = source;
       const size = thumbnail.getSize();

@@ -60,6 +60,7 @@ export type CloudConnectorErrorCode =
   | 'bad_response'
   | 'window'
   | 'provider'
+  | 'unavailable'
   | 'store';
 
 /** An error whose message is a fixed sentence. It never carries a code, a token, a state or response text. */
@@ -91,6 +92,7 @@ const DENIED_MESSAGE = 'The sign-in was refused or cancelled. Nothing was connec
 const CALLBACK_MESSAGE = 'The sign-in response was incomplete. Nothing was connected.';
 const OPEN_MESSAGE = 'The browser could not be opened for sign-in. Nothing was connected.';
 const EXCHANGE_MESSAGE = 'The sign-in could not be completed. Nothing was connected.';
+const UNAVAILABLE_MESSAGE = 'The sign-in service is unavailable or rate limiting requests. Try again later.';
 const LISTEN_MESSAGE = 'The local sign-in listener could not start. Nothing was connected.';
 
 export function tokensExpired(tokens: Tokens, now: number): boolean {
@@ -201,8 +203,8 @@ function parseTokens(
   const accessToken = fields.access_token;
   if (typeof accessToken !== 'string' || accessToken === '') throw fail();
   const refreshToken = typeof fields.refresh_token === 'string' && fields.refresh_token !== '' ? fields.refresh_token : undefined;
-  const lifetime = fields.expires_in;
-  const expiresAt = typeof lifetime === 'number' && lifetime > 0 ? now + lifetime * 1000 : NO_EXPIRY;
+  const lifetime = lifetimeSeconds(fields.expires_in);
+  const expiresAt = lifetime === undefined ? NO_EXPIRY : now + lifetime * 1000;
   return refreshToken === undefined ? { accessToken, expiresAt } : { accessToken, refreshToken, expiresAt };
 }
 
@@ -223,6 +225,8 @@ async function requestTokens(
     deps,
     'the sign-in service',
   );
+  // A rate limit or an outage says nothing about the account, so it is not reported as an expired sign-in.
+  if (reply.status === 429 || reply.status >= 500) throw new CloudConnectorError('unavailable', UNAVAILABLE_MESSAGE);
   if (reply.status < 200 || reply.status > 299) throw new CloudConnectorError(failure.code, failure.message);
   return parseTokens(reply.text, clockOf(deps), failure);
 }
@@ -238,6 +242,12 @@ export async function refreshTokens(provider: ConfiguredProvider, refreshToken: 
 
 function base64url(bytes: Buffer): string {
   return bytes.toString('base64url');
+}
+
+/** The token lifetime in seconds. A provider may send it as a number or as a numeric string. Anything else is no lifetime. */
+function lifetimeSeconds(value: unknown): number | undefined {
+  const seconds = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
+  return typeof seconds === 'number' && Number.isFinite(seconds) && seconds > 0 ? seconds : undefined;
 }
 
 function sameSecret(value: string | null, expected: string): boolean {
@@ -291,11 +301,15 @@ function handleCallback(
     sink.fail(new CloudConnectorError('callback', CALLBACK_MESSAGE));
     return;
   }
-  respond(response, 200, 'Connected. You can close this window.');
+  // The tokens are saved after this page is sent, so the page does not claim the account is connected.
+  respond(response, 200, 'Sign-in received. Return to companyOS to finish. You can close this window.');
   sink.resolve(code);
 }
 
-/** Starts the listener on 127.0.0.1 and a free port. Only one callback is accepted, and only with the right state. */
+/**
+ * Starts the listener on 127.0.0.1 and a free port. The first request that carries the right state completes the sign-in. A
+ * request with the wrong state ends the attempt as refused, so another local process can abort it but cannot finish it.
+ */
 function listenForCallback(state: string, timeoutMs: number): Promise<LoopbackCallback> {
   return new Promise<LoopbackCallback>((resolve, reject) => {
     const server = createServer();

@@ -8,7 +8,8 @@ import { MAX_CAPTURE_TEXT_CHARS } from './capture-text';
  * What is kept: printable characters, in the order typed, with Backspace removing the last one. A piece ends at Enter, Tab,
  * any other key that can move the caret (arrows, Home, End, Escape, forward Delete, function keys), a shortcut with Command
  * or Control held, a focus change (the caller ends it), or five seconds with no key. A modifier pressed alone is not text
- * and does nothing here. A shortcut is never kept as text, since its effect on the text is unknown.
+ * and does nothing here. A shortcut is never kept as text, since its effect on the text is unknown. A shortcut that can delete
+ * or replace the open text (select all, cut, undo, a word or line delete) drops the piece instead of ending it.
  */
 
 /** One key press, as the desktop app reports it. Control characters never reach here as text. */
@@ -19,8 +20,12 @@ export type KeyEvent =
   | { kind: 'tab' }
   /** Shift, Control, Alt, Command, Caps Lock and the like, pressed on their own. */
   | { kind: 'modifier' }
-  /** A key pressed with Command or Control held. It is not kept as text. */
-  | { kind: 'shortcut' }
+  /**
+   * A key pressed with Command, Control or Option held. It is not kept as text. rewritesText is set by the caller for a
+   * shortcut that can delete or replace the open text, such as select all, cut, undo or a word or line delete: the open
+   * piece is then dropped, since the text it would keep may already be gone.
+   */
+  | { kind: 'shortcut'; rewritesText?: boolean }
   /** Any other key that may move the caret or change the text. It ends the piece. */
   | { kind: 'other' };
 
@@ -86,6 +91,12 @@ export class KeystrokeBuffer {
         }
         return finished;
       }
+      case 'shortcut':
+        if (event.rewritesText) {
+          this.clear();
+          return null;
+        }
+        return this.take(now);
       default:
         return this.take(now);
     }

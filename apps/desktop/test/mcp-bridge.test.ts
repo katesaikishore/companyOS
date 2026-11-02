@@ -1,17 +1,24 @@
 import { spawn } from 'node:child_process';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { PassThrough, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 // The bridge is plain Node with no build step, so the test loads it directly.
 // @ts-expect-error the bridge is an untyped .mjs script
-import { handleMessage, searchQuery, TOOLS } from '../scripts/mcp-bridge.mjs';
+import { handleMessage, searchQuery, serve, TOOLS } from '../scripts/mcp-bridge.mjs';
 
 const BRIDGE = fileURLToPath(new URL('../scripts/mcp-bridge.mjs', import.meta.url));
 const TOKEN = 'test-token-123';
+const TOO_LARGE_TEXT = 'The reply is too large. Narrow the search with a kind, a time range or more words.';
 
 interface Seen {
   path: string;
   auth: string | undefined;
+}
+
+/** Polls until the check passes, or gives up after two seconds. The caller's assertions then say what happened. */
+async function waitFor(done: () => boolean): Promise<void> {
+  for (let i = 0; i < 200 && !done(); i++) await new Promise(resolve => setTimeout(resolve, 10));
 }
 
 describe('MCP bridge', () => {
@@ -19,13 +26,16 @@ describe('MCP bridge', () => {
   let port: number;
   let seen: Seen[];
   let status: number;
+  let large: boolean;
 
   beforeEach(async () => {
     seen = [];
     status = 200;
+    large = false;
     api = createServer((request: IncomingMessage, response: ServerResponse) => {
       seen.push({ path: request.url ?? '', auth: request.headers.authorization });
       response.writeHead(status, { 'Content-Type': 'application/json' });
+      if (large) return response.end('x'.repeat(64 * 1024 + 1));
       response.end(request.url?.startsWith('/v1/status') ? '{"screenState":"capturing"}' : '{"hits":[]}');
     });
     await new Promise<void>(resolve => api.listen(0, '127.0.0.1', resolve));
@@ -102,10 +112,48 @@ describe('MCP bridge', () => {
     expect(reply.result.content[0].text).toMatch(/not reachable/);
   });
 
+  it('names the size limit, not an unreachable API, when a reply is too large', async () => {
+    large = true;
+    const reply = await handleMessage(
+      { jsonrpc: '2.0', id: 12, method: 'tools/call', params: { name: 'twin_search', arguments: { text: 'invoice' } } },
+      config(),
+    );
+    expect(reply.result.isError).toBe(true);
+    expect(reply.result.content[0].text).toBe(TOO_LARGE_TEXT);
+    expect(reply.result.content[0].text).not.toMatch(/not reachable/);
+  });
+
   it('answers an unknown method with a JSON-RPC error, and a notification with nothing', async () => {
     const reply = await handleMessage({ jsonrpc: '2.0', id: 8, method: 'resources/list' }, config());
     expect(reply.error.code).toBe(-32601);
     expect(await handleMessage({ jsonrpc: '2.0', method: 'notifications/initialized' }, config())).toBeUndefined();
+  });
+
+  it('answers a no-id message whose method is not text with nothing, and without throwing', async () => {
+    await expect(handleMessage({ jsonrpc: '2.0', method: 5 }, config())).resolves.toBeUndefined();
+    await expect(handleMessage({ jsonrpc: '2.0', method: {} }, config())).resolves.toBeUndefined();
+    const reply = await handleMessage({ jsonrpc: '2.0', id: 13, method: 5 }, config());
+    expect(reply.error.code).toBe(-32601);
+  });
+
+  it('keeps serving after a message that fails inside the handler, and answers it with a fixed error', async () => {
+    const input = new PassThrough();
+    let out = '';
+    let err = '';
+    const output = new Writable({ write: (chunk, _encoding, done) => { out += chunk; done(); } });
+    const errors = new Writable({ write: (chunk, _encoding, done) => { err += chunk; done(); } });
+    // Reading the token throws, the way an unexpected failure inside the handler would.
+    const broken = { port, get token(): string { throw new Error('boom'); } };
+    serve(broken, input, output, errors);
+    input.write('{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"twin_status"}}\n');
+    input.write('{"jsonrpc":"2.0","id":10,"method":"ping"}\n');
+    await waitFor(() => out.includes('"id":9') && out.includes('"id":10') && err !== '');
+    input.end();
+    const lines = out.trim().split('\n').map(line => JSON.parse(line));
+    expect(lines.find(line => line.id === 9).error).toEqual({ code: -32603, message: 'The bridge could not answer this message.' });
+    expect(lines.find(line => line.id === 10).result).toEqual({});
+    expect(err).toBe('The bridge could not answer one message.\n');
+    expect(err).not.toContain('boom');
   });
 
   it('runs as a stdio server: one message per line in, one reply per line out', async () => {
@@ -128,5 +176,26 @@ describe('MCP bridge', () => {
     expect(lines.find(line => line.id === 1).result.serverInfo.name).toBe('companyos-twin');
     expect(lines.find(line => line.id === null).error.code).toBe(-32700);
     expect(lines.find(line => line.id === 2).result.content[0].text).toBe('{"screenState":"capturing"}');
+  });
+
+  it('keeps the stdio server running after a notification whose method is not text', async () => {
+    const child = spawn(process.execPath, [BRIDGE], {
+      env: { ...process.env, COMPANYOS_API_PORT: String(port), COMPANYOS_API_TOKEN: TOKEN },
+      stdio: ['pipe', 'pipe', 'inherit'],
+    });
+    child.stdin.on('error', () => undefined);
+    let out = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', chunk => {
+      out += chunk;
+    });
+    child.stdin.write('{"jsonrpc":"2.0","method":5}\n');
+    child.stdin.write('{"jsonrpc":"2.0","id":3,"method":"ping"}\n');
+    await waitFor(() => out.includes('"id":3'));
+    const alive = child.exitCode === null && child.signalCode === null;
+    child.stdin.end();
+    child.kill();
+    expect(alive).toBe(true);
+    expect(out.trim().split('\n').map(line => JSON.parse(line))).toEqual([{ jsonrpc: '2.0', id: 3, result: {} }]);
   });
 });

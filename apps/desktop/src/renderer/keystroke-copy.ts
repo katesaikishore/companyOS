@@ -9,17 +9,23 @@ export const KEYSTROKE_COPY = {
   label: 'Record typed text',
   /** The switch's note while the feature can run. */
   note:
-    'Keeps the text you type into apps, as finished pieces. A piece ends when you press Enter or Tab, when the app in front changes, ' +
-    'when you press a key that moves the cursor, or after five seconds with no key. It is kept for 90 days, encrypted on this device, and searched on Recall. ' +
-    'Not kept: text typed into a browser; a shortcut with Command or Control; an app or kind of window on the exclusion list; and anything while the screen is locked, ' +
-    'capture is paused, or you are away. A password field is checked for as you type and before each piece is saved, and a piece is refused when that check fails or cannot tell. ' +
-    'Characters typed between two checks can still be kept, so turn this off before you type a password. ' +
+    'Keeps the text you type into apps, as finished pieces, encrypted on this device. A piece ends when you press Enter or Tab, when the app in front changes, ' +
+    'when you press a key that moves the cursor, or after five seconds with no key. It is kept for 90 days and searched on Recall. ' +
+    'Only the US keyboard layout is read in this version, since the keys are read by position; on another layout the kept text would be wrong. ' +
+    'On macOS, turning this on asks for Accessibility access in System Settings, and nothing is kept until it is allowed. ' +
+    'Not kept: text typed into a browser; a shortcut with Command, Control or Option, which includes some characters typed on a Mac; an app or kind of window on the exclusion list; and anything while the screen is locked, ' +
+    'capture is paused, or you are away. Passwords are refused where secure input is detected, and not every password field reports it, so turn this off before you type a password. ' +
+    'A password field is checked for as you type and before each piece is saved, and a piece is refused when that check fails or cannot tell. ' +
+    'Characters typed between two checks can still be kept. ' +
     'Card-like numbers and key-like tokens are replaced before saving. A password typed into an ordinary text box is not recognised.',
-  /** The switch's note when this build has no keyboard hook, so the switch cannot take effect. */
+  /** The switch's note when this build or this system has no keyboard hook, so the switch cannot take effect. */
   unsupported:
-    'Not available in this build. It needs a keyboard hook, which this version does not include, so no text is kept.',
-  /** The switch's note when keyboard access has not been granted. */
-  needsPermission: 'Keyboard access has not been granted to companyOS, so no typed text is kept.',
+    'Not available in this build. This version keeps typed text on macOS only, because only macOS can check for password fields, ' +
+    'and the keyboard hook has to load there. No text is kept on this system.',
+  /** The switch's note when the keyboard hook could not start, which on macOS usually means Accessibility access is not allowed. */
+  needsPermission:
+    'The keyboard hook could not start, so no typed text is kept. On macOS, allow companyOS under Accessibility in System Settings, ' +
+    'then turn this off and on again.',
   /** The name of the delete control that removes typed text with the screen and audio text. */
   deleteLabel: 'Delete screen, audio and typed text',
 } as const;

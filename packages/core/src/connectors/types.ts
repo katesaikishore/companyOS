@@ -10,7 +10,8 @@ import { createHash } from 'node:crypto';
  */
 
 /** Where an item came from. Each connector module produces one of these. */
-export type ConnectorKind = 'calendar' | 'folder' | 'git' | 'mail' | 'issue';
+export const CONNECTOR_KINDS = ['calendar', 'folder', 'git', 'mail', 'issue'] as const;
+export type ConnectorKind = (typeof CONNECTOR_KINDS)[number];
 
 /** One imported item. The integrator stores it through the normal ingest path. */
 export interface ConnectorItem {

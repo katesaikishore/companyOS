@@ -1,4 +1,4 @@
-import { audioDecision, type AudioState } from '@companyos/twin-core';
+import { audioDecision, normaliseTranscript, type AudioState } from '@companyos/twin-core';
 import { BrowserWindow, ipcMain, systemPreferences, utilityProcess, type UtilityProcess } from 'electron';
 import { join } from 'node:path';
 import { captureUrl, type CaptureSource } from './capture-source';
@@ -64,8 +64,15 @@ export interface AudioCaptureOptions {
   now?: () => number;
   /** Whether the operating system lets this app use the microphone now. Tests replace it. */
   microphoneGranted?: () => boolean;
+  /**
+   * Whether the permission this service's sound needs is granted now: the microphone, or screen recording for system
+   * sound. Used instead of microphoneGranted when given.
+   */
+  permissionGranted?: () => boolean;
   /** Tells the speakers apart, when the person has turned that on. Left out, segments carry no speaker. */
   speakers?: SpeakerIdentifier;
+  /** Whether speaker identification is on now. Left out, or false, no voice is compared, whatever `speakers` is. */
+  speakersEnabled?: () => boolean;
 }
 
 interface Segment {
@@ -110,7 +117,7 @@ export class AudioCaptureService {
   private readonly source: CaptureSource;
 
   constructor(private readonly options: AudioCaptureOptions) {
-    this.granted = options.microphoneGranted ?? (() => microphoneGranted());
+    this.granted = options.permissionGranted ?? options.microphoneGranted ?? (() => microphoneGranted());
     this.source = options.source ?? 'microphone';
   }
 
@@ -236,7 +243,9 @@ export class AudioCaptureService {
     }
     // Checked again, because the person may have paused or locked the screen while the segment was being transcribed.
     if (!audioDecision(this.state()).capture) return;
-    // The voice is compared only for a segment that may be kept. A failed check keeps the text, without a speaker.
+    // A segment the store will discard, such as one that is only a tag like [BLANK_AUDIO], opens no speaker.
+    if (normaliseTranscript(text) === '') return;
+    // The voice is compared only for a segment that will be kept. A failed check keeps the text, without a speaker.
     const speaker = await this.identify(segment.samples);
     if (!audioDecision(this.state()).capture) return;
     try {
@@ -253,9 +262,10 @@ export class AudioCaptureService {
   }
 
   private async identify(samples: Float32Array): Promise<string | undefined> {
-    if (!this.options.speakers) return undefined;
+    const speakers = this.options.speakers;
+    if (!speakers || this.options.speakersEnabled?.() !== true) return undefined;
     try {
-      return await this.options.speakers.identify(samples);
+      return await speakers.identify(samples);
     } catch {
       return undefined;
     }

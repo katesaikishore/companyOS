@@ -64,6 +64,22 @@ describe('KeystrokeBuffer: assembling text', () => {
     expect(buffer.length).toBe(0);
   });
 
+  it('drops the open piece on a shortcut that can replace the text, and keeps none of it', () => {
+    const buffer = new KeystrokeBuffer();
+    typeAt(buffer, [[T('secret draft'), 1_000]]);
+    expect(buffer.push({ kind: 'shortcut', rewritesText: true }, 1_500)).toBeNull();
+    expect(buffer.length).toBe(0);
+    expect(buffer.poll(20_000)).toBeNull();
+    typeAt(buffer, [[T('after'), 30_000]]);
+    expect(buffer.push({ kind: 'enter' }, 30_100)).toEqual({ text: 'after', startedAt: 30_000, endedAt: 30_100 });
+  });
+
+  it('still keeps the open piece on a shortcut that does not replace the text', () => {
+    const buffer = new KeystrokeBuffer();
+    typeAt(buffer, [[T('kept'), 1_000]]);
+    expect(buffer.push({ kind: 'shortcut', rewritesText: false }, 1_500)?.text).toBe('kept');
+  });
+
   it('ignores a modifier key pressed on its own, and it does not restart the pause', () => {
     const buffer = new KeystrokeBuffer();
     typeAt(buffer, [[T('abc'), 1_000]]);

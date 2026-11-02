@@ -74,8 +74,8 @@ export function normalizeSignal(input: unknown, options: NormalizeOptions): Twin
 
 const KEY_PLACEHOLDER = '[key]';
 const CARD_PLACEHOLDER = '[card number]';
-/** A card number: 13 to 19 digits, with a single space or dash allowed between them. */
-const CARD_NUMBER = /(?<!\d)(?:\d[ -]?){12,18}\d(?!\d)/g;
+/** A card number: 13 to 19 digits, with one or two spaces or dashes allowed between them. */
+const CARD_NUMBER = /(?<!\d)(?:\d(?:[ -]{1,2})?){12,18}\d(?!\d)/g;
 const PRIVATE_KEY_HEADER = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/g;
 /** Known vendor key shapes: AWS access keys, GitHub, OpenAI and Anthropic style keys, Slack and Google API keys. */
 const VENDOR_KEY =

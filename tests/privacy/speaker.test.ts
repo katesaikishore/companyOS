@@ -6,7 +6,7 @@ import { TwinAgent, unitVector } from '@companyos/twin-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AudioCaptureService, CAPTURE_CHANNEL, type Transcriber } from '../../apps/desktop/src/main/audio-capture';
 import { findLeaks, type Surface } from './canaries';
-import { ConsoleCapture, refuseOutbound } from './surfaces';
+import { ConsoleCapture, diskSurfaces, refuseOutbound } from './surfaces';
 
 // Electron is not running here. The capture window and its IPC channel are replaced by the fakes below. The audio service and
 // the engine are the real ones. The speech model and the speaker model are replaced: what matters here is what reaches each
@@ -83,13 +83,15 @@ describe('speaker identification leaves no raw audio, transcript or voice on an 
   let service: AudioCaptureService;
   let embeddingCanary: string;
   let identified: number;
+  let dataKey: Buffer;
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'speaker-privacy-'));
     logs = new ConsoleCapture();
     outbound = [];
     restoreOutbound = refuseOutbound(outbound);
-    agent = new TwinAgent({ dataDir: join(root, 'twin'), dataKey: randomBytes(32), now: () => AT });
+    dataKey = randomBytes(32);
+    agent = new TwinAgent({ dataDir: join(root, 'twin'), dataKey, now: () => AT });
     agent.updateConfig({ audioCaptureEnabled: true, speakerIdentificationEnabled: true });
     embeddingCanary = '';
     identified = 0;
@@ -108,6 +110,8 @@ describe('speaker identification leaves no raw audio, transcript or voice on an 
           return agent.identifySpeaker(voice);
         },
       },
+      // Read on each segment, as the runtime reads the setting, so switching it off stops the voice comparison at once.
+      speakersEnabled: () => agent.configuration.speakerIdentificationEnabled,
     });
     service.setContext({ enabled: true, locked: false, paused: false, idle: false });
     service.start();
@@ -153,17 +157,33 @@ describe('speaker identification leaves no raw audio, transcript or voice on an 
     expect(leaks).toEqual([]);
     expect(findLeaks(outputs().filter(surface => surface.name !== 'search hits'), { transcript: TRANSCRIPT_CANARY })).toEqual([]);
     expect(outbound).toEqual([]);
+
+    // The person names the speaker, which makes a voiceprint profile. The outputs are checked again, now with that profile.
+    agent.nameSessionSpeaker('Speaker 1', 'Dana Reviewer');
+    expect(agent.speakerProfileCount()).toBe(1);
+    expect(findLeaks(outputs(), { rawSample: RAW_SAMPLE_CANARY, embedding: embeddingCanary })).toEqual([]);
+
+    // On disk, the voice and the transcript are sealed. Only the decrypted speaker store holds the voice, so the disk check
+    // below is read beside that positive control, and the store is not an empty pass.
+    const disk = diskSurfaces(root, join(root, 'twin'), dataKey);
+    const onDisk = disk.filter(surface => !surface.name.startsWith('store:decrypted:'));
+    expect(onDisk.length).toBeGreaterThan(0);
+    expect(findLeaks(onDisk, { embedding: embeddingCanary, transcript: TRANSCRIPT_CANARY })).toEqual([]);
+    expect(disk.find(surface => surface.name === 'store:decrypted:speakers')?.text ?? '').toContain(embeddingCanary);
   });
 
-  it('keeps nothing and identifies nobody when the setting is off, so no label reaches an output', async () => {
+  it('keeps the text without a label, and identifies nobody, when the setting is off', async () => {
     agent.updateConfig({ speakerIdentificationEnabled: false });
-    shared.listeners.get(CAPTURE_CHANNEL.segment)?.(
-      { sender: { id: shared.windows.at(-1)!.id } },
-      { samples: new Float32Array(16_000).fill(RAW_SAMPLE).buffer, durationMs: 1000 },
-    );
+    const samples = new Float32Array(16_000).fill(RAW_SAMPLE);
+    // The voice this segment would have. Nothing computes it here, so its canary must stay off every output. It is not blank.
+    const canary = String(embeddingOf(samples)[EMBEDDING_CANARY_INDEX]);
+    expect(canary).not.toBe('');
+    shared.listeners.get(CAPTURE_CHANNEL.segment)?.({ sender: { id: shared.windows.at(-1)!.id } }, { samples: samples.buffer, durationMs: 1000 });
     await settle();
+    // The speaker model is never asked, so the setting stops the voice comparison itself, not only the label it would give.
+    expect(identified).toBe(0);
     expect(agent.captureSummary().audioCount).toBe(1);
     expect(agent.searchCapture({ text: '', from: 0, to: AT + 1000 })[0]).not.toHaveProperty('speaker');
-    expect(findLeaks(outputs(), { embedding: embeddingCanary })).toEqual([]);
+    expect(findLeaks(outputs(), { embedding: canary })).toEqual([]);
   });
 });

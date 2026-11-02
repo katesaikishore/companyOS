@@ -36,6 +36,11 @@ export const IPC = {
   exportData: 'twin:export-data',
   deleteAll: 'twin:delete-all',
   openMainWindow: 'twin:open-main-window',
+  addConnector: 'twin:add-connector',
+  removeConnector: 'twin:remove-connector',
+  importConnector: 'twin:import-connector',
+  connectCloud: 'twin:connect-cloud',
+  disconnectCloud: 'twin:disconnect-cloud',
   /** Main process to page: change route. */
   navigate: 'twin:navigate',
 } as const;

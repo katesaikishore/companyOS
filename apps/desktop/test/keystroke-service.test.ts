@@ -337,4 +337,34 @@ describe('KeystrokeService', () => {
     await settle();
     expect(h.ingest).toHaveBeenCalledTimes(1);
   });
+
+  it('writes nothing for a piece whose store is still in flight when discard runs', async () => {
+    const h = start();
+    h.source.press(T('deleted soon'));
+    await settle();
+    // Enter ends the piece and starts its store, which is still reading the app. Delete runs before the reads finish.
+    h.source.press({ kind: 'enter' });
+    h.service.discard();
+    await settle();
+    expect(h.ingest).not.toHaveBeenCalled();
+  });
+
+  it('writes nothing for a piece whose store is still in flight when the service stops', async () => {
+    const h = start();
+    h.source.press(T('stopped soon'));
+    await settle();
+    h.source.press({ kind: 'enter' });
+    h.service.setEnabled(false);
+    await settle();
+    expect(h.ingest).not.toHaveBeenCalled();
+  });
+
+  it('still writes a piece that is not discarded while its store runs', async () => {
+    const h = start();
+    h.source.press(T('kept'));
+    await settle();
+    h.source.press({ kind: 'enter' });
+    await settle();
+    expect(h.ingest).toHaveBeenCalledWith({ ts: 1_000, app: 'Notes', text: 'kept' });
+  });
 });

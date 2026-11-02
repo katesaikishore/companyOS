@@ -166,6 +166,15 @@ describe('speaker identification in the engine', () => {
     expect(agent.identifySpeaker(voice(0, 3))).toBe('Ada');
   });
 
+  it('cannot name a session speaker whose voice came from audio that was deleted', () => {
+    speakingOn();
+    agent.identifySpeaker(voice(0));
+    keep('said before the delete', 'Speaker 1');
+    agent.deleteAllCapture();
+    expect(() => agent.nameSessionSpeaker('Speaker 1', 'Ada')).toThrow('That speaker is not in this session any more.');
+    expect(agent.speakerProfileCount()).toBe(0);
+  });
+
   it('exports how many profiles there are, and never a name or a voice', () => {
     speakingOn();
     agent.identifySpeaker(voice(0));

@@ -27,6 +27,7 @@
     "@tesseract.js-data/eng": "1.0.0",
     "electron-updater": "^6.8.10",
     "node-llama-cpp": "3.22.1",
-    "tesseract.js": "7.0.0"
+    "tesseract.js": "7.0.0",
+    "uiohook-napi": "1.5.5"
   }
 }

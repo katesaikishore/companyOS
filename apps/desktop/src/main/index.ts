@@ -20,7 +20,7 @@ import {
   type MessageBoxOptions,
   type SaveDialogOptions,
 } from 'electron';
-import { isSystemCaptureUrl } from './capture-source';
+import { isMicrophoneCaptureUrl, isSystemCaptureUrl } from './capture-source';
 import { writeFileSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -39,6 +39,7 @@ import { renamedAutomationName } from '../shared/rename';
 import { SecureStorageUnavailableError } from './keys';
 import { readLayaFixture } from './laya';
 import { nativeHostScript } from './native-host-install';
+import { connectorIdArg, connectorKindArg, connectorPathArg, connectorPickerOptions } from './connectors-validate';
 import { TwinRuntime } from './runtime';
 import { startAutoUpdates } from './updater';
 
@@ -135,10 +136,7 @@ function privacySettingsLink(permission: CapturePermission): string | undefined 
   return undefined;
 }
 
-/** The only page allowed the microphone: the hidden window that listens while capture is on. */
-const CAPTURE_PAGE_URL = `${APP_ORIGIN}/capture.html`;
-
-/** True for the capture window's microphone request, and for no other. Any video request is refused. */
+/** True for the microphone capture window's microphone request, and for no other. Any video request is refused. */
 function isCaptureMicrophone(
   webContentsId: number | undefined,
   mediaTypes: readonly string[] | undefined,
@@ -146,7 +144,7 @@ function isCaptureMicrophone(
 ): boolean {
   const captureId = runtime?.captureWebContentsId();
   if (captureId === undefined || webContentsId !== captureId) return false;
-  if (requestingUrl !== undefined && requestingUrl !== CAPTURE_PAGE_URL) return false;
+  if (requestingUrl !== undefined && !isMicrophoneCaptureUrl(requestingUrl)) return false;
   return mediaTypes !== undefined && mediaTypes.length > 0 && mediaTypes.every(type => type === 'audio');
 }
 
@@ -244,7 +242,7 @@ function registerIpc(): void {
       defaultId: 1,
       cancelId: 1,
       message: 'Delete all screen images, microphone text and typed text?',
-      detail: 'Every stored screen image, and every line of screen, microphone and typed text, is removed. The local API stops returning them. Your activity history, automations and settings are kept. It cannot be undone.',
+      detail: 'Every stored screen image, and every line of screen, microphone and typed text, is removed. The local API stops returning them. Your activity history, automations and settings are kept. Imported connector items stay until their source is removed. It cannot be undone.',
     });
     if (approved) await requireRuntime().deleteCapture();
   });
@@ -279,6 +277,19 @@ function registerIpc(): void {
     if (!link) throw new Error('Privacy settings are not available on this system.');
     void shell.openExternal(link);
   });
+
+  // The page never sends a path. The person picks the folder or file in the system dialog, and the runtime checks it.
+  handle(IPC.addConnector, async kind => {
+    const chosen = connectorKindArg(kind);
+    const twin = requireRuntime();
+    const parent = parentWindow();
+    const options = connectorPickerOptions(chosen);
+    const picked = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options);
+    if (picked.canceled || picked.filePaths.length === 0) return null;
+    return twin.addConnector(chosen, connectorPathArg(picked.filePaths[0]));
+  });
+  handle(IPC.removeConnector, id => requireRuntime().removeConnector(connectorIdArg(id)));
+  handle(IPC.importConnector, id => requireRuntime().importConnector(connectorIdArg(id)));
 
   handle(IPC.openMainWindow, route => {
     if (route !== undefined && (typeof route !== 'string' || !/^#\/[a-z0-9/-]{0,80}$/.test(route))) {

@@ -140,6 +140,34 @@ describe('parseMbox: messages', () => {
     expect(parseMbox(text, ALL)[0]?.text).toBe('Plain version');
   });
 
+  it('reads an inline text part that has a file name, and skips the attachment and name-only parts before it', () => {
+    const text = mbox(
+      'From ivan@example.com Mon Mar  9 09:00:00 2026',
+      'Subject: Inline notes',
+      'Date: Mon, 09 Mar 2026 09:00:00 +0000',
+      'Message-ID: <inline-6@example.com>',
+      'Content-Type: multipart/mixed; boundary="MIX-9"',
+      '',
+      '--MIX-9',
+      'Content-Type: text/plain; name="old.txt"',
+      '',
+      'NAME-ONLY-TEXT',
+      '--MIX-9',
+      'Content-Type: text/plain; name="data.txt"',
+      'Content-Disposition: attachment; filename="data.txt"',
+      '',
+      'ATTACHMENT-ONLY-TEXT',
+      '--MIX-9',
+      'Content-Type: text/plain; charset=utf-8; name="notes.txt"',
+      'Content-Disposition: inline; filename="notes.txt"',
+      '',
+      'INLINE-NOTE-TEXT',
+      '--MIX-9--',
+    );
+    const [item] = parseMbox(text, ALL);
+    expect(item?.text).toBe('INLINE-NOTE-TEXT');
+  });
+
   it('skips a message whose only text is HTML, and counts it', () => {
     const text = mbox(
       'From frank@example.com Fri Mar  6 09:00:00 2026',

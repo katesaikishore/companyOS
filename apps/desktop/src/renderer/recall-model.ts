@@ -18,6 +18,7 @@ export const KIND_OPTIONS: ReadonlyArray<{ value: RecallKind; label: string }> =
   { value: 'screen', label: 'Screen' },
   { value: 'audio', label: 'Microphone' },
   { value: 'keystroke', label: 'Typed' },
+  { value: 'connector', label: 'Connector' },
 ];
 
 export const RANGE_OPTIONS: ReadonlyArray<{ value: RecallRange; label: string }> = [
@@ -30,12 +31,13 @@ export const KIND_LABEL: Record<CaptureKind, string> = {
   screen: 'Screen',
   audio: 'Microphone',
   keystroke: 'Typed',
+  connector: 'Connector',
 };
 
 /** Every fixed piece of copy on the Recall page. Kept together so the wording is checked in one place. */
 export const RECALL_COPY = {
   title: 'Recall',
-  note: 'Search the text the twin read on the screen, heard on the microphone or saw you type. It is encrypted on this device. Nothing is recorded until you turn it on in Settings or setup.',
+  note: 'Search the text the twin read on the screen, heard on the microphone, saw you type, or imported from a connector you added. It is encrypted on this device. Nothing is recorded until you turn it on in Settings or setup.',
   channels: 'What is being recorded',
   screenChannel: 'Screen text',
   audioChannel: 'Microphone text',

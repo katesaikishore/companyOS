@@ -220,14 +220,15 @@ describe('fetchGoogleEvents', () => {
       };
     });
 
-    const items = await fetchGoogleEvents(
+    const error: unknown = await fetchGoogleEvents(
       WINDOW,
       FRESH,
       depsFor(testProvider('googleCalendar', server.origin), [], { maxPages: 3 }),
-    );
+    ).catch((caught: unknown) => caught);
 
+    // A partial list would replace the stored items with fewer of them, so the read fails instead.
     expect(server.requests).toHaveLength(3);
-    expect(items.map((item) => item.sourceId)).toEqual(['e1', 'e2', 'e3']);
+    expect(error).toMatchObject({ code: 'too_large' });
   });
 
   it('records each request by path only, with no query string and no token', async () => {
@@ -399,10 +400,13 @@ describe('fetchGitHubIssues', () => {
     });
     origin = server.origin;
 
-    const items = await fetchGitHubIssues(FRESH, depsFor(testProvider('github', origin), [], { maxPages: 3 }));
+    const error: unknown = await fetchGitHubIssues(FRESH, depsFor(testProvider('github', origin), [], { maxPages: 3 })).catch(
+      (caught: unknown) => caught,
+    );
 
+    // A partial list would replace the stored items with fewer of them, so the read fails instead.
     expect(server.requests).toHaveLength(3);
-    expect(items.map((item) => item.sourceId)).toEqual(['201', '202', '203']);
+    expect(error).toMatchObject({ code: 'too_large' });
   });
 
   it('refreshes once on 401 and keeps the bearer token on the provider origin only', async () => {

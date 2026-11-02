@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { KeyboardSource, KeyListener } from '../../apps/desktop/src/main/keyboard';
 import { KeystrokeService } from '../../apps/desktop/src/main/keystroke-service';
-import { withoutTypedText } from '../../apps/desktop/src/main/local-api';
+import { withheldFromLocalApi } from '../../apps/desktop/src/main/local-api';
 import { CANARIES, describeLeak, findLeaks, type Surface } from './canaries';
 import { ConsoleCapture, diskSurfaces, errorText, refuseOutbound } from './surfaces';
 
@@ -140,7 +140,7 @@ function surfacesOf(rig: Rig): Surface[] {
     { name: 'outbound:fetch', text: rig.outbound.join('\n') },
     {
       name: 'local-api:search',
-      text: JSON.stringify(withoutTypedText(rig.agent.searchCapture({ text: '', ...everything })), null, 2),
+      text: JSON.stringify(withheldFromLocalApi(rig.agent.searchCapture({ text: '', ...everything })), null, 2),
     },
   ];
 }
@@ -226,7 +226,7 @@ describe('typed text is kept, redacted, only when allowed', () => {
     await rig.typeLine(`${CANARIES.keystrokeStored} needle`);
     const everything = { from: NOW - 365 * DAY, to: NOW + DAY };
     expect(rig.agent.searchCapture({ text: 'needle', ...everything })).toHaveLength(1);
-    expect(withoutTypedText(rig.agent.searchCapture({ text: 'needle', ...everything }))).toEqual([]);
+    expect(withheldFromLocalApi(rig.agent.searchCapture({ text: 'needle', ...everything }))).toEqual([]);
   });
 });
 

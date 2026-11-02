@@ -74,3 +74,31 @@ describe('window-class exclusions', () => {
     });
   });
 });
+
+describe('window-class exclusions remove what was already stored', () => {
+  let dir: string;
+  let agent: TwinAgent;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'window-purge-'));
+    agent = new TwinAgent({ dataDir: join(dir, 'twin'), dataKey: randomBytes(32), now: () => Date.UTC(2026, 10, 2, 9) });
+    agent.updateConfig({ screenCaptureEnabled: true });
+  });
+
+  afterEach(() => {
+    agent.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('removes stored text of a kind that is excluded afterwards, and keeps the other kinds', () => {
+    const ts = Date.UTC(2026, 10, 2, 9);
+    agent.ingestScreen({ ts, app: 'Notes', windowClass: 'editor', text: 'kept editor words', mediaId: null });
+    agent.ingestScreen({ ts, app: 'Slack', windowClass: 'chat', text: 'stored chat words', mediaId: null });
+    expect(agent.captureSummary().screenCount).toBe(2);
+    agent.updateConfig({ excludedWindowClasses: ['chat'] });
+    expect(agent.captureSummary().screenCount).toBe(1);
+    const hits = agent.searchCapture({ text: 'chat words', from: 0, to: Date.UTC(2027, 0, 1) });
+    expect(hits).toHaveLength(0);
+    expect(agent.searchCapture({ text: 'editor words', from: 0, to: Date.UTC(2027, 0, 1) })).toHaveLength(1);
+  });
+});

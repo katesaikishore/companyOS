@@ -6,25 +6,28 @@ import {
   type CaptureSearchRequest,
   type Pipe,
   type PipeGate,
+  type PipeOutput,
 } from '@companyos/twin-core';
-import { mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
 /**
  * The pipe scheduler in the main process. Every minute it finds the pipes that are due, and when the gates allow pipes it
- * runs them. A run reads the stored text through the engine's search, then shows a notice or writes a file. The time of
- * each last run is kept in memory only, so a restart starts each wait again. Nothing here reaches the network.
+ * runs them. A run reads the stored text through the engine's search, then shows a notice, or hands its matches to the agent,
+ * which keeps the newest run encrypted in the store. The time of each last run is kept in memory only, so a restart starts each
+ * wait again. Nothing here writes a file or reaches the network.
  */
 
 /** How often the scheduler looks for due pipes. A pipe runs at most this long after it falls due. */
 export const PIPE_TICK_MS = 60_000;
-/** The folder inside the app's data folder that holds the files of write pipes. */
-const PIPES_FOLDER = 'pipes';
-const PIPE_ID = /^[A-Za-z0-9-]{8,40}$/;
+/**
+ * The folder the earlier version wrote its pipe files to, as plain text. Nothing writes there now. Its files are removed when
+ * the app starts and when captured text is deleted.
+ */
+const LEGACY_PIPES_FOLDER = 'pipes';
 /** What the log says. It names no pipe, no error and no text, because an error can carry the text it was given. */
 const PIPE_FAILED = 'A pipe did not run. Its text is not logged.';
 const CHECK_FAILED = 'The pipes could not be checked. Their text is not logged.';
-const BAD_ID = 'A pipe has an id that cannot be a file name.';
 
 export interface PipeSchedulerOptions {
   now: () => number;
@@ -36,9 +39,11 @@ export interface PipeSchedulerOptions {
   search: (request: CaptureSearchRequest) => CaptureHitView[];
   /** Shows a notice. The text is a count, the app names and the pipe's own name. Never item text. */
   notify: (text: string) => void;
-  writeOutput: (pipeId: string, markdown: string) => Promise<void>;
-  /** Removes every file in the pipes folder except the files of the kept pipe ids. */
-  pruneOutputs: (keep: ReadonlySet<string>) => Promise<void>;
+  /**
+   * Hands a write pipe's newest run to the agent, which keeps it encrypted in the store and replaces the run kept before it. The
+   * agent keeps it only for a saved pipe that is on and keeps its matches, so a pipe removed or turned off during a run keeps nothing.
+   */
+  storeOutput: (pipeId: string, output: PipeOutput) => void;
   /** Receives a fixed sentence when a pipe or a check fails. Defaults to the error log. */
   report?: (message: string) => void;
 }
@@ -84,13 +89,15 @@ export class PipeScheduler {
     const pipes = this.options.pipes();
     for (const pipe of pipes) if (!this.firstSeen.has(pipe.id)) this.firstSeen.set(pipe.id, now);
     this.forget(pipes);
-    // A pipe that is off, or that does not write a file, keeps no file. A removed pipe's file goes too.
-    await this.options.pruneOutputs(new Set(pipes.filter(pipe => pipe.enabled && pipe.action === 'write').map(pipe => pipe.id)));
     const due = pipes.filter(pipe => isPipeDue(pipe, this.baseline(pipe.id), now));
     if (due.length === 0) return;
     const decision = pipeDecision(await this.options.gate());
     if (!decision.run) return;
-    for (const pipe of due) await this.runOne(pipe, this.baseline(pipe.id));
+    // The saved pipes are read again after the gates, so a pipe turned off or removed meanwhile is not run.
+    const current = this.options.pipes();
+    for (const pipe of due) {
+      if (current.some(item => item.id === pipe.id && item.enabled)) await this.runOne(pipe, this.baseline(pipe.id));
+    }
   }
 
   /** The time a pipe's window starts after: its last run, else the time it was first seen. */
@@ -109,7 +116,7 @@ export class PipeScheduler {
     this.lastRun.set(pipe.id, this.options.now());
     try {
       const result = runPipe(pipe, since + 1, { now: () => this.options.now(), search: this.options.search });
-      if (pipe.action === 'write') await this.options.writeOutput(pipe.id, result.markdown);
+      if (pipe.action === 'write') this.options.storeOutput(pipe.id, { ranAt: result.ranAt, items: result.items });
       else if (result.count > 0) this.options.notify(result.notice);
     } catch {
       this.report(PIPE_FAILED);
@@ -122,39 +129,10 @@ export class PipeScheduler {
   }
 }
 
-/** The folder of the write pipes' files, inside the app's data folder. */
-export function pipeOutputFolder(userData: string): string {
-  return join(userData, PIPES_FOLDER);
-}
-
 /**
- * Replaces the file of one write pipe. The text goes to a temporary file first and is renamed over the old one, so a crash
- * never leaves half a file. The file is readable by this user only, where the system keeps file modes.
+ * Removes the folder the earlier version wrote its pipe files to, with every file in it, since those files hold text as plain
+ * Markdown. A folder that is not there has nothing to remove.
  */
-export async function writePipeOutput(folder: string, pipeId: string, markdown: string): Promise<void> {
-  if (!PIPE_ID.test(pipeId)) throw new Error(BAD_ID);
-  await mkdir(folder, { recursive: true, mode: 0o700 });
-  const target = join(folder, `${pipeId}.md`);
-  const temporary = `${target}.tmp`;
-  await writeFile(temporary, markdown, { encoding: 'utf8', mode: 0o600 });
-  await rename(temporary, target);
-}
-
-/**
- * Removes every entry in the pipes folder except the files of the kept pipe ids. Called with no ids, it removes them all,
- * which is what deleting captured text and changing the exclusions need. A folder that does not exist has nothing to remove.
- */
-export async function pruneOutputs(folder: string, keep: ReadonlySet<string>): Promise<void> {
-  let names: string[];
-  try {
-    names = await readdir(folder);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
-    throw error;
-  }
-  const kept = new Set([...keep].map(id => `${id}.md`));
-  for (const name of names) {
-    if (kept.has(name)) continue;
-    await rm(join(folder, name), { recursive: true, force: true });
-  }
+export async function removeLegacyPipeFiles(userData: string): Promise<void> {
+  await rm(join(userData, LEGACY_PIPES_FOLDER), { recursive: true, force: true });
 }

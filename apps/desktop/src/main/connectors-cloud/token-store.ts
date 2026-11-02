@@ -2,7 +2,7 @@
  * Sealed storage for each connector's tokens. Every token is sealed before it reaches the disk. The integrator supplies
  * the seal with Electron's safeStorage. Nothing here writes a token in clear, and a failed write leaves the last good file.
  */
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CloudConnectorError, type Tokens } from './oauth';
 import { isCloudProviderId, type CloudProviderId } from './providers';
@@ -62,9 +62,16 @@ export function createFileTokenStore(options: FileTokenStoreOptions): TokenStore
       );
       const sealed = seal(plain);
       mkdirSync(directory, { recursive: true, mode: 0o700 });
-      // Written beside the target and then renamed, so a failed write leaves the previous file in place.
+      // Written beside the target, flushed to disk, and then renamed, so a failed write leaves the previous file in place
+      // and a power cut after the rename cannot leave an empty file behind.
       const temporary = `${path}.tmp`;
       writeFileSync(temporary, sealed, { mode: 0o600 });
+      const handle = openSync(temporary, 'r+');
+      try {
+        fsyncSync(handle);
+      } finally {
+        closeSync(handle);
+      }
       renameSync(temporary, path);
     },
 

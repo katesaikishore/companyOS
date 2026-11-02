@@ -1,0 +1,60 @@
+---
+title: "Connectors"
+description: "Read a folder, Git repository, calendar file or mail archive that you choose, keep its text on this device, and never write back to it"
+---
+
+A connector imports text from something you already have on this device: a folder of notes, the history of a Git repository, a calendar export, or a mail archive. Nothing is imported until you add a source. Each source is one folder, repository or file that you pick in a system dialog, and you can have up to 20 in all.
+
+The four local connectors read the files on this device and open no network connection. They never change the files they read. Nothing is written back.
+
+## The four kinds
+
+| Kind | What is read | Limits |
+| --- | --- | --- |
+| **Folder** | Markdown, plain text and HTML files (`.md`, `.markdown`, `.txt`, `.html`, `.htm`). An HTML file keeps its visible text, without scripts, styles or tags. | Each file up to 1 MB. Hidden files and folders are skipped, and so are symbolic links. A folder with more than 5,000 supported files, or more than 20,000 entries to walk, is not imported in part: the import is refused and the earlier items are kept. |
+| **Git repository** | Each commit's date, its subject, and the names of the files it changed, up to 50 names. The changes themselves are not read. | Up to 16 MB of Git output. The newest 5,000 commits are read, so a longer history is imported in part. A repository with no commits gives no items. |
+| **Calendar file** (`.ics`) | Each event's title, description and location, for events from 180 days ago to 365 days ahead. A recurring event is expanded up to 500 times. Attendees and organisers are not read. | The file up to 10 MB. |
+| **Mail archive** (`.mbox`) | Each message's date, subject and plain text body. A message whose only text is HTML is skipped. So is a message with no readable date. The sender and attachments are not read. | The file up to 50 MB, and the first 5,000 messages. |
+
+Each item is one commit, one file, one event occurrence or one message. Its title is the commit subject, the file name without its extension, the event's summary or the message's subject.
+
+## When a source is read
+
+- When you add it. A source whose first read fails is not kept, and the reason is shown.
+- When you choose **Import now** on its row in the Connectors section of Settings.
+- About every six hours while the app runs. A source is read again only when six hours have passed since its last read or failed attempt.
+
+The automatic reads wait while capture is paused, while the screen is locked, and while you are away. The app checks for due reads every 30 minutes, so a read that waited starts at the first check after the wait ends. **Import now** always reads, because you asked for it.
+
+Each read replaces what the source held before. A file you delete leaves no item behind, and a file you change is read again in its new form. If a read fails, the items from the last good read are kept, and the source keeps its last read time.
+
+## Where the text goes
+
+The text is stored in the same encrypted store as the rest of your history. Each item is redacted when it is stored, with the same rules as typed text, so a card-like number or a key-like token is replaced before it is kept. The source's label and path are kept on this device, so you can see which folder or file an item came from.
+
+Items appear in [Recall](/recall) with the label **Connector**, and you can search for them there. The local API is off by default, and it never returns connector items. They are searched only on the Recall page.
+
+## What is never sent
+
+No connector sends anything over the network. The files stay on this device and are read only. Nothing is written back to them, and no connector creates, moves or deletes a file it read.
+
+## Removing a source
+
+**Remove** on a source's row takes out its items at once. The files it read are not changed.
+
+Two other deletions behave differently, because you chose to import these items:
+
+- **Delete screen and audio text** does not remove connector items. They are not screen or microphone text.
+- **Delete everything** removes them, with the rest of the history.
+
+Connector items are not on the 90-day window that applies to screen and microphone text. They stay until you remove their source or delete everything.
+
+## Export
+
+An export holds only the number of connector items and the date of the oldest and newest. It never holds their text, and it replaces each source's label and path with a placeholder.
+
+## Errors
+
+Every error from a connector is a fixed sentence, and none of them names a path, a file name, an item's text or Git output. A scheduled read that fails reports only that sentence.
+
+See [Privacy](/privacy) for everything the app keeps and sends, and [Recall](/recall) for how to search what you have imported.

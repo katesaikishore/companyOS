@@ -1,14 +1,41 @@
+import { z } from 'zod';
 import type { CaptureHitView, CaptureSearchRequest } from './contract';
 import { PIPE_KINDS, PipesSchema, type Pipe, type PipeKind } from './types';
 
 /**
  * Pipes: saved searches that run on a schedule and do one local thing with the result. A pipe is data, never code. It
  * reads only the text the twin has already stored, through the same search the Recall page uses, so an excluded app stays
- * out. Nothing in this file reaches the network.
+ * out. A write pipe keeps the matches of its newest run in the encrypted store. Nothing in this file writes a file or
+ * reaches the network.
  */
 
 /** Most matches one run reads. The engine's search returns no more than this, and a full run says so. */
 export const PIPE_MATCH_LIMIT = 200;
+/** The most characters of one match's text that a kept run holds. A longer snippet is cut to this. */
+export const PIPE_OUTPUT_TEXT_MAX = 1000;
+const PIPE_OUTPUT_APP_MAX = 500;
+/** The id of a pipe, as the config checks it. The same rule applies wherever a pipe id is taken from a caller. */
+export const PIPE_ID = /^[A-Za-z0-9-]{8,40}$/;
+
+/** One match of a kept run: when it was stored, the app it came from, its kind and its text on one line. */
+export const PipeOutputItemSchema = z
+  .object({
+    ts: z.number().int().nonnegative(),
+    app: z.string().max(PIPE_OUTPUT_APP_MAX).nullable(),
+    kind: z.enum(PIPE_KINDS),
+    text: z.string().max(PIPE_OUTPUT_TEXT_MAX),
+  })
+  .strict();
+export type PipeOutputItem = z.infer<typeof PipeOutputItemSchema>;
+
+/** The newest run of one write pipe: when it ran, and its matches, at most PIPE_MATCH_LIMIT. */
+export const PipeOutputSchema = z
+  .object({
+    ranAt: z.number().int().nonnegative(),
+    items: z.array(PipeOutputItemSchema).max(PIPE_MATCH_LIMIT),
+  })
+  .strict();
+export type PipeOutput = z.infer<typeof PipeOutputSchema>;
 /** How many app names a notification names before it counts the rest. */
 const NOTICE_APP_NAMES = 3;
 const MINUTE_MS = 60_000;
@@ -88,8 +115,11 @@ export interface PipeRunResult {
    * text of an item, only the number and the names.
    */
   notice: string;
-  /** The Markdown for a write pipe. It holds stored text, so it is written only to the pipes folder. */
-  markdown: string;
+  /**
+   * The matches of this run, as a write pipe keeps them. They hold stored text, so they go only to the encrypted store, and
+   * a notify pipe does not keep them.
+   */
+  items: PipeOutputItem[];
 }
 
 /**
@@ -117,7 +147,7 @@ export function runPipe(pipe: Pipe, since: number, deps: PipeRunDeps): PipeRunRe
     truncated,
     apps,
     notice: count === 0 ? '' : noticeFor(pipe.name, count, truncated, apps),
-    markdown: markdownFor(pipe, from, ranAt, hits),
+    items: hits.map(itemFor),
   };
 }
 
@@ -142,34 +172,16 @@ function noticeFor(name: string, count: number, truncated: boolean, apps: readon
   return `${name}: ${countText} new ${noun}${appText}.`;
 }
 
-function markdownFor(pipe: Pipe, from: number, to: number, hits: readonly CaptureHitView[]): string {
-  const lines = [
-    `# ${pipe.name}`,
-    '',
-    `Run at ${iso(to)}. Matches stored from ${iso(from)} to ${iso(to)}.`,
-    '',
-    `Search: ${pipe.query === '' ? 'any text' : `"${pipe.query}"`}`,
-    `Source: ${sourceWords(pipe)}`,
-    `App: ${pipe.app ?? 'any app'}`,
-    '',
-    'This file holds text the twin read on your screen or heard on your microphone. It is not encrypted, and each run replaces it.',
-    '',
-  ];
-  if (hits.length === 0) lines.push('No matches in this run.');
-  for (const hit of hits) lines.push(`- ${iso(hit.ts)} · ${hit.kind === 'audio' ? 'microphone' : (hit.app ?? 'unknown app')} · ${oneLine(hit.snippet)}`);
-  return `${lines.join('\n')}\n`;
-}
-
-function sourceWords(pipe: Pipe): string {
-  if (pipe.kind === 'screen') return 'screen text';
-  if (pipe.kind === 'audio') return 'microphone text';
-  return 'screen and microphone text';
+/** One match as a kept run holds it. The kind is one of the pipe kinds, since runPipe drops any other kind before this. */
+function itemFor(hit: CaptureHitView): PipeOutputItem {
+  return {
+    ts: hit.ts,
+    app: hit.app,
+    kind: hit.kind as PipeKind,
+    text: oneLine(hit.snippet).slice(0, PIPE_OUTPUT_TEXT_MAX),
+  };
 }
 
 function oneLine(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
-}
-
-function iso(ms: number): string {
-  return new Date(ms).toISOString();
 }

@@ -210,6 +210,28 @@ describe('refreshTokens', () => {
     expect(entries.map((entry) => entry.path)).toEqual(['/token']);
   });
 
+  it('reads a lifetime sent as a numeric string, so the token is still refreshed on time', async () => {
+    provider = await startFakeProvider(() => ({ json: { access_token: 'ACCESS-3', expires_in: '1800' } }));
+    const tokens = await refreshTokens(testProvider('googleCalendar', provider.origin), 'REFRESH-1', {
+      fetch,
+      record: () => undefined,
+      now: () => NOW,
+    });
+
+    expect(tokens.expiresAt).toBe(NOW + 1800_000);
+  });
+
+  it('reports a provider outage as unavailable rather than as an expired sign-in', async () => {
+    provider = await startFakeProvider(() => ({ status: 503, json: { error: 'temporarily_unavailable' } }));
+    const error: unknown = await refreshTokens(testProvider('googleCalendar', provider.origin), 'REFRESH-1', {
+      fetch,
+      record: () => undefined,
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({ code: 'unavailable' });
+    expect((error as Error).message).not.toContain('Connect the account again');
+  });
+
   it('asks the person to connect again, with a fixed sentence, when the refresh is refused', async () => {
     provider = await startFakeProvider((request) => ({
       status: 400,

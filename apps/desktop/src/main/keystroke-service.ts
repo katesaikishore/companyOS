@@ -59,6 +59,8 @@ export class KeystrokeService {
   private secure: { value: boolean | 'unknown'; at: number } | undefined;
   private reading = false;
   private waiting: Array<{ event: KeyEvent; ts: number }> = [];
+  /** Every discard changes this. A store that began before a discard sees the change, and keeps nothing. */
+  private generation = 0;
   /**
    * Set when keys had to be dropped. Text is never assembled across a gap, since a dropped Backspace would keep a typo. The
    * keys after the gap are dropped too, until a key that ends a piece (Enter, Tab, another key that moves the caret, or a
@@ -116,8 +118,12 @@ export class KeystrokeService {
     this.setEnabled(false);
   }
 
-  /** Drops the open piece and any waiting key without keeping them. Used when the person deletes captured text. */
+  /**
+   * Drops the open piece and any waiting key without keeping them. Used when the person deletes captured text. A piece that
+   * is still being checked for storage is dropped too.
+   */
   discard(): void {
+    this.generation++;
     this.buffer.clear();
     this.bufferApp = undefined;
     this.waiting = [];
@@ -242,6 +248,8 @@ export class KeystrokeService {
    * policy has already checked the app now in front.
    */
   private async store(piece: FinishedText, boundary: Boundary, app: string): Promise<void> {
+    // Taken before the first await, so a discard or a stop during the reads is seen below.
+    const generation = this.generation;
     try {
       let front: string | undefined;
       let secure: boolean | 'unknown' = 'unknown';
@@ -255,6 +263,8 @@ export class KeystrokeService {
       this.front = front;
       this.frontAt = at;
       this.secure = { value: secure, at };
+      // The text was deleted or the service stopped while the reads ran, so the piece is not written.
+      if (generation !== this.generation || !this.enabled) return;
       if (!keystrokeDecision({ ...this.deps.state(front), secureInput: secure }).capture) return;
       if (boundary !== 'switch' && front !== app) return;
       this.deps.ingest({ ts: piece.startedAt, app, text: piece.text });

@@ -18,7 +18,7 @@ describe('the typed-text copy matches the engine', () => {
     expect(note).toContain('browser');
     expect(note).toContain('password field');
     expect(note).toContain('exclusion list');
-    expect(note).toContain('Command or Control');
+    expect(note).toContain('Command, Control or Option');
     expect(note).toContain('locked');
     expect(note).toContain('paused');
     expect(note).toContain('away');
@@ -39,6 +39,38 @@ describe('the typed-text copy matches the engine', () => {
     expect(keystrokeNote('needs_permission')).toBe(KEYSTROKE_COPY.needsPermission);
     expect(keystrokeNote('on')).toBe(KEYSTROKE_COPY.note);
     expect(keystrokeNote('off')).toBe(KEYSTROKE_COPY.note);
+  });
+});
+
+describe('the typed-text note states the limits of the keyboard hook', () => {
+  it('says the text is kept on this device, encrypted', () => {
+    expect(KEYSTROKE_COPY.note).toContain('encrypted on this device');
+  });
+
+  it('says only the US layout is read, and why another layout gives wrong text', () => {
+    expect(KEYSTROKE_COPY.note).toContain('US keyboard layout');
+    expect(KEYSTROKE_COPY.note).toContain('wrong');
+  });
+
+  it('says passwords are refused where secure input is detected, and not every field reports it', () => {
+    expect(KEYSTROKE_COPY.note).toContain('refused where secure input is detected');
+    expect(KEYSTROKE_COPY.note).toContain('not every password field reports it');
+  });
+
+  it('says what macOS asks for when the switch is turned on, which is Accessibility access', () => {
+    expect(KEYSTROKE_COPY.note).toContain('On macOS');
+    expect(KEYSTROKE_COPY.note).toContain('Accessibility access');
+    expect(KEYSTROKE_COPY.note).not.toContain('does not include');
+  });
+
+  it('says the switch is not available here, and why, when the hook cannot run on this system', () => {
+    expect(KEYSTROKE_COPY.unsupported.startsWith('Not available in this build.')).toBe(true);
+    expect(KEYSTROKE_COPY.unsupported).toContain('macOS only');
+  });
+
+  it('tells the person what to do when the hook could not start', () => {
+    expect(KEYSTROKE_COPY.needsPermission).toContain('Accessibility');
+    expect(KEYSTROKE_COPY.needsPermission).toContain('turn this off and on again');
   });
 });
 

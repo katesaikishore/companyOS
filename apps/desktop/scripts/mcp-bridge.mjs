@@ -14,6 +14,12 @@ const DEFAULT_PORT = 3838;
 const MAX_QUERY_CHARS = 200;
 const MAX_REPLY_CHARS = 64 * 1024;
 const KINDS = ['screen', 'audio'];
+const TOO_LARGE = 'The reply is too large.';
+const TOO_LARGE_TEXT = 'The reply is too large. Narrow the search with a kind, a time range or more words.';
+const INTERNAL_ERROR = 'The bridge could not answer this message.';
+
+/** Raised when a reply passes MAX_REPLY_CHARS, so the caller can name that fault rather than an unreachable API. */
+class ReplyTooLargeError extends Error {}
 
 export const TOOLS = [
   {
@@ -49,7 +55,7 @@ export function apiGet(port, token, path) {
       res.setEncoding('utf8');
       res.on('data', chunk => {
         body += chunk;
-        if (body.length > MAX_REPLY_CHARS) req.destroy(new Error('The reply is too large.'));
+        if (body.length > MAX_REPLY_CHARS) req.destroy(new ReplyTooLargeError(TOO_LARGE));
       });
       res.on('end', () => resolve({ status: res.statusCode ?? 0, body }));
     });
@@ -66,7 +72,8 @@ async function callApi(config, path) {
     const reply = await apiGet(config.port, config.token, path);
     if (reply.status !== 200) return { isError: true, text: `The local API refused the request (HTTP ${reply.status}). Check that the local API is on and the token is current.` };
     return { isError: false, text: reply.body };
-  } catch {
+  } catch (error) {
+    if (error instanceof ReplyTooLargeError) return { isError: true, text: TOO_LARGE_TEXT };
     return { isError: true, text: 'The local API is not reachable. Turn it on in the twin\'s Settings, and check the port.' };
   }
 }
@@ -109,7 +116,10 @@ export async function handleMessage(message, config) {
   }
   const { id, method, params } = message;
   const notification = id === undefined;
-  if (method === 'notifications/initialized' || (notification && method?.startsWith('notifications/'))) return undefined;
+  // A method that is not text cannot name a notification, so it never reaches startsWith.
+  if (method === 'notifications/initialized' || (notification && typeof method === 'string' && method.startsWith('notifications/'))) {
+    return undefined;
+  }
   const ok = result => (notification ? undefined : { jsonrpc: '2.0', id, result });
   switch (method) {
     case 'initialize':
@@ -135,8 +145,12 @@ export function configFromEnv(env = process.env) {
   return { port: Number.isInteger(port) && port > 0 && port < 65536 ? port : DEFAULT_PORT, token: env.COMPANYOS_API_TOKEN ?? '' };
 }
 
-/** Runs the stdio server: one JSON-RPC message per line in, one response per line out. */
-export function serve(config, input = process.stdin, output = process.stdout) {
+/**
+ * Runs the stdio server: one JSON-RPC message per line in, one response per line out. A message that fails inside the
+ * handler is answered with a fixed internal error (when it asked for an answer), and the server keeps running. The error
+ * itself is not written anywhere, because it can carry the request's text.
+ */
+export function serve(config, input = process.stdin, output = process.stdout, errors = process.stderr) {
   const lines = createInterface({ input });
   lines.on('line', line => {
     if (line.trim() === '') return;
@@ -147,9 +161,15 @@ export function serve(config, input = process.stdin, output = process.stdout) {
       output.write(`${JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'The message is not JSON.' } })}\n`);
       return;
     }
-    void handleMessage(message, config).then(response => {
-      if (response !== undefined) output.write(`${JSON.stringify(response)}\n`);
-    });
+    void handleMessage(message, config)
+      .then(response => {
+        if (response !== undefined) output.write(`${JSON.stringify(response)}\n`);
+      })
+      .catch(() => {
+        errors.write('The bridge could not answer one message.\n');
+        const id = message?.id;
+        if (id !== undefined) output.write(`${JSON.stringify({ jsonrpc: '2.0', id, error: { code: -32603, message: INTERNAL_ERROR } })}\n`);
+      });
   });
 }
 

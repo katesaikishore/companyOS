@@ -362,6 +362,33 @@ export interface TwinStatus {
   tasks: DayTasksView;
   /** What the twin knows about the person's routines. Rebuilt from the stored events on each read. */
   knownRoutines: KnownRoutinesView;
+  /** Items stored from connected sources (folder, Git, calendar, mail). Optional, so a status built without it still type-checks. */
+  connectorItems?: number;
+  /** The items each local source had at its last import this session, by source id. Not saved, so it is empty after a restart. */
+  connectorCounts?: Record<string, number>;
+  /** The cloud accounts the app can connect, read-only: Google Calendar and GitHub. Optional, so a status built without it still type-checks. */
+  cloudAccounts?: CloudAccountView[];
+  /** The newest kept run of each write pipe, by pipe id. A pipe with no entry has no kept run. Holds no text. */
+  pipeOutputs?: Record<string, PipeOutputSummaryView>;
+}
+
+/** When a write pipe's newest kept run was read, and how many matches it kept. Holds no text. */
+export interface PipeOutputSummaryView {
+  count: number;
+  ranAt: number;
+}
+
+/** A cloud account the app can connect, read-only. The client id is never sent to a page: only whether one is set. */
+export interface CloudAccountView {
+  provider: 'googleCalendar' | 'github';
+  /** Whether this build has a client id for the account. Without one, connecting is refused. */
+  configured: boolean;
+  /** Whether a source for the account is saved. Its tokens are sealed on this device. */
+  connected: boolean;
+  /** Epoch milliseconds of the last successful read. */
+  lastImportedAt?: number;
+  /** Items the last read this session stored. Not saved, so it is empty after a restart. */
+  count?: number;
 }
 
 /** Everything a page may ask of the main process. Each call is validated there. */
@@ -423,6 +450,23 @@ export interface TwinBridge {
   requestPermission(permission: CapturePermission): Promise<void>;
   /** Opens the operating system's privacy settings for screen or microphone access. */
   openPrivacySettings(permission: CapturePermission): Promise<void>;
+
+  /**
+   * Asks for a folder (folder and Git repository) or a file (calendar and mail archive) in the system dialog, then reads it
+   * once. Resolves to the items stored, or to null when the dialog was cancelled. A source whose first read fails is not kept.
+   */
+  addConnector(kind: 'folder' | 'git' | 'calendar' | 'mail'): Promise<number | null>;
+  /** Removes a local source and its items. The files it read are not changed. */
+  removeConnector(id: string): Promise<void>;
+  /** Reads a local source again now, and replaces its items. Resolves to the items stored. */
+  importConnector(id: string): Promise<number>;
+  /**
+   * Connects a cloud account, read-only, through the person's own sign-in in the browser. Resolves to the items the first read
+   * stored. If that read fails, nothing stays connected.
+   */
+  connectCloud(provider: CloudAccountView['provider']): Promise<number>;
+  /** Disconnects a cloud account: deletes its sealed tokens and its items, and removes it from the list. */
+  disconnectCloud(provider: CloudAccountView['provider']): Promise<void>;
 
   exportData(): Promise<string>;
   deleteAll(): Promise<void>;

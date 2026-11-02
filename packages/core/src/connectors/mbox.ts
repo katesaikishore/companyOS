@@ -7,7 +7,7 @@ import { buildItem, connectorSourceId, parseParameters, type ConnectorItem } fro
  * the Subject, with RFC 2047 encoded words decoded. The ts is the Date header. The sender is never read and never stored.
  *
  * The text is the first text/plain part, in document order. A multipart message is searched through its nested parts,
- * and attachments are skipped. The body is decoded from quoted-printable or base64 and from its charset, and it is cut to
+ * and attachments are skipped; a part marked inline is read even when it has a file name. The body is decoded from quoted-printable or base64 and from its charset, and it is cut to
  * the item limit. A message whose only text is HTML is skipped and counted in skippedHtmlOnly, and so is a message with no
  * readable Date header (skippedNoDate). A message with no text part keeps its subject and has an empty text.
  *
@@ -152,6 +152,8 @@ function scan(entity: Entity, depth: number, found: Found): void {
 }
 
 function isAttachment(entity: Entity): boolean {
+  // A part marked inline is body text, even when it has a file name.
+  if (entity.disposition === 'inline') return false;
   return (
     entity.disposition === 'attachment' ||
     entity.dispositionParams.has('filename') ||

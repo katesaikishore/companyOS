@@ -17,9 +17,13 @@ export function parseAccessibleText(raw: string): string {
   const lines: string[] = [];
   let length = 0;
   for (const line of raw.split(/\r?\n/)) {
-    const text = line.replace(/\s+/g, ' ').trim();
-    if (text === '' || seen.has(text)) continue;
-    if (length + text.length > MAX_TEXT_CHARS) break;
+    let text = line.replace(/\s+/g, ' ').trim();
+    if (text === '') continue;
+    // A line longer than the room left is cut to that room. Stopping at it would also drop every line after it.
+    const room = MAX_TEXT_CHARS - length;
+    if (room <= 0) break;
+    if (text.length > room) text = text.slice(0, room);
+    if (seen.has(text)) continue;
     seen.add(text);
     lines.push(text);
     length += text.length + 1;
@@ -29,6 +33,7 @@ export function parseAccessibleText(raw: string): string {
 
 /** The Windows reader, as a PowerShell script. It walks the focused window's controls, breadth first, and prints their text. */
 export const WINDOWS_READER = `
+try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
 Add-Type -TypeDefinition @"
 using System; using System.Runtime.InteropServices;
@@ -43,7 +48,8 @@ $count = 0
 while ($queue.Count -gt 0 -and $count -lt ${MAX_ELEMENTS}) {
   $item = $queue.Dequeue()
   $element = $item[0]; $depth = $item[1]; $count++
-  $isPassword = $false
+  # Fails closed: when the password flag cannot be read, the element's text is not read.
+  $isPassword = $true
   try { $isPassword = [bool]$element.GetCurrentPropertyValue([System.Windows.Automation.AutomationElement]::IsPasswordProperty) } catch {}
   if (-not $isPassword) {
     $name = $element.Current.Name
@@ -72,9 +78,15 @@ let seen = 0;
 function read(element, depth) {
   if (seen >= ${MAX_ELEMENTS} || depth > ${MAX_DEPTH}) return;
   seen += 1;
-  let role = '';
-  try { role = element.role(); } catch (e) {}
-  if (role !== 'AXSecureTextField') {
+  // A password field is skipped by its role or its subrole. When the role cannot be read, the element's text is not read.
+  let secure = true;
+  try {
+    const role = element.role();
+    let subrole = '';
+    try { subrole = element.subrole(); } catch (e) {}
+    secure = role === 'AXSecureTextField' || subrole === 'AXSecureTextField';
+  } catch (e) {}
+  if (!secure) {
     for (const get of [() => element.name(), () => element.value()]) {
       try {
         const text = get();
@@ -102,8 +114,10 @@ export function readAccessibleText(platform: NodeJS.Platform = process.platform)
 
 function run(command: string, args: string[]): Promise<string> {
   return new Promise<string>(resolve => {
-    execFile(command, args, { timeout: READ_TIMEOUT_MS, maxBuffer: 1024 * 1024, windowsHide: true }, (error, stdout) => {
-      resolve(error ? '' : parseAccessibleText(stdout));
+    execFile(command, args, { timeout: READ_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024, windowsHide: true }, (_error, stdout) => {
+      // A reader that times out or overflows its buffer may still have printed text. That text is kept, since the error
+      // would discard all of it. The length cap in parseAccessibleText bounds it.
+      resolve(parseAccessibleText(stdout));
     });
   });
 }

@@ -1,4 +1,5 @@
-import type { Pipe } from '@companyos/twin-core';
+import type { Pipe, PipeOutputSummaryView } from '@companyos/twin-core';
+import { formatWhen, plural } from './format.js';
 
 /**
  * The limits and form rules of the Pipes section. The renderer cannot import the engine's values, so the limits are a copy
@@ -33,7 +34,7 @@ export const PIPE_SOURCES: ReadonlyArray<{ value: '' | 'screen' | 'audio'; label
 
 export const PIPE_ACTION_CHOICES: ReadonlyArray<{ value: 'notify' | 'write'; label: string }> = [
   { value: 'notify', label: 'Notify me of the count' },
-  { value: 'write', label: 'Write a Markdown file' },
+  { value: 'write', label: 'Keep the newest matches, encrypted' },
 ];
 
 /** The fields of the add form, as the person typed them. */
@@ -74,7 +75,7 @@ export function pipeFormProblem(form: PipeForm, existing: number): string | unde
   return undefined;
 }
 
-/** The saved pipe for a form that passed pipeFormProblem. The id is a new random id, which is also the file name. */
+/** The saved pipe for a form that passed pipeFormProblem. The id is a new random id. */
 export function pipeFromForm(form: PipeForm, id: string): Pipe {
   const app = form.app.trim();
   return {
@@ -95,6 +96,16 @@ export function pipeSummary(pipe: Pipe): string {
   const source = pipe.kind === 'screen' ? 'screen text' : pipe.kind === 'audio' ? 'microphone text' : 'screen and microphone text';
   const interval = PIPE_INTERVALS.find(choice => choice.minutes === pipe.intervalMinutes)?.label ?? `every ${pipe.intervalMinutes} minutes`;
   const app = pipe.app === undefined ? '' : ` · ${pipe.app}`;
-  const action = pipe.action === 'write' ? 'writes a file' : 'notifies';
+  const action = pipe.action === 'write' ? 'keeps matches' : 'notifies';
   return `${search} · ${source}${app} · ${interval.toLowerCase()} · ${action}`;
+}
+
+/**
+ * What a pipe keeps, in one line for its Settings row: when its newest kept run was read and how many matches it kept. A notify
+ * pipe keeps nothing, and a write pipe with no kept run has not run yet. Holds no text.
+ */
+export function pipeKeptLine(pipe: Pipe, summary: PipeOutputSummaryView | undefined, now: number = Date.now()): string {
+  if (pipe.action !== 'write') return 'Shows a notice only. Nothing is kept.';
+  if (summary === undefined) return 'Not run yet. Nothing is kept.';
+  return `Last run ${formatWhen(summary.ranAt, now)} · ${plural(summary.count, 'match', 'matches')} kept, encrypted.`;
 }

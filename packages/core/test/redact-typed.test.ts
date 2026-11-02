@@ -7,6 +7,8 @@ describe('redactTypedText: card-like numbers', () => {
     ['4111-1111-1111-1111', '[card number]'],
     ['4111111111111111', '[card number]'],
     ['378282246310005', '[card number]'],
+    ['4111  1111  1111  1111', '[card number]'],
+    ['4111--1111--1111--1111', '[card number]'],
   ])('replaces the card-like number %s', (card, placeholder) => {
     expect(redactTypedText(card)).toBe(placeholder);
   });

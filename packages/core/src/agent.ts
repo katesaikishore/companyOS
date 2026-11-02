@@ -31,7 +31,16 @@ import {
 } from './autonomy';
 import { runAutomation, type Executor, type RunMode, type RunRequest, type RunResult } from './runner';
 import { segment, type Segment } from './segment';
-import { EncryptedStore } from './store';
+import { EncryptedStore, type CaptureRecord } from './store';
+import { PIPE_ID, PipeOutputSchema, type PipeOutput } from './pipes';
+import {
+  CONNECTOR_KINDS,
+  CONNECTOR_LOCATION_MAX,
+  CONNECTOR_TEXT_MAX,
+  CONNECTOR_TITLE_MAX,
+  connectorSourceId,
+  type ConnectorItem,
+} from './connectors/types';
 import { SPEAKER_EMBEDDING_DIM } from './models/speaker';
 import { bestProfile, isSessionSpeakerLabel, isSpeakerName, SessionSpeakers, SPEAKER_NAME_MAX_CHARS, unitVector, type SpeakerProfile } from './speaker/match';
 import { dayKeyOf, decisionFits, parseTaskDecision, TaskDecisionSchema, tasksForDay, type TaskDecision } from './tasks';
@@ -39,6 +48,7 @@ import type { InstalledModel, NetworkEntry } from './models/types';
 import {
   CAPTURE_KINDS,
   DEFAULT_CONFIG,
+  MAX_PIPES,
   TwinConfigSchema,
   WINDOW_CLASSES,
   mergeConfigPatch,
@@ -72,6 +82,40 @@ const MAX_TIME_MS = 8_640_000_000_000_000;
 const MEDIA_ID = /^[0-9a-f]{32}$/;
 const INVALID_CAPTURE = 'Invalid capture: it has a field or value the twin does not accept.';
 const INVALID_SEARCH = 'Invalid search: it has a field or value the twin does not accept.';
+const INVALID_PIPE_OUTPUT = 'Invalid pipe output: it has a field or value the twin does not accept.';
+const PipeIdSchema = z.string().regex(PIPE_ID);
+const INVALID_CONNECTOR_IMPORT = 'Invalid connector import: it has a field or value the twin does not accept.';
+const UNKNOWN_CONNECTOR_SOURCE = 'Unknown connector source: add the source in settings before importing into it.';
+const INVALID_CONNECTOR_SOURCE = 'Invalid connector source: the id is not allowed.';
+/** Most items one import call may pass. A larger import is split by the caller. */
+const MAX_CONNECTOR_IMPORT = 10_000;
+/** The source a call names. Source ids are 16 to 64 characters, and the saved list decides which ids exist. */
+const ConnectorSourceKeySchema = z.string().min(1).max(64);
+/** One parsed item, as the connector parsers build it. Strict, so a field a parser did not produce is refused. */
+const ConnectorItemSchema = z
+  .object({
+    source: z.enum(CONNECTOR_KINDS),
+    sourceId: z.string().min(1).max(128),
+    ts: z.number().min(-MAX_TIME_MS).max(MAX_TIME_MS),
+    title: z.string().min(1).max(CONNECTOR_TITLE_MAX),
+    text: z.string().max(CONNECTOR_TEXT_MAX),
+    location: z.string().max(CONNECTOR_LOCATION_MAX).optional(),
+  })
+  .strict();
+const ConnectorImportSchema = z
+  .object({
+    sourceKey: ConnectorSourceKeySchema,
+    items: z.array(ConnectorItemSchema).max(MAX_CONNECTOR_IMPORT),
+  })
+  .strict();
+
+/**
+ * The record id of an imported item: the same source and item always give the same id, so importing it again replaces the
+ * stored copy. The id is a hash, so it names no item.
+ */
+function connectorRecordId(sourceKey: string, sourceId: string): string {
+  return connectorSourceId('connector', sourceKey, sourceId);
+}
 
 const TimeSchema = z.number().int().nonnegative().max(MAX_TIME_MS);
 /** Strict, so a window title or any other extra field is refused rather than stored. */
@@ -262,22 +306,34 @@ export class TwinAgent {
   }
 
   get configuration(): TwinConfig {
-    return { ...this.config, excludedApps: [...this.config.excludedApps], installedModels: [...this.config.installedModels] };
+    return {
+      ...this.config,
+      excludedApps: [...this.config.excludedApps],
+      installedModels: [...this.config.installedModels],
+      connectors: this.config.connectors.map(source => ({ ...source })),
+    };
   }
 
   /** Merges a settings patch into the saved config and checks the result as a whole, so a patch resets nothing it leaves out. */
   updateConfig(patch: Partial<TwinConfig>): TwinConfig {
     const parsed = mergeConfigPatch(this.config, patch);
     const excludedChanged = JSON.stringify(parsed.excludedApps) !== JSON.stringify(this.config.excludedApps);
+    const windowKindsChanged = JSON.stringify(parsed.excludedWindowClasses) !== JSON.stringify(this.config.excludedWindowClasses);
     // The dismissed signatures that name an excluded app go with its events, from the saved config as well.
     const next = excludedChanged
       ? { ...parsed, dismissedRoutineSignatures: withoutExcludedApps(parsed.dismissedRoutineSignatures, parsed.excludedApps) }
       : parsed;
     if (this.config.automationsEnabled && !next.automationsEnabled) this.stopGeneration++;
     if (this.config.allowUnattended && !next.allowUnattended) this.unattendedGeneration++;
+    // A source the person removed takes its imported items with it, so no item is left without a source in the list.
+    const kept = new Set(next.connectors.map(source => source.id));
+    for (const source of this.config.connectors) if (!kept.has(source.id)) this.store.deleteConnectorSource(source.id);
     this.config = next;
     this.store.replaceAll('settings', [next]);
+    // A pipe that is off, removed or not a write pipe keeps no run, so its kept matches go with the change, not at a later check.
+    this.store.prunePipeOutputs(next.pipes.filter(pipe => pipe.enabled && pipe.action === 'write').map(pipe => pipe.id));
     if (excludedChanged) this.purgeExcluded();
+    if (windowKindsChanged) this.purgeExcludedWindowKinds();
     return this.configuration;
   }
 
@@ -287,6 +343,16 @@ export class TwinAgent {
     const kept = all.filter(event => !event.app || !isExcludedApp(event.app, this.config.excludedApps));
     if (kept.length !== all.length) this.store.replaceAll('events', kept);
     this.purgeExcludedCapture();
+    // Kept pipe matches may hold text from an app that is now excluded, so every kept run goes, as the files did.
+    this.store.deletePipeOutputs();
+  }
+
+  /** Text read from a kind of window that is now excluded goes with its images, as an excluded app's does. */
+  private purgeExcludedWindowKinds(): void {
+    const { mediaIds } = this.store.deleteCaptureForWindowClasses(this.config.excludedWindowClasses);
+    if (mediaIds.length > 0) this.deleteMedia?.(mediaIds);
+    // Kept pipe matches may hold text from a kind of window that is now excluded, so every kept run goes.
+    this.store.deletePipeOutputs();
   }
 
   /**
@@ -445,12 +511,91 @@ export class TwinAgent {
   }
 
   /**
-   * Deletes every stored screen, microphone and typed-text item, with its text. Returns the image ids, so the caller deletes those
-   * files too. Speaker profiles are not items: they stay until forgetSpeakers.
+   * Deletes every stored screen, microphone and typed-text item, with its text, and every write pipe's kept matches. Returns the
+   * image ids, so the caller deletes those files too. Speaker profiles are not items: they stay until forgetSpeakers. Session
+   * speakers are cleared, since their voices came from the audio just deleted, so none of them can be named into a profile.
+   * Imported connector items stay as well, because the person chose to import them: removeConnectorItems or a wipe removes them.
    */
   deleteAllCapture(): string[] {
     this.sessionItems.clear();
+    this.sessionSpeakers.clear();
     return this.store.deleteAllCapture().mediaIds;
+  }
+
+  /**
+   * Keeps the newest run of a write pipe's matches, encrypted in the store, in place of the run kept before it. Returns false, and
+   * keeps nothing, when the pipe is not saved, is off, or does not keep its matches: a pipe removed or turned off during a run keeps
+   * no run. The run is checked first, and a refusal names no text.
+   */
+  storePipeOutput(pipeId: string, output: PipeOutput): boolean {
+    const id = PipeIdSchema.safeParse(pipeId);
+    const parsed = PipeOutputSchema.safeParse(output);
+    if (!id.success || !parsed.success) throw new Error(INVALID_PIPE_OUTPUT);
+    const pipe = this.config.pipes.find(item => item.id === id.data);
+    if (!pipe || !pipe.enabled || pipe.action !== 'write') return false;
+    this.store.replacePipeOutput({ pipeId: id.data, ranAt: parsed.data.ranAt, items: parsed.data.items });
+    return true;
+  }
+
+  /**
+   * Deletes the kept matches of the given pipes, or of every pipe when no ids are given. Returns how many were deleted. Holds no text.
+   */
+  removePipeOutputs(pipeIds?: readonly string[]): number {
+    if (pipeIds === undefined) return this.store.deletePipeOutputs();
+    const parsed = z.array(PipeIdSchema).max(MAX_PIPES).safeParse(pipeIds);
+    if (!parsed.success) throw new Error(INVALID_PIPE_OUTPUT);
+    return this.store.deletePipeOutputs(parsed.data);
+  }
+
+  /** When a pipe's newest kept run was read, and how many matches it kept. Null when the pipe has no kept run. Holds no text. */
+  pipeOutputSummary(pipeId: string): { count: number; ranAt: number } | null {
+    const parsed = PipeIdSchema.safeParse(pipeId);
+    if (!parsed.success) throw new Error(INVALID_PIPE_OUTPUT);
+    return this.store.pipeOutputSummary(parsed.data);
+  }
+
+  /**
+   * Stores items imported from one connector source, indexed for search, with the same redaction as typed text. A token in an
+   * imported title or text is replaced before anything is stored. Importing an item again replaces its stored copy, so a
+   * re-import does not duplicate. The source must be in the saved list, so its items can always be removed with it. Returns how
+   * many items were stored. A refused import stores nothing and names no item.
+   */
+  ingestConnectorItems(sourceKey: string, items: readonly ConnectorItem[]): number {
+    const parsed = ConnectorImportSchema.safeParse({ sourceKey, items });
+    if (!parsed.success) throw new Error(INVALID_CONNECTOR_IMPORT);
+    const key = parsed.data.sourceKey;
+    if (!this.config.connectors.some(source => source.id === key)) throw new Error(UNKNOWN_CONNECTOR_SOURCE);
+    // Two items with one id in the same import: the later one is the copy that is kept.
+    const records = new Map<string, CaptureRecord>();
+    for (const item of parsed.data.items) {
+      const id = connectorRecordId(key, item.sourceId);
+      const ts = Math.floor(item.ts);
+      const title = redactTypedText(item.title);
+      const text = redactTypedText(item.text);
+      const location = item.location === undefined ? undefined : redactTypedText(item.location);
+      records.set(id, {
+        collection: 'connectorText',
+        kind: 'connector',
+        id,
+        ts,
+        app: null,
+        text: text === '' ? title : `${title}\n${text}`,
+        body: location === undefined ? { ts, source: item.source, sourceKey: key } : { ts, source: item.source, sourceKey: key, location },
+      });
+    }
+    return this.store.storeConnectorItems([...records.values()]);
+  }
+
+  /** Deletes every item imported from one source, with its text and search index rows. Returns how many were deleted. */
+  removeConnectorItems(sourceKey: string): number {
+    const parsed = ConnectorSourceKeySchema.safeParse(sourceKey);
+    if (!parsed.success) throw new Error(INVALID_CONNECTOR_SOURCE);
+    return this.store.deleteConnectorSource(parsed.data);
+  }
+
+  /** How many imported connector items are stored, across every source. Holds no text. */
+  connectorCount(): number {
+    return this.store.connectorSummary().count;
   }
 
   /**
@@ -574,6 +719,16 @@ export class TwinAgent {
       keystrokeCount,
       oldest: new Date(first).toISOString(),
       newest: new Date(last).toISOString(),
+    };
+  }
+
+  /** How many imported connector items are stored, and the first and last of their times. Holds no text, so the export can show it. */
+  private connectorCapture(): { count: number; oldest: string | null; newest: string | null } {
+    const { count, oldest, newest } = this.store.connectorSummary();
+    return {
+      count,
+      oldest: oldest === null ? null : new Date(oldest).toISOString(),
+      newest: newest === null ? null : new Date(newest).toISOString(),
     };
   }
 
@@ -1024,8 +1179,8 @@ export class TwinAgent {
   }
 
   /**
-   * Drops events, handoff records, task decisions, dismissed signatures and captured text past the retention window. A
-   * signature goes once the events no longer hold the sites or unknown apps it names. Returns how many records were removed.
+   * Drops events, handoff records, task decisions, dismissed signatures, captured text and kept pipe runs past the retention window.
+   * A signature goes once the events no longer hold the sites or unknown apps it names. Returns how many records were removed.
    */
   prune(): number {
     return this.pruneWithMedia().removed;
@@ -1042,6 +1197,8 @@ export class TwinAgent {
     const kept = all.filter(event => event.ts >= cutoff);
     if (kept.length !== all.length) this.store.replaceAll('events', kept);
     const capture = this.store.pruneCapture(cutoff);
+    // A kept pipe run is copied text, so each match in it goes once it is past the same window as the text it came from.
+    const pipeRuns = this.store.prunePipeOutputsBefore(cutoff);
     return {
       removed:
         all.length -
@@ -1049,7 +1206,8 @@ export class TwinAgent {
         this.pruneHandoffs(cutoff) +
         this.pruneTaskDecisions(cutoff) +
         this.pruneSignatures(kept) +
-        capture.removed,
+        capture.removed +
+        pipeRuns,
       mediaIds: capture.mediaIds,
     };
   }
@@ -1068,6 +1226,12 @@ export class TwinAgent {
       config: {
         ...this.configuration,
         pipes: this.config.pipes.map(pipe => ({ ...pipe, name: TYPED_NAME_NOT_EXPORTED, query: pipe.query === '' ? '' : TYPED_NAME_NOT_EXPORTED })),
+        // A source's label and path are chosen by the person, so the plain-text export replaces both, as it does automation names.
+        connectors: this.config.connectors.map(({ path, ...source }) => ({
+          ...source,
+          label: TYPED_NAME_NOT_EXPORTED,
+          ...(path === undefined ? {} : { path: TYPED_NAME_NOT_EXPORTED }),
+        })),
       },
       events: this.store.readAll<TwinEvent>('events'),
       automations: this.readAutomations().map(automation =>
@@ -1080,6 +1244,8 @@ export class TwinAgent {
         decision.kind === 'rename' && decision.name !== '' ? { ...decision, name: TYPED_NAME_NOT_EXPORTED } : decision,
       ),
       screenCapture: this.captureSummary(),
+      // Imported items: how many, and the first and last of their times. Their text, titles and locations are not exported.
+      connectorCapture: this.connectorCapture(),
       // How many voices were named. The names and the voice vectors are not exported.
       speakers: { profiles: this.speakers.length },
     };

@@ -16,6 +16,7 @@ import {
   PIPE_SOURCES,
   pipeFormProblem,
   pipeFromForm,
+  pipeKeptLine,
   pipeSummary,
   type PipeForm,
 } from '../src/renderer/pipes-model';
@@ -135,7 +136,24 @@ describe('pipeFromForm and pipeSummary', () => {
       '"budget" · screen text · Slack · every hour · notifies',
     );
     expect(pipeSummary(pipeFromForm({ ...form, query: '', action: 'write', intervalMinutes: 1440 }, ID))).toBe(
-      'any text · screen and microphone text · once a day · writes a file',
+      'any text · screen and microphone text · once a day · keeps matches',
     );
+  });
+
+  it('says what a pipe keeps, with the time and count of its newest run, and never any text', () => {
+    const notifyPipe = pipeFromForm({ ...form, action: 'notify' }, ID);
+    const writePipe = pipeFromForm({ ...form, action: 'write' }, ID);
+    const now = Date.UTC(2026, 10, 2, 12, 0);
+    expect(pipeKeptLine(notifyPipe, { count: 3, ranAt: now })).toBe('Shows a notice only. Nothing is kept.');
+    expect(pipeKeptLine(writePipe, undefined, now)).toBe('Not run yet. Nothing is kept.');
+    const line = pipeKeptLine(writePipe, { count: 1, ranAt: now }, now);
+    expect(line).toMatch(/^Last run Today \d{2}:\d{2} · 1 match kept, encrypted\.$/);
+    expect(pipeKeptLine(writePipe, { count: 0, ranAt: now }, now)).toMatch(/· 0 matches kept, encrypted\.$/);
+    expect(pipeKeptLine(writePipe, { count: 200, ranAt: now }, now)).toMatch(/· 200 matches kept, encrypted\.$/);
+  });
+
+  it('offers the write action as keeping the newest matches, encrypted, after notify', () => {
+    expect(PIPE_ACTION_CHOICES.map(choice => choice.value)).toEqual(['notify', 'write']);
+    expect(PIPE_ACTION_CHOICES.find(choice => choice.value === 'write')?.label).toBe('Keep the newest matches, encrypted');
   });
 });

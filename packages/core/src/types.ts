@@ -78,8 +78,11 @@ export const MAX_DECLINE_STREAK = 32;
 /** The longest dismissed-routine signature kept. A longer one is not stored, so its routine is hidden by id only. */
 export const MAX_SIGNATURE_CHARS = 2048;
 
-/** The kinds of captured item: text read from the screen, text from the microphone, and text the person typed. */
-export const CAPTURE_KINDS = ['screen', 'audio', 'keystroke'] as const;
+/**
+ * The kinds of captured item: text read from the screen, text from the microphone, text the person typed, and text from an
+ * imported source. A connector item is one the person chose to import, so it has its own deletion rules. See connectors/types.ts.
+ */
+export const CAPTURE_KINDS = ['screen', 'audio', 'keystroke', 'connector'] as const;
 export type CaptureKind = (typeof CAPTURE_KINDS)[number];
 
 /** Most pipes one config holds. */
@@ -88,20 +91,19 @@ export const PIPE_NAME_MAX = 60;
 export const PIPE_QUERY_MAX = 200;
 export const PIPE_INTERVAL_MIN_MINUTES = 15;
 export const PIPE_INTERVAL_MAX_MINUTES = 1440;
-/** What a pipe does with its matches. 'notify' shows a count and app names. 'write' saves the text to a file. */
+/** What a pipe does with its matches. 'notify' shows a count and app names. 'write' keeps the newest run's matches, encrypted in the store. */
 export const PIPE_ACTIONS = ['notify', 'write'] as const;
 export type PipeAction = (typeof PIPE_ACTIONS)[number];
 /** The text a pipe may search. Typed text is not one of them, so a pipe never reads what the person typed. */
 export const PIPE_KINDS = ['screen', 'audio'] as const;
 export type PipeKind = (typeof PIPE_KINDS)[number];
-/** No control characters, so a name or search cannot break a line of the Markdown file it may be written to. */
+/** No control characters, so a name or search cannot break a line of a log or a list. */
 const NO_CONTROL_CHARACTERS = /^[^\p{Cc}]*$/u;
 const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u;
 
 /**
  * A pipe: a saved search that runs on a schedule and does one local thing with the result. The strict schema refuses any
- * other field, so a pipe cannot carry code, a command or a destination. The id is a file name, so it is limited to letters,
- * digits and dashes.
+ * other field, so a pipe cannot carry code, a command or a destination. The id is limited to letters, digits and dashes.
  */
 export const PipeSchema = z
   .object({
@@ -132,6 +134,47 @@ export const PipesSchema = z
     for (const pipe of pipes) {
       if (ids.has(pipe.id)) context.addIssue({ code: 'custom', message: 'Each pipe needs its own id.' });
       ids.add(pipe.id);
+    }
+  });
+
+/** The kinds of imported source. The first four read a file or folder on this device. The last two read a cloud account, read-only. */
+export const CONNECTOR_SOURCE_KINDS = ['folder', 'git', 'calendar', 'mail', 'google-calendar', 'github'] as const;
+export type ConnectorSourceKind = (typeof CONNECTOR_SOURCE_KINDS)[number];
+const LOCAL_CONNECTOR_SOURCE_KINDS: readonly ConnectorSourceKind[] = ['folder', 'git', 'calendar', 'mail'];
+/** Most imported sources one config holds. */
+export const MAX_CONNECTORS = 20;
+export const CONNECTOR_LABEL_MAX = 60;
+/** A local file or folder path. Only a local source has one. */
+export const CONNECTOR_PATH_MAX = 1000;
+
+/**
+ * An imported source the person added. Its id is random, so the items it imported are found and removed by that id. The strict
+ * schema refuses any other field, so a source cannot carry a token, a command or a destination.
+ */
+export const ConnectorSourceSchema = z
+  .object({
+    id: z.string().min(16).max(64),
+    kind: z.enum(CONNECTOR_SOURCE_KINDS),
+    label: z.string().trim().min(1).max(CONNECTOR_LABEL_MAX).regex(NO_CONTROL_CHARACTERS),
+    path: z.string().min(1).max(CONNECTOR_PATH_MAX).regex(NO_CONTROL_CHARACTERS).optional(),
+    createdAt: z.number().int().nonnegative(),
+    lastImportedAt: z.number().int().nonnegative().optional(),
+  })
+  .strict()
+  .refine(source => source.path === undefined || LOCAL_CONNECTOR_SOURCE_KINDS.includes(source.kind), {
+    message: 'Only a local source has a path.',
+  });
+export type ConnectorSource = z.infer<typeof ConnectorSourceSchema>;
+
+/** The imported sources, checked as one list: at most MAX_CONNECTORS, and each id once. */
+export const ConnectorSourcesSchema = z
+  .array(ConnectorSourceSchema)
+  .max(MAX_CONNECTORS)
+  .superRefine((sources, context) => {
+    const ids = new Set<string>();
+    for (const source of sources) {
+      if (ids.has(source.id)) context.addIssue({ code: 'custom', message: 'Each source needs its own id.' });
+      ids.add(source.id);
     }
   });
 
@@ -187,6 +230,8 @@ export const TwinConfigSchema = z
     capturePaused: z.boolean().default(false),
     /** Saved pipes. Empty until the person adds one. Each runs on its own schedule. See pipes.ts. */
     pipes: PipesSchema.default([]),
+    /** Imported sources the person added. Empty until they add one. The desktop app owns the list. Items are in the store. See connectors/types.ts. */
+    connectors: ConnectorSourcesSchema.default([]),
   })
   .strict();
 export type TwinConfig = z.infer<typeof TwinConfigSchema>;
@@ -241,4 +286,6 @@ export const DEFAULT_CONFIG: TwinConfig = {
   frameRetentionDays: 7,
   capturePaused: false,
   pipes: [],
+  // Imported sources stay off until the person adds one.
+  connectors: [],
 };
