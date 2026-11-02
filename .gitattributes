@@ -1,0 +1,2 @@
+# Keep JavaScript modules LF in every checkout. A CRLF checkout on Windows breaks a shebang line in Vitest.
+*.mjs text eol=lf
