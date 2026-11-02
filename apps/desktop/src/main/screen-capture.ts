@@ -70,6 +70,8 @@ export interface ScreenCaptureDeps {
   now: () => number;
   /** Whether a secure field may hold focus. Rejecting counts as unknown, so the frame is skipped. */
   secureInput: () => Promise<boolean | 'unknown'>;
+  /** The text the focused window exposes to accessibility tools. Read with the OCR text, not instead of it. Empty when none. */
+  accessibility?: () => Promise<string>;
 }
 
 interface Job {
@@ -268,7 +270,10 @@ export class ScreenCaptureService {
     const started = this.deps.now();
     let text: string;
     try {
-      text = normaliseOcr(await this.deps.ocr.recognise(job.png));
+      const ocrText = await this.deps.ocr.recognise(job.png);
+      // Read before the checks below, so a secure field that takes focus during this read is caught by them.
+      const accessible = this.deps.accessibility ? await settleWithin(this.deps.accessibility(), CHECK_TIMEOUT_MS, '') : '';
+      text = normaliseOcr([accessible, ocrText].join('\n'));
     } catch {
       // A dropped frame must not stand as the reference for the next one, or an unchanged screen is never read again.
       this.dedupeFor(job.display).reset();

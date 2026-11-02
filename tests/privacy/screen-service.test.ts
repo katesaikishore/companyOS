@@ -120,6 +120,8 @@ interface Fixture {
   failSecureProbe(): void;
   /** Holds OCR until the returned release is called. The read in progress is the one held. */
   holdOcr(): () => void;
+  /** Sets what the accessibility reader does on each read. It is called while the frame is being read. */
+  setAccessibility(reader: () => Promise<string>): void;
   /** Holds every image write until the returned release is called. */
   holdWrites(): () => void;
   /** Shows the service one frame with the given text, and waits for the frame to be taken or dropped, not for its read. */
@@ -156,6 +158,7 @@ function open(): Fixture {
   let context: ScreenContext = { ...OPEN };
   let secure: boolean | 'unknown' = false;
   let secureFails = false;
+  let accessibility: () => Promise<string> = async () => '';
   let writeGate: Promise<void> | undefined;
   let writeStarts = 0;
   let frames = 0;
@@ -178,6 +181,7 @@ function open(): Fixture {
       if (secureFails) throw new Error('The probe failed.');
       return secure;
     },
+    accessibility: () => accessibility(),
   });
   service.setContext(context);
   service.start(60_000);
@@ -199,6 +203,9 @@ function open(): Fixture {
     },
     failSecureProbe() {
       secureFails = true;
+    },
+    setAccessibility(reader) {
+      accessibility = reader;
     },
     holdOcr() {
       let release: () => void = () => undefined;
@@ -383,6 +390,27 @@ describe('ScreenCaptureService, against planted canaries', () => {
     expect(fx.writeStarts).toBe(0);
     expect(fx.agent.captureSummary().screenCount).toBe(0);
     expect(fx.mediaFiles()).toBe(0);
+    expect(findLeaks(fx.surfaces(), { probeError: CANARY_SERVICE.probeError })).toEqual([]);
+  });
+
+  it('stores the accessibility text together with the OCR text of the same frame', async () => {
+    fx.setAccessibility(async () => 'Quarterly figures from the accessibility tree');
+    await fx.shot('Visible ocr words');
+    await fx.idle();
+    const stored = fx.surfaces().find(surface => surface.name === 'store:decrypted:capture')?.text ?? '';
+    expect(stored).toContain('Quarterly figures from the accessibility tree');
+    expect(stored).toContain('Visible ocr words');
+  });
+
+  it('stores nothing when a password field takes focus while the accessibility text is read', async () => {
+    fx.setAccessibility(async () => {
+      fx.setSecure(true);
+      return `Accessible text ${CANARY_SERVICE.probeError}`;
+    });
+    await fx.shot('Visible ocr words');
+    await fx.idle();
+    expect(fx.agent.captureSummary().screenCount).toBe(0);
+    expect(fx.writeStarts).toBe(0);
     expect(findLeaks(fx.surfaces(), { probeError: CANARY_SERVICE.probeError })).toEqual([]);
   });
 

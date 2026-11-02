@@ -52,6 +52,7 @@ import { AudioCaptureService, WhisperTranscriber, microphoneGranted } from './au
 import { destroyStoredSecrets, loadOrCreateApiToken, loadOrCreateDataKey, rotateApiToken as replaceApiToken } from './keys';
 import { LOCAL_API_HOST, LOCAL_API_PORT, createLocalApi, type LocalApi } from './local-api';
 import { MediaStore } from './media-store';
+import { readAccessibleText } from './accessibility';
 import { electronFrameSource, forkOcrWorker, ScreenCaptureService, type Frame, type ScreenContext } from './screen-capture';
 import { secureInputState } from './secure-input';
 import { detectHardware } from './hardware';
@@ -198,6 +199,7 @@ export class TwinRuntime {
       sink: { ingestScreen: read => this.keepScreenRead(read) },
       now: () => Date.now(),
       secureInput: () => this.checkSecureInput(),
+      accessibility: () => readAccessibleText(),
     });
     // One speech process serves both sources, so the model is in memory once.
     const transcriber = new WhisperTranscriber({
