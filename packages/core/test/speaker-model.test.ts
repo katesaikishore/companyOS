@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { CATALOG } from '../src/models/catalog';
 import { assertBundleSpec, bundleDirectory, bundleTotalBytes } from '../src/models/bundle-download';
@@ -39,7 +40,8 @@ describe('speaker model catalogue entry', () => {
   it('is installed in its own folder, apart from the speech model', () => {
     const models = '/models';
     expect(speakerDirectory(models)).toBe(bundleDirectory(models, SPEAKER_BUNDLE));
-    expect(speakerModelPath(models)).toBe(`${speakerDirectory(models)}/${PINNED.file}`);
+    // Built with join, as the code is, so the separator is the platform's (a backslash on Windows).
+    expect(speakerModelPath(models)).toBe(join(speakerDirectory(models), PINNED.file));
     expect(SPEAKER_MODEL_ID).not.toBe(WHISPER_MODEL_ID);
     expect(CATALOG.some(model => model.id === SPEAKER_MODEL_ID)).toBe(false);
   });
