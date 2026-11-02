@@ -5,6 +5,7 @@ import { button, chip, exclusionEditor, toggleRow } from '../components/ui.js';
 import { formatBytes, plural } from '../format.js';
 import { captureChannelNote, layaState, layaStateLabel, modelState, modelStateLabel } from '../labels.js';
 import { TEXT_KEPT_DAYS } from '../recall-model.js';
+import { WINDOW_KIND_IDS, WINDOW_KIND_LABELS, type WindowKindId } from '../window-kinds.js';
 import { act, bridge, confirmDeleteAll, pending, saveConfig, setNotice, state } from '../store.js';
 import { forgetRecall } from './recall.js';
 import { openSetup } from './setup.js';
@@ -69,6 +70,7 @@ export function settingsView(status: TwinStatus): HTMLElement {
         capturePanel(
           config.watchBrowsers,
           config.excludedApps,
+          config.excludedWindowClasses,
           config.idleGapMs,
           config.screenCaptureEnabled,
           config.audioCaptureEnabled && config.installedModels.some(model => model.id === SPEECH_MODEL_ID),
@@ -212,6 +214,7 @@ function appearancePanel(current: Theme): HTMLElement {
 function capturePanel(
   watchBrowsers: boolean,
   excluded: readonly string[],
+  excludedKinds: readonly string[],
   idleGapMs: number,
   screenOn: boolean,
   micOn: boolean,
@@ -244,6 +247,25 @@ function capturePanel(
       ),
       exclusionEditor('exclusions:settings', excluded, 'settings-exclusions', next =>
         void saveConfig('exclusions:settings', { excludedApps: next }),
+      ),
+    ),
+    block(
+      textBlock(
+        'Window kinds',
+        'Windows of the kinds you tick are never read, whatever app they belong to. The kind comes from the app, never from the window title. Browsers are never read in this version.',
+      ),
+      ...WINDOW_KIND_IDS.map(kind =>
+        toggleRow({
+          testid: `settings-kind-${kind}`,
+          label: WINDOW_KIND_LABELS[kind],
+          checked: excludedKinds.includes(kind),
+          onChange: checked => {
+            const next: WindowKindId[] = WINDOW_KIND_IDS.filter(
+              other => (other === kind ? checked : excludedKinds.includes(other)),
+            );
+            void saveConfig(`kinds:${kind}`, { excludedWindowClasses: next });
+          },
+        }),
       ),
     ),
     row(

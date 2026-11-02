@@ -746,6 +746,7 @@ export class TwinRuntime {
       app: front === undefined ? null : normalizeAppName(front),
       appExcluded: front === undefined || isOwnApp(front) || isExcludedApp(front, config.excludedApps),
       windowClass: windowClassOf(front),
+      windowExcluded: config.excludedWindowClasses.includes(windowClassOf(front)),
       permissionGranted: screenPermissionGranted(),
     };
   }

@@ -85,6 +85,8 @@ export type CaptureKind = (typeof CAPTURE_KINDS)[number];
 export const TwinConfigSchema = z
   .object({
     excludedApps: z.array(z.string().min(1).max(100)).max(200),
+    /** Kinds of window (by class, never by title) that are not read, whatever app they belong to. Empty by default. */
+    excludedWindowClasses: z.array(z.enum(WINDOW_CLASSES)).max(WINDOW_CLASSES.length).default([]),
     maxAutonomyLevel: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
     allowUnattended: z.boolean(),
     watchBrowsers: z.boolean(),
@@ -141,6 +143,7 @@ export function mergeConfigPatch(current: TwinConfig, patch: unknown): TwinConfi
 }
 
 export const DEFAULT_CONFIG: TwinConfig = {
+  excludedWindowClasses: [],
   excludedApps: [
     '1password',
     'bitwarden',

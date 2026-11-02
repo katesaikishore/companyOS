@@ -14,6 +14,8 @@ export interface ScreenState {
   idle: boolean;
   /** The focused app is on the exclusion list. */
   appExcluded: boolean;
+  /** The focused window's class is on the window-class exclusion list. Undefined counts as not excluded. */
+  windowExcluded?: boolean;
   /** The class of the focused window. A browser window is never captured. */
   windowClass: WindowClass;
   /** Whether a password or other secure field may hold focus. 'unknown' when the operating system cannot say. */
@@ -44,6 +46,7 @@ export function screenDecision(state: ScreenState): CaptureDecision {
   if (state.idle) return skip('You are away, so nothing is read.');
   if (!state.permissionGranted) return skip('Screen recording permission is not granted.');
   if (state.appExcluded) return skip('This app is excluded from capture.');
+  if (state.windowExcluded) return skip('This kind of window is excluded from capture.');
   if (state.windowClass === 'browser') return skip('Browser windows are not read, because private windows cannot be told apart.');
   if (state.secureInput === 'unknown') return skip('Secure input cannot be checked, so the read waits.');
   if (state.secureInput) return skip('A password field may have focus, so the read is skipped.');

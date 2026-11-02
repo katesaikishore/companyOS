@@ -292,6 +292,7 @@ export class TwinAgent {
     const app = parsed.data.app === null ? null : normalizeAppName(parsed.data.app) || null;
     if (!this.config.screenCaptureEnabled) return false;
     if (windowClass === 'browser' || (app !== null && isBrowserApp(app))) return false;
+    if (this.config.excludedWindowClasses.includes(windowClass)) return false;
     if (app !== null && isExcludedApp(app, this.config.excludedApps)) return false;
     const text = normaliseOcr(parsed.data.text);
     if (text === '' && mediaId === null) return false;
