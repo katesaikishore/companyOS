@@ -82,7 +82,9 @@ function text(value: unknown, pattern: RegExp, message: string): string {
   return value;
 }
 
-const automationId = (value: unknown) => text(value, /^auto_[a-f0-9]{12}$/, 'Invalid automation id.');
+/** An accepted routine's id (auto_ and 12 hex) or a hand-made menu automation's id (menu- and 32 hex). */
+const automationId = (value: unknown) =>
+  text(value, /^(?:auto_[a-f0-9]{12}|menu-[a-f0-9]{32})$/, 'Invalid automation id.');
 const routineId = (value: unknown) => text(value, /^[a-f0-9]{12}$/, 'Invalid routine id.');
 const modelId = (value: unknown) => text(value, /^[a-z0-9.-]{1,80}$/, 'Invalid model id.');
 const mediaId = (value: unknown) => text(value, /^[0-9a-f]{32}$/, 'Invalid image id.');
@@ -417,7 +419,9 @@ function createMainWindow(): void {
   // Linux window managers can still maximise a window that reports it cannot be, so any maximise is undone.
   mainWindow.on('maximize', () => mainWindow?.unmaximize());
   mainWindow.once('ready-to-show', () => mainWindow?.show());
-  mainWindow.webContents.setVisualZoomLevelLimits(1, 1);
+  // The call returns a promise that rejects if the page's frame goes away before it applies. Visual zoom is off by default,
+  // so a rejection changes nothing, and it must not become an unhandled rejection that shows an error box at startup.
+  mainWindow.webContents.setVisualZoomLevelLimits(1, 1).catch(() => undefined);
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   mainWindow.webContents.on('will-navigate', event => event.preventDefault());
   mainWindow.on('close', event => {
@@ -426,7 +430,8 @@ function createMainWindow(): void {
       mainWindow?.hide();
     }
   });
-  void mainWindow.loadURL(`${APP_ORIGIN}/index.html`);
+  // A first load cut short, for example by a quick quit, is not an error worth an error box.
+  mainWindow.loadURL(`${APP_ORIGIN}/index.html`).catch(() => undefined);
 }
 
 function createTrayWindow(): void {
@@ -451,7 +456,7 @@ function createTrayWindow(): void {
   // The tray page holds the same bridge as the main window, so it gets the same guards: no new windows, no navigation.
   trayWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   trayWindow.webContents.on('will-navigate', event => event.preventDefault());
-  void trayWindow.loadURL(`${APP_ORIGIN}/tray.html`);
+  trayWindow.loadURL(`${APP_ORIGIN}/tray.html`).catch(() => undefined);
 }
 
 function hideTray(): void {

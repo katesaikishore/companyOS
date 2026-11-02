@@ -72,6 +72,8 @@ export interface HandsRecord {
   exit: number | HandsFailure;
   durationMs: number;
   code?: string;
+  /** The agent id of the run's cursor, so lines from runs that overlap can be told apart. Never a name or a label. */
+  agent?: string;
 }
 
 export interface HandsOptions {
@@ -90,10 +92,12 @@ export interface HandsOptions {
   session?: AgentDesktopSession;
 }
 
-/** One automation's cursor in the shared session: its agent id, and the name drawn beside the cursor. */
+/** One automation's cursor in the shared session: its agent id, the name drawn beside it, and its colour. */
 export interface HandsCursor {
   agentId: string;
   label: string;
+  /** A hex colour for the cursor's body and ripple, so overlapping runs can be told apart on screen. */
+  colour: string;
 }
 
 const MESSAGES = {
@@ -224,9 +228,22 @@ const MENU_CLOSE_MS = 2_000;
 /** The longest menu path the program can choose for now: a menu bar item and one item in its menu. */
 export const SUPPORTED_MENU_DEPTH = 2;
 
+/** Cursor colours, far enough apart to tell runs apart at a glance. A design choice. */
+export const CURSOR_COLOURS = ['#E5484D', '#30A46C', '#0090FF', '#F76B15', '#8E4EC6', '#12A594'] as const;
+
+/** One colour for an agent id, the same on every run: a 32-bit FNV-1a hash of the id picks it. */
+function cursorColour(agentId: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < agentId.length; index++) {
+    hash ^= agentId.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return CURSOR_COLOURS[hash % CURSOR_COLOURS.length];
+}
+
 /**
  * The named cursor for one automation. The agent id comes from the automation's id, so it stays the same across runs and a
- * reused id reuses its cursor. The label is the automation's name, with control characters made spaces.
+ * reused id reuses its cursor and its colour. The label is the automation's name, with control characters made spaces.
  */
 export function cursorFor(automationId: string, name: string): HandsCursor {
   const agentId = automationId.replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 64) || 'automation';
@@ -237,7 +254,7 @@ export function cursorFor(automationId: string, name: string): HandsCursor {
     .trim()
     .replace(/^-+\s*/, '')
     .slice(0, CURSOR_LABEL_MAX);
-  return { agentId, label: label || 'companyOS' };
+  return { agentId, label: label || 'companyOS', colour: cursorColour(agentId) };
 }
 
 /**
@@ -251,6 +268,8 @@ export class AgentDesktopSession {
   private startedWith: string | undefined;
   /** Agent id and label pairs already drawn, so a renamed automation gets its new label. */
   private readonly styled = new Set<string>();
+  /** Counts dropped sessions, so a style call that finishes after a drop cannot mark the new session as styled. */
+  private generation = 0;
 
   constructor(private readonly options: () => HandsOptions) {}
 
@@ -271,13 +290,22 @@ export class AgentDesktopSession {
   }
 
   /**
-   * Drops the session, so the next menu step starts a new one. Called when a call made in the session fails with a session
-   * error, for example after the program was restarted and the old session is gone.
+   * Drops the session, so the next menu step starts a new one, and ends the dropped one so its cursors leave the screen.
+   * Called when a call made in the session reports that the session has ended, or when the program path changes.
    */
   forget(): void {
+    void this.drop();
+  }
+
+  /** Forgets the session at once, then ends it. Ending is best effort: a session that has already ended refuses quietly. */
+  private async drop(): Promise<void> {
+    const previous = this.started;
     this.started = undefined;
     this.startedWith = undefined;
     this.styled.clear();
+    this.generation++;
+    const id = await previous;
+    if (id !== undefined) await runCall(this.options(), ['session', 'end', id], false);
   }
 
   private async start(): Promise<string | undefined> {
@@ -289,29 +317,53 @@ export class AgentDesktopSession {
     return call.result.ok ? sessionIdOf(call.output) : undefined;
   }
 
-  /** Draws the automation's cursor with its name, once per agent id and name. Best effort: a failure keeps the default cursor. */
+  /**
+   * Draws the automation's cursor with its name and colour, once per agent id and name. Best effort: a failure keeps the
+   * default cursor.
+   */
   async style(sessionId: string, cursor: HandsCursor): Promise<void> {
     const key = `${cursor.agentId}\u0000${cursor.label}`;
-    if (this.styled.has(key) || !AGENT_ID.test(cursor.agentId)) return;
+    if (this.styled.has(key) || !AGENT_ID.test(cursor.agentId) || !CURSOR_COLOUR.test(cursor.colour)) return;
+    const generation = this.generation;
     const call = await runCall(
       this.options(),
-      ['cursor-overlay', 'enable', '--label', cursor.label, '--session', sessionId, '--agent-id', cursor.agentId],
+      [
+        'cursor-overlay',
+        'enable',
+        '--label',
+        cursor.label,
+        '--fill',
+        cursor.colour,
+        '--accent',
+        cursor.colour,
+        '--session',
+        sessionId,
+        '--agent-id',
+        cursor.agentId,
+      ],
       false,
     );
-    if (call.result.ok) this.styled.add(key);
+    if (call.result.ok && generation === this.generation) this.styled.add(key);
   }
 
   /** Ends the session, which stops every cursor in it. Called when the app stops. */
   async end(): Promise<void> {
-    const pending = this.started;
-    this.forget();
-    const id = await pending;
-    if (id !== undefined) await runCall(this.options(), ['session', 'end', id], false);
+    await this.drop();
   }
 }
 
-/** An error code that says the session is gone or unknown, so the session should be started again. */
-const SESSION_ERROR = /SESSION/;
+/** A cursor colour the program accepts: # and six hex digits. */
+const CURSOR_COLOUR = /^#[0-9A-Fa-f]{6}$/;
+
+/**
+ * True when a call's envelope says the session it named has ended, so the session should be started again. The program
+ * reports this as INVALID_ARGS with details.kind "session_ended" (seen on agent-desktop 1.0.2). An unknown session id is
+ * not reported as a session error.
+ */
+function sessionEnded(output: Buffer | undefined): boolean {
+  const envelope = parseEnvelope(output) as { ok?: unknown; error?: { details?: { kind?: unknown } } };
+  return envelope?.ok === false && envelope.error?.details?.kind === 'session_ended';
+}
 
 /**
  * Chooses one menu path in an application through the program: the menu bar item, then each submenu, then the item. Each
@@ -352,7 +404,7 @@ export async function chooseMenuWithAgentDesktop(options: HandsOptions, app: str
     const ref = found.result.ok ? menuItemRef(found.output, label) : undefined;
     if (ref === undefined) {
       const code = errorCodeOf(found.output);
-      if (code !== undefined && SESSION_ERROR.test(code)) options.session?.forget();
+      if (sessionEnded(found.output)) options.session?.forget();
       if (openMenus > 0) await closeMenu(options, app, scope, actor);
       recordStep(options, 'choose_menu', 'not_found', started, code);
       return refused('not_found', MESSAGES.menuItem);
@@ -361,7 +413,7 @@ export async function chooseMenuWithAgentDesktop(options: HandsOptions, app: str
     const delivery = deliveryOf(clicked.output);
     if (!clicked.result.ok) {
       const code = errorCodeOf(clicked.output);
-      if (code !== undefined && SESSION_ERROR.test(code)) options.session?.forget();
+      if (sessionEnded(clicked.output)) options.session?.forget();
       // After the last click the item may have run, and before it Escape is sent only to a menu known to be open.
       if (!last && openMenus > 0) await closeMenu(options, app, scope, actor);
       recordStep(options, 'choose_menu', clicked.exit, started, code);
@@ -518,7 +570,13 @@ interface CallResult {
 /** Writes one call that ended to the log, if there is one. The log is best effort, so a failing log cannot stall a call. */
 function recordStep(options: HandsOptions, step: HandsStep, exit: number | HandsFailure, started: number, code?: string): void {
   try {
-    options.record?.({ step, exit, durationMs: Date.now() - started, ...(code === undefined ? {} : { code }) });
+    options.record?.({
+      step,
+      exit,
+      durationMs: Date.now() - started,
+      ...(code === undefined ? {} : { code }),
+      ...(options.cursor ? { agent: options.cursor.agentId } : {}),
+    });
   } catch {
     // The log is best effort. A failing log must not leave the call unsettled.
   }
