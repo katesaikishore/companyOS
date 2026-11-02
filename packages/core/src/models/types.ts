@@ -86,7 +86,8 @@ export interface NetworkEntry {
    * 'connector' is a read from a cloud account the person connected (read-only). The entry holds the host and the path without
    * its query, the status and the byte count. Never a token.
    */
-  purpose: 'model_download' | 'update_check' | 'connector';
+  purpose: 'model_download' | 'update_check' | 'connector' | 'mail_sync' | 'sign_in';
+  /** `mail_sync` is a read of message metadata from Gmail. The ledger's copy must say what it sends before it is wired in. */
   /** Model downloads only. */
   modelId?: string;
   host: string;

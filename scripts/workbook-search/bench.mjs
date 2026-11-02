@@ -84,6 +84,7 @@ for (const task of tasks) {
   if (embedder) index = await addEmbeddings(index, embedder);
   const found = await searchRows(index, task.instruction, { limit: 10, embedder });
   scored++;
+  if (scored % 25 === 0) console.error(`${new Date().toISOString()} scored ${scored} of ${tasks.length}`);
   const type = task.instruction_type;
   byType[type] ??= { scored: 0, hit5: 0 };
   byType[type].scored++;
