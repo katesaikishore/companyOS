@@ -13,12 +13,14 @@ import {
   screen,
   session,
   shell,
+  desktopCapturer,
   Notification,
   Tray,
   type MenuItemConstructorOptions,
   type MessageBoxOptions,
   type SaveDialogOptions,
 } from 'electron';
+import { isSystemCaptureUrl } from './capture-source';
 import { writeFileSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -152,9 +154,27 @@ function installPermissionPolicy(): void {
   ses.setPermissionRequestHandler((webContents, permission, callback, details) => {
     const mediaTypes = 'mediaTypes' in details ? details.mediaTypes : undefined;
     const requestingUrl = 'requestingUrl' in details ? details.requestingUrl : undefined;
-    callback(permission === 'media' && isCaptureMicrophone(webContents.id, mediaTypes, requestingUrl));
+    callback(
+      (permission === 'media' && isCaptureMicrophone(webContents.id, mediaTypes, requestingUrl)) ||
+        (permission === 'display-capture' && isSystemCaptureUrl(webContents.getURL())),
+    );
+  });
+  // Display capture is granted to the system-sound page alone. It gets the sound through the loopback request below.
+  ses.setDisplayMediaRequestHandler((request, callback) => {
+    if (!isSystemCaptureUrl(request.frame?.url ?? '')) {
+      callback({});
+      return;
+    }
+    desktopCapturer
+      .getSources({ types: ['screen'] })
+      .then(sources => {
+        const [screen] = sources;
+        callback(screen ? { video: screen, audio: 'loopback' } : {});
+      })
+      .catch(() => callback({}));
   });
   ses.setPermissionCheckHandler((webContents, permission, _origin, details) => {
+    if (permission === 'display-capture') return isSystemCaptureUrl(webContents?.getURL() ?? '');
     const mediaTypes = details.mediaType === 'audio' ? ['audio'] : undefined;
     return permission === 'media' && isCaptureMicrophone(webContents?.id, mediaTypes, details.requestingUrl);
   });

@@ -143,6 +143,7 @@ export class TwinRuntime {
   /** Screen and microphone capture. Each starts only while its setting is on. */
   private readonly screen: ScreenCaptureService;
   private readonly audio: AudioCaptureService;
+  private readonly systemAudio: AudioCaptureService;
   /** The speech model state the microphone was last decided on. Undefined until the first decision. */
   private speechWasInstalled: boolean | undefined;
   /** The daily sweep of expired text and images. Cleared on stop, so a stopped app does not keep a timer. */
@@ -198,12 +199,16 @@ export class TwinRuntime {
       now: () => Date.now(),
       secureInput: () => this.checkSecureInput(),
     });
-    this.audio = new AudioCaptureService({
-      transcriber: new WhisperTranscriber({
-        workerPath: join(__dirname, 'transcribe-worker.js'),
-        modelsDir: join(options.userData, 'models'),
-      }),
+    // One speech process serves both sources, so the model is in memory once.
+    const transcriber = new WhisperTranscriber({
+      workerPath: join(__dirname, 'transcribe-worker.js'),
+      modelsDir: join(options.userData, 'models'),
+    });
+    this.audio = new AudioCaptureService({ transcriber, sink: { ingestAudio: segment => this.keepAudioSegment(segment) } });
+    this.systemAudio = new AudioCaptureService({
+      transcriber,
       sink: { ingestAudio: segment => this.keepAudioSegment(segment) },
+      source: 'system',
     });
     this.models = new ModelManager({
       modelsDir: join(options.userData, 'models'),
@@ -791,6 +796,7 @@ export class TwinRuntime {
     const config = this.agent.configuration;
     // Microphone text needs the speech model. Without it, audio is not kept or transcribed.
     this.audio.setContext({ enabled: config.audioCaptureEnabled && this.speechInstalled(), ...this.captureFlags() });
+    this.systemAudio.setContext({ enabled: config.systemAudioCaptureEnabled && this.speechInstalled(), ...this.captureFlags() });
     if (config.screenCaptureEnabled) {
       this.screen.setContext(this.screenContext());
       this.screen.start();
@@ -803,6 +809,7 @@ export class TwinRuntime {
   private startCapture(): void {
     clearInterval(this.captureTimer);
     this.audio.start();
+    this.systemAudio.start();
     this.captureTimer = setInterval(() => this.refreshCapture(), CAPTURE_SYNC_MS);
     this.captureTimer.unref?.();
     this.refreshCapture();
@@ -813,6 +820,7 @@ export class TwinRuntime {
     clearInterval(this.captureTimer);
     this.captureTimer = undefined;
     this.audio.stop();
+    this.systemAudio.stop();
     return this.screen.stop();
   }
 

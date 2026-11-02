@@ -85,13 +85,25 @@ function collect(session: Listening, block: Float32Array): void {
   window.captureBridge.sendSegment(speech.slice().buffer, Math.round((speech.length / SAMPLE_RATE) * 1000));
 }
 
+/** The microphone, or the sound the computer plays. The system stream has a video track the page does not use, so it is stopped at once. */
+async function acquire(): Promise<MediaStream> {
+  if (new URLSearchParams(location.search).get('source') !== 'system') {
+    return navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 }, video: false });
+  }
+  const display = await navigator.mediaDevices.getDisplayMedia({ audio: true, video: true });
+  for (const track of display.getVideoTracks()) track.stop();
+  const audio = display.getAudioTracks();
+  if (audio.length === 0) throw new Error('This system gives no sound to capture.');
+  return new MediaStream(audio);
+}
+
 async function start(): Promise<void> {
   if (listening) return;
   const current = ++generation;
   let stream: MediaStream | undefined;
   let context: AudioContext | undefined;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 }, video: false });
+    stream = await acquire();
     context = new AudioContext({ sampleRate: SAMPLE_RATE });
     await context.audioWorklet.addModule('./worklets/pcm-worklet.js');
     if (current !== generation) throw new Error('Cancelled.');

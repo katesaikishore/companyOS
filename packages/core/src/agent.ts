@@ -86,6 +86,7 @@ const AudioReadSchema = z
     ts: TimeSchema,
     durationMs: z.number().int().nonnegative().max(MAX_SEGMENT_MS),
     text: z.string().max(MAX_RAW_TEXT_CHARS),
+    source: z.enum(['microphone', 'system']).default('microphone'),
   })
   .strict();
 const CaptureSearchSchema = z
@@ -112,6 +113,8 @@ export interface ScreenRead {
 
 /** One microphone segment after transcription. A segment that carries any other field is refused. */
 export interface AudioRead {
+  /** Where the sound came from. Microphone when not given. */
+  source?: 'microphone' | 'system';
   ts: number;
   durationMs: number;
   text: string;
@@ -317,7 +320,8 @@ export class TwinAgent {
   ingestAudio(segment: AudioRead): boolean {
     const parsed = AudioReadSchema.safeParse(segment);
     if (!parsed.success) throw new Error(INVALID_CAPTURE);
-    if (!this.config.audioCaptureEnabled) return false;
+    const system = parsed.data.source === 'system';
+    if (system ? !this.config.systemAudioCaptureEnabled : !this.config.audioCaptureEnabled) return false;
     const text = normaliseTranscript(parsed.data.text);
     if (text === '') return false;
     const { ts, durationMs } = parsed.data;
@@ -328,7 +332,7 @@ export class TwinAgent {
       ts,
       app: null,
       text,
-      body: { ts, durationMs },
+      body: { ts, durationMs, source: parsed.data.source },
     });
     return true;
   }

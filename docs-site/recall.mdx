@@ -31,7 +31,7 @@ Nothing is read in these cases:
 - a password field may have focus, or the check for one cannot run
 - Screen Recording permission has not been granted
 
-Microphone text is read in 30-second parts, and a part that is almost silent is dropped. Nothing is heard while capture is paused, the screen is locked, or you are away. The microphone also picks up people nearby and on calls, so check the recording rules where you work first. System audio is not recorded.
+Microphone text is read in 30-second parts, and a part that is almost silent is dropped. Nothing is heard while capture is paused, the screen is locked, or you are away. The microphone also picks up people nearby and on calls, so check the recording rules where you work first. System audio is recorded only when you turn on **Record system audio**. It is the sound the computer plays, so it includes the other people on calls and any video. It is transcribed on this device and kept apart from microphone text by its source.
 
 Screen text is whatever OCR reads from the screen. OCR reads everything visible, including window titles, chat messages, and any password shown as plain text. Password managers are excluded by default. The checks on the app in front, the pause, the lock and the idle check are the only protection. They do not cover what is visible behind the app in front: a browser window or an excluded app there is read, and its text is stored under the name of the app in front. Excluding that browser or excluded app later does not remove that text. Excluding the app in front does remove it. So these checks are not complete.
 

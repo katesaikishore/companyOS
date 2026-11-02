@@ -120,6 +120,8 @@ export const TwinConfigSchema = z
     screenCaptureEnabled: z.boolean().default(false),
     /** Microphone text. Off until the person turns it on, in settings or during setup. */
     audioCaptureEnabled: z.boolean().default(false),
+    /** Whether the sound the computer plays is transcribed. Off until the person turns it on. */
+    systemAudioCaptureEnabled: z.boolean().default(false),
     /** The read-only API on 127.0.0.1 for other programs on this device. Off until the person turns it on. */
     localApiEnabled: z.boolean().default(false),
     /** How many days captured screen images are kept. Their text is kept for the same 90 days as the rest of the history. */
@@ -173,6 +175,7 @@ export const DEFAULT_CONFIG: TwinConfig = {
   // Screen and microphone capture, and the local API, stay off until the person turns them on.
   screenCaptureEnabled: false,
   audioCaptureEnabled: false,
+  systemAudioCaptureEnabled: false,
   localApiEnabled: false,
   frameRetentionDays: 7,
   capturePaused: false,

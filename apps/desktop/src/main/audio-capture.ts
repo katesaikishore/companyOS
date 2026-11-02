@@ -1,7 +1,7 @@
 import { audioDecision, type AudioState } from '@companyos/twin-core';
 import { BrowserWindow, ipcMain, systemPreferences, utilityProcess, type UtilityProcess } from 'electron';
 import { join } from 'node:path';
-import { APP_ORIGIN } from '../shared/ipc';
+import { captureUrl, type CaptureSource } from './capture-source';
 import type { TranscribeReply } from './transcribe-worker';
 
 /** How long after a crashed capture page the window is opened again. */
@@ -45,11 +45,13 @@ export interface Transcriber {
 
 /** Where kept text goes. The twin's agent satisfies this. */
 export interface AudioSink {
-  ingestAudio(segment: { ts: number; durationMs: number; text: string }): boolean;
+  ingestAudio(segment: { ts: number; durationMs: number; text: string; source?: CaptureSource }): boolean;
 }
 
 export interface AudioCaptureOptions {
   transcriber: Transcriber;
+  /** Which sound this service takes. Microphone when not given. */
+  source?: CaptureSource;
   sink: AudioSink;
   now?: () => number;
   /** Whether the operating system lets this app use the microphone now. Tests replace it. */
@@ -95,9 +97,11 @@ export class AudioCaptureService {
   /** One segment at a time. A segment that arrives while another is being transcribed is dropped, not queued. */
   private busy = false;
   private readonly granted: () => boolean;
+  private readonly source: CaptureSource;
 
   constructor(private readonly options: AudioCaptureOptions) {
     this.granted = options.microphoneGranted ?? (() => microphoneGranted());
+    this.source = options.source ?? 'microphone';
   }
 
   /** Starts listening for segments. Nothing opens until the setting is on and the policy allows capture. */
@@ -188,7 +192,7 @@ export class AudioCaptureService {
         this.windowReady = false;
       }
     });
-    void window.loadURL(`${APP_ORIGIN}/capture.html`);
+    void window.loadURL(captureUrl(this.source));
     return window;
   }
 
@@ -223,7 +227,7 @@ export class AudioCaptureService {
     // Checked again, because the person may have paused or locked the screen while the segment was being transcribed.
     if (!audioDecision(this.state()).capture) return;
     try {
-      this.options.sink.ingestAudio({ ts, durationMs: segment.durationMs, text });
+      this.options.sink.ingestAudio({ ts, durationMs: segment.durationMs, text, source: this.source });
     } catch {
       // The store refused the segment. Its reason is not shown, because it can echo the text.
     }

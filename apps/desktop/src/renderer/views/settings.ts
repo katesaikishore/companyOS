@@ -313,6 +313,18 @@ function recallPanel(status: TwinStatus): HTMLElement {
         onChange: checked => void saveConfig('audio-capture', { audioCaptureEnabled: checked }),
       }),
     ),
+    row(
+      toggleRow({
+        testid: 'settings-system-audio',
+        label: 'Record system audio',
+        note: speechInstalled
+          ? 'Transcribes the sound the computer plays, such as calls and video, on this device. It hears the other people in those, so check the recording rules first.'
+          : 'Needs the speech model. Until it is installed, system audio is not heard.',
+        checked: config.systemAudioCaptureEnabled && speechInstalled,
+        disabled: !speechInstalled,
+        onChange: checked => void saveConfig('system-audio', { systemAudioCaptureEnabled: checked }),
+      }),
+    ),
     speechRow(status),
     permissionRow('microphone', capture.audioState),
     row(
