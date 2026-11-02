@@ -42,3 +42,4 @@ export * from './connectors/folder';
 export * from './connectors/git-log';
 export * from './workbook/sheet';
 export * from './workbook/brain';
+export * from './workbook/search';
