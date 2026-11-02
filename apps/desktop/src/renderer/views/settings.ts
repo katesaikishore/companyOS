@@ -71,9 +71,14 @@ const READING_LINE_PX = 120;
 
 let activeSection: SectionId = 'capture';
 
-/** Opens Settings at its Connectors section. The Connectors page in the sidebar uses it. */
+/**
+ * Scrolls a mounted Settings page to its Connectors section and marks it in the nav. The Connectors page in the sidebar
+ * calls it once, when the route opens, so a later refresh does not pull the page back there.
+ */
 export function openConnectorsSection(): void {
   activeSection = 'connectors';
+  markNav();
+  document.getElementById(sectionDomId('connectors'))?.scrollIntoView();
 }
 let followingScroll = false;
 

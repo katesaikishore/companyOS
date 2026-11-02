@@ -147,7 +147,6 @@ function viewFor(status: TwinStatus, route: Route): HTMLElement {
     case 'tasks':
       return tasksView(status);
     case 'connectors':
-      openConnectorsSection();
       return settingsView(status);
     case 'settings':
       return settingsView(status);
@@ -180,10 +179,16 @@ function render(): void {
     return;
   }
 
+  // A rebuild replaces the page column, which would put it back at the top. On the same route, keep the place.
+  const sameRoute = key === lastRouteKey;
+  const keptScroll = sameRoute ? appRoot.querySelector<HTMLElement>('main.main')?.scrollTop : undefined;
   lastSignature = signed;
   lastRouteKey = key;
   const wizardOpen = !status.config.setupCompleted || state.wizardForced;
   mount(appRoot, wizardOpen ? setupView(status) : shell(status, state.route, viewFor(status, state.route)));
+  const column = appRoot.querySelector<HTMLElement>('main.main');
+  if (column && keptScroll !== undefined) column.scrollTop = keptScroll;
+  else if (!wizardOpen && !sameRoute && state.route.name === 'connectors') openConnectorsSection();
   patchLive(status);
 }
 
