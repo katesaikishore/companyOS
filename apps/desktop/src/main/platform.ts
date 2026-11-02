@@ -147,6 +147,9 @@ function run(argv) {
   return 'ok';
 }`;
 
+/** How long a macOS menu press may take, including System Events' wait after a click that opens a modal dialog. */
+const MAC_MENU_TIMEOUT_MS = 15_000;
+
 /** Why a macOS menu press did nothing, in words that are safe to show. Each one means no item was pressed. */
 const MAC_MENU_REFUSALS: Record<string, string> = {
   'no-app': 'The app is not running, so no menu item was chosen.',
@@ -195,7 +198,10 @@ const macOS: Platform = {
     if (isShellApp(app) || !isAllowedMenuPath(menu)) return false;
     let answer: string;
     try {
-      answer = await run('osascript', ['-l', 'JavaScript', '-e', MAC_MENU, JSON.stringify({ app, menu: [...menu] })]);
+      // A click on an item that opens a modal dialog can block in System Events for about five seconds before it returns,
+      // so the default four seconds would stop a press that worked and report it as failed.
+      const request = JSON.stringify({ app, menu: [...menu] });
+      answer = await run('osascript', ['-l', 'JavaScript', '-e', MAC_MENU, request], undefined, MAC_MENU_TIMEOUT_MS);
     } catch {
       return false;
     }
