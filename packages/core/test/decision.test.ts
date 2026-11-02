@@ -80,9 +80,15 @@ function importersOf(module: string): string[] {
     .sort();
 }
 
-describe('the decision model only advises display labels', () => {
-  it('only labels.ts reads decision.ts', () => {
-    expect(importersOf('decision')).toEqual(['labels.ts']);
+describe('the decision model only advises, and the target picker is the one reader that chooses an element', () => {
+  it('only labels.ts and the target picker read decision.ts', () => {
+    expect(importersOf('decision')).toEqual(['labels.ts', 'picker.ts']);
+  });
+
+  it('the picker imports nothing but the decision types, so it cannot run an action', () => {
+    const source = readFileSync(join(__dirname, '..', 'src', 'picker.ts'), 'utf8');
+    const imports = [...source.matchAll(/from ['"]([^'"]+)['"]/g)].map(match => match[1]);
+    expect(imports).toEqual(['./decision']);
   });
 
   it('only the agent and the contract read the labels, so no policy, runner or automation can', () => {
