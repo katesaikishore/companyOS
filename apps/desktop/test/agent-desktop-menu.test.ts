@@ -118,10 +118,11 @@ describe('parseMenuPath', () => {
     expect(parseMenuPath('View > Open / Close')).toEqual(['View', 'Open / Close']);
   });
 
-  it('accepts only a menu bar item and one item in its menu in the form', () => {
+  it('accepts two to four labels in the form', () => {
     expect(draftReady({ name: 'n', app: 'Finder', path: 'View' })).toBe(false);
     expect(draftReady({ name: 'n', app: 'Finder', path: 'View > Clean Up' })).toBe(true);
-    expect(draftReady({ name: 'n', app: 'Finder', path: 'View > Clean Up By > Name' })).toBe(false);
+    expect(draftReady({ name: 'n', app: 'Finder', path: 'View > Clean Up By > Name' })).toBe(true);
+    expect(draftReady({ name: 'n', app: 'Finder', path: 'a > b > c > d > e' })).toBe(false);
   });
 });
 
@@ -194,6 +195,24 @@ describe.runIf(STARTS_FAKE_PROGRAM)('chooseMenuWithAgentDesktop', () => {
     expect(calls()).toEqual([]);
     const base: Executor = { focusApp: async () => true, frontmostApp: async () => 'Finder' };
     await expect(handsExecutor(base, options()).chooseMenu?.('Finder', SUBMENU)).rejects.toBeInstanceOf(StepRefusedError);
+  });
+
+  it('hands a path with a submenu to the built-in adapter when it has one, and starts nothing in the program', async () => {
+    const calls = fake();
+    const pressed: Array<readonly string[]> = [];
+    const base: Executor = {
+      focusApp: async () => true,
+      frontmostApp: async () => 'Finder',
+      chooseMenu: async (_app, menu) => {
+        pressed.push(menu);
+        return true;
+      },
+    };
+    await expect(handsExecutor(base, withCursor()).chooseMenu?.('Finder', SUBMENU)).resolves.toBe(true);
+    expect(pressed).toEqual([SUBMENU]);
+    expect(calls()).toEqual([]);
+    await expect(handsExecutor(base, withCursor()).chooseMenu?.('Finder', CLEAN_UP)).resolves.toBe(true);
+    expect(pressed).toEqual([SUBMENU]);
   });
 
   it('refuses a menu bar click that opened no menu, and sends no Escape to a window with no menu open', async () => {

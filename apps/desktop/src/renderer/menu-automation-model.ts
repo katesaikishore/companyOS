@@ -1,13 +1,11 @@
 /** Separators a person may type between menu labels: ">" or "→". A label may hold "/", so "/" is not one. */
 const SEPARATOR = /\s*(?:>|→)\s*/;
-/**
- * How many labels the form accepts: a menu bar item and one item in its menu. The program cannot open submenus yet, so a
- * longer path would be refused at every run. The engine itself accepts up to four, for when it can.
- */
-export const FORM_MENU_LABELS = 2;
+/** How many labels a path may have: a menu bar item, up to two submenus, then the item. The engine accepts the same. */
+export const MENU_LABELS_MIN = 2;
+export const MENU_LABELS_MAX = 4;
 
 /**
- * The labels of a typed menu path, such as "View > Clean Up". Empty labels are dropped, so a trailing separator
+ * The labels of a typed menu path, such as "View > Clean Up By > Name". Empty labels are dropped, so a trailing separator
  * does not add one. The engine checks each label against its own rule, so this only splits.
  */
 export function parseMenuPath(text: string): string[] {
@@ -24,7 +22,8 @@ export interface MenuAutomationDraft {
   path: string;
 }
 
-/** True when every field has something and the path has exactly the labels the form accepts. */
+/** True when every field has something and the path has two to four labels. */
 export function draftReady(draft: MenuAutomationDraft): boolean {
-  return draft.name.trim() !== '' && draft.app.trim() !== '' && parseMenuPath(draft.path).length === FORM_MENU_LABELS;
+  const labels = parseMenuPath(draft.path).length;
+  return draft.name.trim() !== '' && draft.app.trim() !== '' && labels >= MENU_LABELS_MIN && labels <= MENU_LABELS_MAX;
 }

@@ -464,7 +464,8 @@ async function checkFocusByName(options: HandsOptions, app: string): Promise<Han
  * The runner's executor when the program path is set. A focus by name is the built-in adapter's, after the program has
  * counted the app's windows. A key press goes through the program on macOS and Windows only. On Linux the program's press
  * crashed a GTK 3 test window in most trials, so the built-in press (xdotool on X11) is used there, and the path does not
- * block it. A menu choice always goes through the program, under the automation's named cursor when a session runs.
+ * block it. A menu choice of two labels goes through the program, under the automation's named cursor when a session runs,
+ * and a longer one goes to the built-in adapter.
  * Frontmost-app checks, links and files come from the built-in executor unchanged. While the path is unusable, the focus
  * and menu steps are blocked with the reason before anyone is asked, and nothing starts.
  */
@@ -479,7 +480,12 @@ export function handsExecutor(base: Executor, options: HandsOptions, platform: N
     ...(pressThroughProgram
       ? { pressShortcut: async (app: string, shortcut: string) => outcomeOf(await pressWithAgentDesktop(options, app, shortcut)) }
       : {}),
-    chooseMenu: async (app, menu) => outcomeOf(await chooseMenuWithAgentDesktop(options, app, menu)),
+    // The program chooses a menu bar item and one item in its menu, under the automation's cursor. It cannot open a
+    // submenu, so a longer path goes to the built-in adapter where it has one (macOS presses it without opening a menu).
+    chooseMenu: async (app, menu) =>
+      menu.length > SUPPORTED_MENU_DEPTH && base.chooseMenu
+        ? base.chooseMenu(app, menu)
+        : outcomeOf(await chooseMenuWithAgentDesktop(options, app, menu)),
     blockedReason: op => (op === 'press_shortcut' && !pressThroughProgram ? undefined : agentDesktopProblem(options.binary)),
   };
 }

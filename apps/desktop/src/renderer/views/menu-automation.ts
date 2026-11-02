@@ -5,11 +5,11 @@ import { call, go, pending, state } from '../store.js';
 
 const KEY = 'menu-automation';
 const NOTE =
-  'Brings the app forward, then chooses a menu bar item and one item in its menu through the agent-desktop program, under its own named cursor. Submenus are not supported yet. It starts as a draft, and every run asks before the menu is chosen. The app needs an open window.';
+  'Brings the app forward, then chooses the menu path. A menu bar item and one item in it go through the agent-desktop program, under the automation’s own named cursor, and the app needs an open window. A path with a submenu is pressed by macOS without opening a menu. It starts as a draft, and every run asks before the menu is chosen.';
 
 const draft: MenuAutomationDraft = { name: '', app: '', path: '' };
 
-/** A form that makes a draft automation by hand: one app and one menu path, such as "View > Clean Up". */
+/** A form that makes a draft automation by hand: one app and one menu path, such as "View > Clean Up By > Name". */
 export function menuAutomationPanel(): HTMLElement {
   let createButton: HTMLButtonElement | undefined;
   const update = (field: keyof MenuAutomationDraft) => (event: Event) => {
@@ -63,7 +63,7 @@ export function menuAutomationPanel(): HTMLElement {
       { class: 'menu-automation-fields' },
       field('Name', 'name', 'Arrange the Desktop', 80),
       field('App', 'app', 'Finder', 100),
-      field('Menu path', 'path', 'View > Clean Up', 170),
+      field('Menu path', 'path', 'View > Clean Up By > Name', 330),
     ),
     h('div', { class: 'actions' }, createButton),
   );

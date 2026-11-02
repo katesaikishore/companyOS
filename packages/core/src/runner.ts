@@ -114,7 +114,7 @@ function unsupportedReason(step: Step, executor: Executor): string | undefined {
   if (step.op === 'open_file' && !executor.openFile) return 'This system cannot open files yet.';
   if (step.op === 'press_shortcut' && !executor.pressShortcut) return 'This system cannot press shortcuts yet.';
   if (step.op === 'choose_menu' && !executor.chooseMenu) {
-    return 'Menu items are chosen through the agent-desktop program. Set its path in Settings.';
+    return 'This system cannot choose menu items yet. Outside macOS, set the agent-desktop program in Settings.';
   }
   return undefined;
 }
