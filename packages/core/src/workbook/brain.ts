@@ -10,8 +10,11 @@ import type { Routine } from '../mine';
 /** The target of a task the person keeps. Routine ids are 12 hex digits, so this can never be one. */
 export const PERSON = 'you';
 
-/** Confidence at or above which a task is given to a routine. A design value, not a measured one. */
-export const AUTOMATE_MIN_CONFIDENCE = 0.5;
+/**
+ * Confidence at or above which a task is given to a routine. A design value, not a measured one. It was set on the
+ * synthetic 50-task labels, so a real task sheet should confirm it before it is relied on.
+ */
+export const AUTOMATE_MIN_CONFIDENCE = 0.25;
 
 /** Terms shorter than this carry too little to match on. A design value. */
 const MIN_TERM_LENGTH = 3;
@@ -24,16 +27,16 @@ const STOP_WORDS: ReadonlySet<string> = new Set([
 
 /**
  * The words a person uses for an application, mapped to the term the routines use for it. A design value. "Sheet" and
- * "Microsoft Excel" must meet at one term, so a task that says sheet can match a routine that opens Excel. The map runs
- * before the length check, so "dm" still reaches "slack".
+ * "Microsoft Excel" must meet at one term, so a task that says sheet can match a routine that opens Excel. The keys are
+ * singular, because a word is made singular before the map is read, and the map runs before the length check, so "dm"
+ * still reaches "slack".
  */
 const SYNONYMS: ReadonlyMap<string, string> = new Map([
   ['sheet', 'excel'], ['spreadsheet', 'excel'], ['workbook', 'excel'], ['csv', 'excel'], ['table', 'excel'],
-  ['mail', 'outlook'], ['email', 'outlook'], ['emails', 'outlook'], ['inbox', 'outlook'],
-  ['doc', 'word'], ['docs', 'word'], ['document', 'word'], ['memo', 'word'], ['letter', 'word'],
-  ['chat', 'slack'], ['message', 'slack'], ['messages', 'slack'], ['dm', 'slack'],
-  ['ticket', 'jira'], ['tickets', 'jira'], ['issue', 'jira'], ['issues', 'jira'],
-  ['invoice', 'invoice'], ['invoices', 'invoice'],
+  ['mail', 'outlook'], ['email', 'outlook'], ['inbox', 'outlook'],
+  ['doc', 'word'], ['document', 'word'], ['memo', 'word'], ['letter', 'word'],
+  ['chat', 'slack'], ['message', 'slack'], ['dm', 'slack'],
+  ['ticket', 'jira'], ['issue', 'jira'],
 ]);
 
 const NO_ROUTINE_REASON = 'No routine covers this task, so it is left to you.';
@@ -85,13 +88,23 @@ export interface Understanding {
 }
 
 /**
- * The terms of a text, in first-seen order and each once: lowercase words of letters and digits, with the synonym map
- * applied, and short words and stop-words dropped. Tasks and routines both go through this, so their terms meet.
+ * A word with its plural "s" dropped, so "expenses" and "expense" meet at one term. Words of four letters or fewer, and
+ * words ending in "ss" such as "process", are left alone. This is a simple rule, not a stemmer, so irregular plurals such
+ * as "policies" do not meet their singular.
+ */
+function singularOf(word: string): string {
+  return word.length > 4 && word.endsWith('s') && !word.endsWith('ss') ? word.slice(0, -1) : word;
+}
+
+/**
+ * The terms of a text, in first-seen order and each once: lowercase words of letters and digits, made singular, with the
+ * synonym map applied, and short words and stop-words dropped. Tasks and routines both go through this, so their terms meet.
  */
 function termsOf(text: string): string[] {
   const terms = new Set<string>();
   for (const word of text.toLowerCase().split(/[^\p{L}\p{N}]+/u)) {
-    const term = SYNONYMS.get(word) ?? word;
+    const base = singularOf(word);
+    const term = SYNONYMS.get(base) ?? base;
     if (term.length < MIN_TERM_LENGTH || STOP_WORDS.has(term)) continue;
     terms.add(term);
   }
