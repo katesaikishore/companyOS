@@ -328,13 +328,7 @@ function modelCard(spec: ModelSpec, fit: ModelFit, status: TwinStatus): HTMLElem
     h('p', { class: 'mono small muted' }, `${spec.params} · ${spec.quantization} · ${formatBytes(spec.sizeBytes)}`),
     h('p', { class: 'model-fit' }, h('strong', null, 'Fits your device. '), fit.reason),
     h('dl', { class: 'facts' }, fact('Licence', spec.license), fact('Source', 'huggingface.co')),
-    downloading
-      ? progressBar(modelFraction(status, spec.id), {
-          'data-testid': 'download-progress',
-          'data-model-id': spec.id,
-          'data-progress-model': spec.id,
-        })
-      : undefined,
+    downloading ? downloadProgress(status, spec.id, 'download-progress') : undefined,
     h(
       'div',
       { class: 'model-actions' },
@@ -408,6 +402,26 @@ function alternativesBlock(plan: SetupPlan, status: TwinStatus): HTMLElement {
   );
 }
 
+/**
+ * A model's download: a bar, the bytes received of the total, and the bytes still to come. The count is patched in place
+ * on every poll, so the bar and the text stay in step while the download runs.
+ */
+function downloadProgress(status: TwinStatus, modelId: string, testid: string): HTMLElement {
+  const download = status.downloads.find(entry => entry.modelId === modelId);
+  const left = Math.max(0, (download?.totalBytes ?? 0) - (download?.receivedBytes ?? 0));
+  return h(
+    'div',
+    { class: 'download-progress-block', 'data-testid': testid, 'data-model-id': modelId },
+    progressBar(modelFraction(status, modelId), { 'data-progress-model': modelId }),
+    h(
+      'p',
+      { class: 'mono small muted download-progress-text' },
+      h('span', { 'data-label-download': modelId }, modelStateLabel(status, modelId)),
+      left > 0 ? h('span', { 'data-testid': 'download-left' }, ` · ${formatBytes(left)} left`) : undefined,
+    ),
+  );
+}
+
 function alternativeRow(fit: ModelFit, plan: SetupPlan, status: TwinStatus): HTMLElement {
   const spec = fit.spec;
   const current = modelState(status, spec.id);
@@ -415,7 +429,7 @@ function alternativeRow(fit: ModelFit, plan: SetupPlan, status: TwinStatus): HTM
   let action: Child;
   if (recommended) action = chip('Recommended above', 'teal');
   else if (current === 'installed') action = chip('Installed', 'teal');
-  else if (current === 'downloading') action = chip('Downloading');
+  else if (current === 'downloading') action = downloadProgress(status, spec.id, 'alt-download-progress');
   else {
     action = button('Install', {
       variant: 'secondary',

@@ -2276,6 +2276,22 @@ a {
   border-bottom: 1px solid var(--divider);
 }
 
+/* A download in an alternative row takes its own line under the model's name, so the bar has room. */
+.alt-row .download-progress-block {
+  flex: 1 1 100%;
+}
+
+.download-progress-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.download-progress-text {
+  margin: 0;
+}
+
 .alt-main {
   display: flex;
   flex: 1;
