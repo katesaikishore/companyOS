@@ -45,3 +45,4 @@ export * from './workbook/brain';
 export * from './workbook/search';
 export * from './mail/gmail';
 export * from './apps/capabilities';
+export * from './apps/first-seen';
