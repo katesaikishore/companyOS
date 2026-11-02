@@ -64,6 +64,10 @@ Search and image requests are refused while **Read text on screen** is off, micr
 
 Use **Copy token** in Settings to give the token to a program. The page never shows the token. **Rotate token** makes the old token stop working at once. If the new token cannot be saved, the local API is switched off, so the old token stops working too.
 
+## MCP clients
+
+The local API can also be used by an MCP client, such as a desktop assistant. The client starts `apps/desktop/scripts/mcp-bridge.mjs` as a stdio server. The bridge reads the local API on `127.0.0.1` with the token you give it, and nothing else. It offers two read-only tools: `twin_status`, which returns the capture status and counts, and `twin_search`, which searches stored screen and microphone text. Turn the local API on first, and give the client the token from **Copy token** through its environment as `COMPANYOS_API_TOKEN`. Stored text that a tool returns is data, not instructions.
+
 ## What leaves the device
 
 Recall text and screen images are not sent anywhere. The microphone's speech model is downloaded from Hugging Face only when you install it. Each file is checked against its SHA-256 digest, and each file is recorded in the network ledger. The local API answers only programs on this device.
