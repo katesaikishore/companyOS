@@ -12,7 +12,7 @@ import type { MediaStore } from './media-store';
 import type { OcrRequest, OcrResponse } from './ocr-worker';
 
 /**
- * Takes still frames of the primary display while screen capture is on. A frame passes the policy, is skipped when it
+ * Takes still frames of every display, one at a time, while screen capture is on. A frame passes the policy, is skipped when it
  * repeats the last kept frame, is read by OCR, and is stored as a sealed image with its text. Nothing here reaches the
  * network: the frame, the text and the image stay in this process, the media folder and the encrypted store.
  */
@@ -30,9 +30,12 @@ const KEEP_WIDTH = 1_280;
 const KEEP_QUALITY = 60;
 /** A read that takes this long is treated as stuck. The worker is restarted and the frame is dropped. */
 const OCR_TIMEOUT_MS = 60_000;
+const PRIMARY_DISPLAY = 'primary';
 const OCR_FAILED = 'The frame could not be read.';
 
 export interface Frame {
+  /** The display the frame shows. Frames of different displays are never compared with each other. Undefined means the primary display. */
+  display?: string;
   width: number;
   height: number;
   /** The raw pixels, used only to tell two frames apart. The byte order does not matter for that. */
@@ -42,7 +45,7 @@ export interface Frame {
 }
 
 export interface FrameSource {
-  /** Grabs the primary display. Null when nothing can be grabbed, for example without screen recording permission. */
+  /** Grabs the next display in turn. Null when nothing can be grabbed, for example without screen recording permission. */
   grab(): Promise<Frame | null>;
 }
 
@@ -73,6 +76,8 @@ interface Job {
   ts: number;
   context: ScreenContext;
   png: Buffer;
+  /** The display the frame shows. */
+  display: string;
   /** The capture generation the frame was taken in. A stop or a delete moves the generation on, so an older frame is dropped. */
   generation: number;
 }
@@ -117,7 +122,8 @@ export class ScreenCaptureService {
   private generation = 0;
   /** The one frame waiting to be read. A newer frame replaces it, so a slow read never builds a queue. */
   private pending: Job | null = null;
-  private deduper = new FrameDeduper();
+  /** The last kept frame of each display. Displays do not repeat each other, so each keeps its own. */
+  private dedupers = new Map<string, FrameDeduper>();
   private timer: ReturnType<typeof setTimeout> | undefined;
   private intervalBaseMs = DEFAULT_INTERVAL_MS;
   private readonly recentReads: number[] = [];
@@ -130,7 +136,7 @@ export class ScreenCaptureService {
     if (this.running) return;
     this.running = true;
     this.intervalBaseMs = intervalMs;
-    this.deduper = new FrameDeduper();
+    this.dedupers.clear();
     this.schedule();
   }
 
@@ -224,11 +230,21 @@ export class ScreenCaptureService {
       const frame = await settleWithin(this.deps.source.grab(), CHECK_TIMEOUT_MS, null);
       if (!frame || generation !== this.generation) return;
       // A repeat of the last kept frame costs no OCR and no storage. The fingerprint is kept even if the frame is later dropped.
-      if (!this.deduper.shouldKeep(fingerprintBitmap(frame.bgra, frame.width, frame.height))) return;
-      this.enqueue({ ts: this.deps.now(), context: current, png: frame.png, generation });
+      const display = frame.display ?? PRIMARY_DISPLAY;
+      if (!this.dedupeFor(display).shouldKeep(fingerprintBitmap(frame.bgra, frame.width, frame.height))) return;
+      this.enqueue({ ts: this.deps.now(), context: current, png: frame.png, generation, display });
     } catch {
       // The error text is dropped on purpose. It can describe what was on screen.
     }
+  }
+
+  private dedupeFor(display: string): FrameDeduper {
+    let deduper = this.dedupers.get(display);
+    if (!deduper) {
+      deduper = new FrameDeduper();
+      this.dedupers.set(display, deduper);
+    }
+    return deduper;
   }
 
   private enqueue(job: Job): void {
@@ -255,7 +271,7 @@ export class ScreenCaptureService {
       text = normaliseOcr(await this.deps.ocr.recognise(job.png));
     } catch {
       // A dropped frame must not stand as the reference for the next one, or an unchanged screen is never read again.
-      this.deduper.reset();
+      this.dedupeFor(job.display).reset();
       return;
     }
     this.recentReads.push(this.deps.now() - started);
@@ -263,7 +279,7 @@ export class ScreenCaptureService {
     // The frame passed its checks when it was taken. It is kept only if the state still allows it now, and a secure field
     // that took focus during OCR stops it.
     if (!(await this.stillAllowed(job))) {
-      this.deduper.reset();
+      this.dedupeFor(job.display).reset();
       return;
     }
     // A frame with no text cannot be found by search, so its image is not kept either.
@@ -272,7 +288,7 @@ export class ScreenCaptureService {
     // Pause, stop, delete or a secure field can arrive while the image is written. They are checked again before the text
     // is stored, and an image that is no longer wanted is removed.
     if (!(await this.stillAllowed(job))) {
-      this.deduper.reset();
+      this.dedupeFor(job.display).reset();
       if (mediaId) await this.deps.media.remove([mediaId]).catch(() => undefined);
       return;
     }
@@ -290,7 +306,7 @@ export class ScreenCaptureService {
     }
     // An image whose text was not stored would be kept with nothing to find it by, so it is removed.
     if (!stored) {
-      this.deduper.reset();
+      this.dedupeFor(job.display).reset();
       if (mediaId) await this.deps.media.remove([mediaId]).catch(() => undefined);
     }
   }
@@ -318,17 +334,22 @@ export class ScreenCaptureService {
   }
 }
 
-/** The Electron grab of the primary display, at OCR_WIDTH or less. */
+/** The Electron grab of each display in turn, at OCR_WIDTH or less. */
+/** The displays are read one at a time, in turn. A single-display machine reads its one display, as before. */
 export function electronFrameSource(): FrameSource {
+  let turn = 0;
   return {
     async grab() {
-      const display = screen.getPrimaryDisplay();
+      const displays = screen.getAllDisplays();
+      if (displays.length === 0) return null;
+      const display = displays[turn % displays.length];
+      turn = (turn + 1) % displays.length;
       const physicalWidth = Math.round(display.size.width * display.scaleFactor);
       const physicalHeight = Math.round(display.size.height * display.scaleFactor);
       const width = Math.min(OCR_WIDTH, physicalWidth);
       const height = Math.max(1, Math.round((physicalHeight * width) / physicalWidth));
       const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width, height } });
-      // Only the primary display is read. With several displays and no match, nothing is read.
+      // Each display is read through its own source. A display with no matching source is not read.
       const sameDisplay = sources.find(candidate => candidate.display_id === String(display.id));
       const source = sameDisplay ?? (sources.length === 1 ? sources[0] : undefined);
       if (!source) return null;
@@ -336,7 +357,7 @@ export function electronFrameSource(): FrameSource {
       const size = thumbnail.getSize();
       // Without screen recording permission the thumbnail comes back empty, and an empty frame is never kept.
       if (size.width < 1 || size.height < 1) return null;
-      return { width: size.width, height: size.height, bgra: thumbnail.toBitmap(), png: thumbnail.toPNG() };
+      return { display: String(display.id), width: size.width, height: size.height, bgra: thumbnail.toBitmap(), png: thumbnail.toPNG() };
     },
   };
 }

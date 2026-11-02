@@ -5,7 +5,7 @@ description: "Search the text the twin reads on your screen and hears on your mi
 
 Recall keeps two kinds of text and lets you search them on the **Recall** page. Both are off until you turn them on, in setup or in **Settings**, under **Screen and audio**.
 
-- **Screen text** is the text read from the primary display, kept with a small image of the screen.
+- **Screen text** is the text read from each display, kept with a small image of the screen.
 - **Microphone text** is speech turned into text on this device, in 30-second parts.
 
 Recall is a preview. Its Screen Recording and microphone prompts have not yet been checked on a Mac with a password field on screen, so keep it off unless you are testing it.
@@ -14,14 +14,14 @@ Recall is a preview. Its Screen Recording and microphone prompts have not yet be
 
 Setup has a Recall step with both switches off:
 
-- **Read text on screen** reads the primary display.
+- **Read text on screen** reads every display, one at a time.
 - **Transcribe the microphone** turns speech into text on this device. It needs the speech model, which you install in Settings under Screen and audio. Until it is installed, the switch is disabled.
 
 Each switch saves at once, and you can change either one later in Settings.
 
 ## What is read
 
-Screen text is read only when what is on the primary display changes, and after you switch apps. It is checked about every five seconds. On a machine where text reading is slow, the checks come about every fifteen seconds instead, so the computer is not kept busy. It is read only on macOS in this version. Windows and Linux do not read screen text, because the check for a focused password field runs only on macOS. On macOS, the app also needs Screen Recording permission.
+Screen text is read only when what is on a display changes, and after you switch apps. It is checked about every five seconds. On a machine where text reading is slow, the checks come about every fifteen seconds instead, so the computer is not kept busy. It is read only on macOS in this version. Windows and Linux do not read screen text, because the check for a focused password field runs only on macOS. On macOS, the app also needs Screen Recording permission.
 
 Nothing is read in these cases:
 

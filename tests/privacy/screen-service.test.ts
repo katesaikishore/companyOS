@@ -123,7 +123,7 @@ interface Fixture {
   /** Holds every image write until the returned release is called. */
   holdWrites(): () => void;
   /** Shows the service one frame with the given text, and waits for the frame to be taken or dropped, not for its read. */
-  shot(text: string): Promise<void>;
+  shot(text: string, display?: string): Promise<void>;
   /** Resolves once no read is in flight. The service keeps its drain private, so the wait reads it here. */
   idle(): Promise<void>;
   /** Every output the suite inspects, after the run. */
@@ -220,11 +220,11 @@ function open(): Fixture {
         release();
       };
     },
-    async shot(text) {
+    async shot(text, display) {
       frames += 1;
       const label = `frame ${frames}`;
       ocr.reads.set(label, text);
-      source.next = frameOf(label, frames * 20, text);
+      source.next = { ...frameOf(label, frames * 20, text), display };
       await service.requestFrame('interval');
     },
     async idle() {
@@ -384,6 +384,27 @@ describe('ScreenCaptureService, against planted canaries', () => {
     expect(fx.agent.captureSummary().screenCount).toBe(0);
     expect(fx.mediaFiles()).toBe(0);
     expect(findLeaks(fx.surfaces(), { probeError: CANARY_SERVICE.probeError })).toEqual([]);
+  });
+
+  it('reads each display, and does not treat one display\'s frame as a repeat of another\'s', async () => {
+    // The same pixels on two displays. A shared duplicate check would drop the second display's frame.
+    const same = 40;
+    fx.ocr.reads.set('left frame', 'Left display text');
+    fx.ocr.reads.set('right frame', 'Right display text');
+    fx.source.next = { ...frameOf('left frame', same, 'Left display text'), display: 'left' };
+    await fx.service.requestFrame('interval');
+    fx.source.next = { ...frameOf('right frame', same, 'Right display text'), display: 'right' };
+    await fx.service.requestFrame('interval');
+    await fx.idle();
+    expect(fx.ocr.calls).toEqual(['left frame', 'right frame']);
+    expect(fx.agent.captureSummary().screenCount).toBe(2);
+
+    // A repeat on the same display is still skipped, so the screen is not read again for nothing.
+    fx.ocr.reads.set('left again', 'Left display text');
+    fx.source.next = { ...frameOf('left again', same, 'Left display text'), display: 'left' };
+    await fx.service.requestFrame('interval');
+    await fx.idle();
+    expect(fx.ocr.calls).toHaveLength(2);
   });
 
   it('stop waits for a read that is still running to end', async () => {

@@ -295,7 +295,7 @@ function recallPanel(status: TwinStatus): HTMLElement {
       toggleRow({
         testid: 'settings-screen',
         label: 'Read text on screen',
-        note: 'Reads the whole primary display when what is on it changes. A browser, an excluded app or a password field is skipped only when it has focus, so a window of one visible behind another app can still be read. Paused or locked capture is skipped. On macOS it needs Screen Recording permission.',
+        note: 'Reads every display, one at a time, when what is on one changes. A browser, an excluded app or a password field is skipped only when it has focus, so a window of one visible behind another app can still be read. Paused or locked capture is skipped. On macOS it needs Screen Recording permission.',
         checked: config.screenCaptureEnabled,
         onChange: checked => void saveConfig('screen-capture', { screenCaptureEnabled: checked }),
       }),
