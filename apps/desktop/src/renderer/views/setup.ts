@@ -432,6 +432,13 @@ function alternativeRow(fit: ModelFit, plan: SetupPlan, status: TwinStatus): HTM
       { class: 'alt-main' },
       h('span', { class: 'mono' }, spec.name),
       h('span', { class: 'muted small' }, `${spec.params} · ${spec.quantization} · ${formatBytes(spec.sizeBytes)}`),
+      // The bar sits under the name, so the row keeps its three columns while a download runs.
+      current === 'downloading'
+        ? progressBar(modelFraction(status, spec.id), {
+            'data-testid': 'alt-download-progress',
+            'data-progress-model': spec.id,
+          })
+        : undefined,
     ),
     h('span', { class: `fit fit-${fit.fit}` }, fitLabel(fit.fit)),
     action,
