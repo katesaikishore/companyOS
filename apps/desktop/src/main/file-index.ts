@@ -51,7 +51,8 @@ interface Found {
   kind: FileKind;
   /**
    * True for a file whose content is only in iCloud: it has a size but no blocks on disk. Reading it would make macOS
-   * download it, and the read waits until it arrives, so such a file is indexed by its name, folder and date only.
+   * download it, and the read waits until it arrives, so such a file is indexed by its name, folder and date only. Only
+   * macOS is asked: Windows reports no blocks for every file.
    */
   cloudOnly: boolean;
 }
@@ -92,7 +93,7 @@ export async function walkFolders(home = homedir(), folders: readonly string[] =
         continue;
       }
       if (stats.isDirectory()) await walk(path, root, depth + 1);
-      else if (stats.isFile()) found.push({ path, root, size: stats.size, mtime: stats.mtimeMs, kind: kindOf(path), cloudOnly: stats.size > 0 && stats.blocks === 0 });
+      else if (stats.isFile()) found.push({ path, root, size: stats.size, mtime: stats.mtimeMs, kind: kindOf(path), cloudOnly: process.platform === 'darwin' && stats.size > 0 && stats.blocks === 0 });
     }
   };
   for (const folder of folders) {

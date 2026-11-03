@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { QueryVectors, walkFolders } from '../src/main/file-index';
 
@@ -34,7 +34,7 @@ describe('walkFolders', () => {
       'Desktop/repo/readme.md': 'x',
       'Desktop/archive.zip': 'x',
     });
-    const found = (await walkFolders(root)).map(file => [file.path.slice(root.length + 1), file.kind, file.cloudOnly]);
+    const found = (await walkFolders(root)).map(file => [file.path.slice(root.length + 1).split(sep).join('/'), file.kind, file.cloudOnly]);
     expect(found).toEqual([
       ['Downloads/passport.jpg', 'image', false],
       ['Downloads/visa/letter.pdf', 'document', false],
