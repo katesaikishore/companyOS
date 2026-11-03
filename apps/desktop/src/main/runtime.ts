@@ -58,7 +58,7 @@ import {
   normalizeAppName,
 } from '@companyos/twin-core';
 import { SPEAKER_MIN_SAMPLES, SPEAKER_MODEL_ID, WHISPER_MODEL_ID } from '@companyos/twin-core';
-import { discoverFromScreen, proposeTasks, type ProposedTask, type ScreenDiscovery } from '@companyos/twin-core';
+import { discoverFromScreen, proposeTasks, recapBlocks, writeRecap, type DayRecap, type ProposedTask, type ScreenDiscovery } from '@companyos/twin-core';
 import { readSurface } from './app-surface';
 import { createOllamaChat, createOllamaEmbedder, createOllamaVision, visionModelReady } from './vision-ollama';
 import type { OperatorModel, OperatorTaskRequest } from '@companyos/twin-core';
@@ -263,6 +263,8 @@ export class TwinRuntime {
   private apiState: LocalApiState = 'off';
   private localApi: LocalApi | undefined;
   private apiToken: string | undefined;
+  /** Recaps being written, by day, so a second request for the same day waits for the first. */
+  private readonly recapsRunning = new Map<string, Promise<DayRecap>>();
   /** API and token changes run one at a time, as browser capture changes do. */
   private apiChanges: Promise<void> = Promise.resolve();
   /** Runs the saved pipes on their schedules. It starts and stops with the runtime. Its last-run times stay in memory. */
@@ -668,6 +670,33 @@ export class TwinRuntime {
       model: createOllamaChat({ record }),
       excludedApps: this.agent.configuration.excludedApps,
     });
+  }
+
+  /**
+   * The recap of one local day, today by default, written by the local model. Recall search returns the newest items
+   * first and at most a few hundred, so screen text and speech are read block by block, which spreads the samples over the
+   * day instead of its last few minutes. One recap per day is written at a time; asking again while it runs gets the same
+   * answer. Typed text and imported connector text are not used.
+   */
+  dayRecap(day?: string): Promise<DayRecap> {
+    if (day !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(day)) return Promise.reject(new Error('A day is written as YYYY-MM-DD.'));
+    const view = this.agent.dayTasks(day);
+    const running = this.recapsRunning.get(view.day);
+    if (running) return running;
+    const hits: CaptureHitView[] = [];
+    for (const block of recapBlocks(view)) {
+      for (const kind of ['screen', 'audio'] as const) {
+        try {
+          hits.push(...this.agent.searchCapture({ text: '', kind, from: block.startTs, to: block.endTs }));
+        } catch {
+          // A channel with nothing stored for the block has nothing to add.
+        }
+      }
+    }
+    const record = (entry: NetworkEntry): void => this.agent.recordNetworkCall(entry);
+    const job = writeRecap(view, hits, createOllamaChat({ record })).finally(() => this.recapsRunning.delete(view.day));
+    this.recapsRunning.set(view.day, job);
+    return job;
   }
 
   /** Starts a task from the Tasks page. The operator checks every step; this only passes the request on. */
@@ -1282,6 +1311,24 @@ export class TwinRuntime {
     copy(await this.queueApi(() => this.apiTokenValue()));
   }
 
+  /**
+   * Copies an MCP config for agents such as Claude Desktop or Cursor: this app's own binary run in Node mode on the bundled
+   * server, with the local API token. The token goes to the clipboard only, as with Copy token.
+   */
+  async copyMcpConfig(copy: (text: string) => void): Promise<void> {
+    const token = await this.queueApi(() => this.apiTokenValue());
+    const config = {
+      mcpServers: {
+        companyos: {
+          command: process.execPath,
+          args: [join(app.getAppPath(), 'dist', 'main', 'mcp-server.js')],
+          env: { ELECTRON_RUN_AS_NODE: '1', COMPANYOS_API_TOKEN: token, COMPANYOS_API_PORT: String(LOCAL_API_PORT) },
+        },
+      },
+    };
+    copy(JSON.stringify(config, null, 2));
+  }
+
   /** Replaces the local API token. The API reads the token on every request, so the old one stops working at once. */
   rotateApiToken(): Promise<void> {
     return this.queueApi(async () => {
@@ -1639,6 +1686,8 @@ export class TwinRuntime {
         search: request => (this.agent.configuration.screenCaptureEnabled ? withheldFromLocalApi(this.agent.searchCapture(request)) : []),
         frameImage: id => (this.agent.configuration.screenCaptureEnabled ? this.readFrame(id) : Promise.resolve(null)),
         status: () => this.captureChannels(),
+        // The recap is written from the same screen and microphone text the search serves, so it follows the same rule.
+        recap: day => (this.agent.configuration.screenCaptureEnabled ? this.dayRecap(day) : Promise.reject(new Error('Screen reading is off.'))),
       });
       await this.apiTokenValue();
       await api.start();

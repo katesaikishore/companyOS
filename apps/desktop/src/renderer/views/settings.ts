@@ -478,7 +478,7 @@ function apiRow(enabled: boolean, apiState: TwinStatus['capture']['apiState']): 
   const note =
     apiState === 'failed'
       ? 'The API could not start. Another program on this device may be using its port.'
-      : 'Copy the token to give to a program on this device. Rotating it stops the old token at once.';
+      : 'Copy the token to give to a program on this device, or copy an MCP config for Claude Desktop, Claude Code or Cursor. Rotating the token stops the old one at once.';
   return row(
     textBlock('API token', enabled ? note : 'Turn the local API on to get a token.'),
     h(
@@ -491,6 +491,15 @@ function apiRow(enabled: boolean, apiState: TwinStatus['capture']['apiState']): 
           void act('api-copy', async () => {
             await bridge().copyApiToken();
             setNotice('Token copied to the clipboard.', 'info');
+          }),
+      }),
+      button('Copy MCP config', {
+        testid: 'settings-mcp-copy',
+        disabled: !enabled || pending('mcp-copy'),
+        onClick: () =>
+          void act('mcp-copy', async () => {
+            await bridge().copyMcpConfig();
+            setNotice('MCP config copied. Paste it into your agent’s MCP settings.', 'info');
           }),
       }),
       button('Rotate token', {

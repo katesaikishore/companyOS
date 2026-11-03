@@ -8,6 +8,7 @@ import type { DownloadState, HardwareProfile, InstalledModel, LayaBundleView, Ne
 import type { RunResult } from './runner';
 import type { TaskDecision } from './tasks';
 import type { ProposedTask } from './operator/understand';
+import type { DayRecap } from './recap';
 
 /**
  * The contract between the desktop main process and its pages (the app and the tray).
@@ -572,6 +573,8 @@ export interface TwinBridge {
   deleteCapture(): Promise<void>;
   /** Copies the local API token to the clipboard. The token itself never reaches the page. */
   copyApiToken(): Promise<void>;
+  /** Copies an MCP server config, with the local API token, for agents such as Claude Desktop. Nothing reaches the page. */
+  copyMcpConfig(): Promise<void>;
   /** Replaces the local API token after the person confirms. The old token stops working at once. */
   rotateApiToken(): Promise<void>;
   /** Asks the operating system for screen or microphone access. The result shows in the status. */
@@ -600,6 +603,8 @@ export interface TwinBridge {
    * model for one next step per piece of work. Proposals only: nothing runs until startTask.
    */
   proposeTasks(): Promise<ProposedTask[]>;
+  /** The recap of a day (YYYY-MM-DD, today when absent), written by the local model from that day's tasks, screen text and speech. */
+  dayRecap(day?: string): Promise<DayRecap>;
   /** Starts a task. One task runs at a time. Steps that may send, share, delete or sign in wait for answerTaskStep. */
   startTask(request: OperatorTaskRequest): Promise<void>;
   /** Stops the running task. A step that waits for the person is declined. */
