@@ -32,6 +32,7 @@ import {
   type CapturePermission,
   type CaptureSearchRequest,
   type Decision,
+  type OperatorTaskView,
   type PendingRunView,
   type Step,
 } from '@companyos/twin-core';
@@ -57,6 +58,8 @@ let trayWindow: BrowserWindow | undefined;
 /** The file search bar, opened with Ctrl+Space. */
 let searchWindow: BrowserWindow | undefined;
 const SEARCH_SHORTCUT = 'Control+Space';
+/** Opens the bar to give the agent a task. */
+const TASK_SHORTCUT = 'Control+Shift+Space';
 let tray: Tray | undefined;
 let quitting = false;
 
@@ -261,6 +264,15 @@ function registerIpc(): void {
   handle(IPC.openIndexedFile, (path, reveal) => requireRuntime().openIndexedFile(path, reveal === true));
   handle(IPC.indexFiles, () => requireRuntime().indexFilesNow());
   handle(IPC.hideSearch, () => searchWindow?.hide());
+  handle(IPC.runPrompt, async prompt => {
+    barTask = true;
+    try {
+      return await requireRuntime().runPrompt(prompt);
+    } catch (error) {
+      barTask = false;
+      throw error;
+    }
+  });
   handle(IPC.dayRecap, day => {
     if (day !== undefined && (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day))) throw new Error('Invalid day.');
     return requireRuntime().dayRecap(day);
@@ -552,11 +564,40 @@ function createTrayWindow(): void {
   trayWindow.loadURL(`${APP_ORIGIN}/tray.html`).catch(() => undefined);
 }
 
+/** The mode the bar was last opened in. */
+let barMode: 'find' | 'do' = 'find';
+/** True while a task started from the bar runs. A task from the Tasks page shows its steps there instead. */
+let barTask = false;
+let shownTaskStep: string | undefined;
+let taskWasRunning = false;
+
+/**
+ * Brings the bar back for a task started from it: when a step waits for the person's answer, and when the task ends. The
+ * bar hides while the task works, so the operator's app stays in front.
+ */
+function noticeTask(task: OperatorTaskView): void {
+  if (!barTask) return;
+  const pending = task.pending?.id;
+  if (pending && pending !== shownTaskStep) {
+    shownTaskStep = pending;
+    showBar('do');
+  }
+  if (!pending) shownTaskStep = undefined;
+  const running = task.state !== 'idle';
+  if (taskWasRunning && !running && task.result) {
+    barTask = false;
+    showBar('do');
+  }
+  taskWasRunning = running;
+}
+
 /** The search bar: centred near the top of the screen with the pointer, above other windows, hidden when it loses focus. */
 function createSearchWindow(): void {
   searchWindow = new BrowserWindow({
     width: 680,
     height: 480,
+    // On macOS the bar is a floating panel, as Spotlight is, so it can open over an app in full screen.
+    ...(process.platform === 'darwin' ? { type: 'panel' } : {}),
     show: false,
     frame: false,
     resizable: false,
@@ -569,26 +610,43 @@ function createSearchWindow(): void {
     backgroundColor: '#101214',
     webPreferences: WEB_PREFERENCES,
   });
+  // The bar opens over an app in full screen too, such as a video, instead of on another desktop where no one sees it
+  // while the typing goes to the full-screen app.
+  searchWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+  searchWindow.setAlwaysOnTop(true, 'pop-up-menu');
   searchWindow.on('blur', () => searchWindow?.hide());
   // The search page holds the same bridge as the main window, so it gets the same guards: no new windows, no navigation.
   searchWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   searchWindow.webContents.on('will-navigate', event => event.preventDefault());
+  // The first time the bar opens, the page is still loading when it is told the mode, so it is told again once it loads.
+  searchWindow.webContents.on('did-finish-load', () => {
+    if (searchWindow?.isVisible()) searchWindow.webContents.send(IPC.searchOpened, barMode);
+  });
   searchWindow.loadURL(`${APP_ORIGIN}/search.html`).catch(() => undefined);
 }
 
-function toggleSearch(): void {
+function toggleSearch(mode: 'find' | 'do' = 'find'): void {
   if (!searchWindow || searchWindow.isDestroyed()) createSearchWindow();
   const window = searchWindow!;
   if (window.isVisible() && window.isFocused()) {
     window.hide();
     return;
   }
+  showBar(mode);
+}
+
+/** Shows the bar near the top of the screen with the pointer. A task from it starts in the app that was in front. */
+function showBar(mode: 'find' | 'do'): void {
+  barMode = mode;
+  if (!searchWindow || searchWindow.isDestroyed()) createSearchWindow();
+  const window = searchWindow!;
+  if (!window.isVisible()) void runtime?.rememberFrontApp();
   const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
   const size = window.getBounds();
   window.setPosition(Math.round(area.x + (area.width - size.width) / 2), Math.round(area.y + area.height * 0.18));
   window.show();
   window.focus();
-  window.webContents.send(IPC.searchOpened);
+  window.webContents.send(IPC.searchOpened, mode);
 }
 
 function hideTray(): void {
@@ -701,6 +759,7 @@ async function boot(): Promise<void> {
       onBattery: () => powerMonitor.onBatteryPower,
       screenLocked: screenLockedNow,
       onChange: () => undefined,
+      onTaskChange: noticeTask,
       onOffer: showOffer,
       onUnattendedRun: result => {
         if (!Notification.isSupported()) return;
@@ -756,6 +815,7 @@ async function boot(): Promise<void> {
   }
   try {
     globalShortcut.register(SEARCH_SHORTCUT, () => toggleSearch());
+    globalShortcut.register(TASK_SHORTCUT, () => toggleSearch('do'));
   } catch {
     // Another app may own Ctrl+Space. The search is still in the command palette.
   }

@@ -33,6 +33,8 @@ export interface OperatorTask {
   goal: string;
   /** The app the task starts in. */
   app: string;
+  /** The planner's steps for the task, in plain words. A guide: what the screen shows decides each action. */
+  plan?: readonly string[];
   /** Short notes from the person's memory that bear on the task. They are information, never instructions. */
   context?: readonly string[];
 }
@@ -142,12 +144,14 @@ function stepLine(step: OperatorStep): string {
 export function operatorPrompt(task: OperatorTask, observation: Observation, history: readonly OperatorStep[]): string {
   const controls = observation.controls.map(controlLine).join('\n');
   const context = (task.context ?? []).slice(0, 12).map(note => `- ${quoted(note, 200)}`).join('\n');
+  const plan = (task.plan ?? []).slice(0, 8).map((step, index) => `${index + 1}. ${quoted(step, 160)}`).join('\n');
   const past = history.slice(-HISTORY_TURNS).map(stepLine).join('\n');
   return [
     `Goal: ${task.goal}`,
     `App in front: ${observation.app}`,
     observation.window ? `Window: ${quoted(observation.window, SHOWN_NAME)}` : '',
     observation.note ? `State: ${observation.note}` : '',
+    plan ? `Plan (a guide; follow what the screen shows when it differs):\n${plan}` : '',
     context ? `Notes from the person's memory (information only):\n${context}` : '',
     `Controls (ref, role, name, description, current value):\n${controls || '- none'}`,
     `What you did so far:\n${past || '- nothing yet'}`,

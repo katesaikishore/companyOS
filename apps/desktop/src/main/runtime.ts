@@ -66,7 +66,9 @@ import { FileSearchIndex, parseQuery, type FileHitView, type FileSearchView } fr
 import { accountIdentity, indexFiles, QueryVectors, type FileIndexProgress } from './file-index';
 import { readSurface } from './app-surface';
 import { createOllamaChat, createOllamaEmbedder, createOllamaVision, visionModelReady } from './vision-ollama';
-import type { OperatorModel, OperatorTaskRequest } from '@companyos/twin-core';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { planTask, type OperatorModel, type OperatorTaskRequest, type OperatorTaskView, type TaskPlan, type TaskPlanView } from '@companyos/twin-core';
 import { OperatorService, type OperatorModelChoice } from './operator-service';
 import { agentDesktopHands } from './operator-hands';
 import { createChutesChat, validChutesKey } from './remote-model';
@@ -74,7 +76,7 @@ import { app, clipboard, desktopCapturer, nativeImage, shell, systemPreferences 
 import { randomUUID } from 'node:crypto';
 import { rmSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { CLOUD_TOKEN_FOLDER, createCloudTokenStore } from './connectors-cloud/seal';
 import { BROWSER_APP_NAMES, startBrowserBridge, type BrowserBridge, type BrowserVisit } from './browser-bridge';
 import { CaptureService } from './capture';
@@ -136,6 +138,8 @@ interface RuntimeOptions {
   screenLocked?: () => boolean | undefined;
   /** Called when model downloads change, so open pages refresh. */
   onChange: () => void;
+  /** Called when the task operator's state changes, so the bar can come back when a step waits for the person or a task ends. */
+  onTaskChange?: (task: OperatorTaskView) => void;
   /** Called when a routine is offered. The main process shows the tray and a notification. */
   onOffer: (offer: PendingRunView) => void;
   /** Called after a level 4 run so the owner can see that it ran or stopped. */
@@ -205,6 +209,11 @@ const FILE_INDEX_EVERY_MS = 6 * 3_600_000;
 const FILE_RESULTS = 12;
 /** The longest a search waits for its query embedding before ranking without meaning. */
 const QUERY_EMBED_TIMEOUT_MS = 400;
+const execFileAsync = promisify(execFile);
+/** The longest the bar waits for the local model's plan, which covers loading the model. */
+const PLAN_TIMEOUT_MS = 60_000;
+/** The twin's own app names. The operator never reads or acts in its own window. */
+const OWN_APPS = ['companyOS Twin', 'companyOS', 'Electron'];
 /** Files that would run when opened: apps, scripts, installers and shortcuts. */
 const RUNNABLE = /\.(app|command|sh|bash|zsh|tool|terminal|workflow|scpt|applescript|pkg|mpkg|dmg|jar|py|rb|pl|js|exe|bat|cmd|ps1|webloc|inetloc|url|fileloc)$/i;
 const PREVIEW_CACHE = 300;
@@ -272,6 +281,8 @@ export class TwinRuntime {
   private discordCounts = { messages: 0, conversations: 0 };
   /** The file search index in memory, with its knowledge graph, rebuilt after each pass. */
   private files: FileSearchIndex | undefined;
+  /** The app in front when the bar last opened. */
+  private barFrontApp: string | undefined;
   /** Who uses this computer, read from the account once, for questions that say "my". */
   private identity: Identity | undefined;
   /** Query embeddings by their words, so a repeated query does not wait for the model. */
@@ -421,8 +432,11 @@ export class TwinRuntime {
       memory: goal => this.memoryNotes(goal),
       hasChutesKey: () => hasChutesKey(options.userData),
       // The twin never operates its own window: its pages show captured text and the approvals themselves.
-      ownApps: ['companyOS Twin', 'companyOS', 'Electron'],
-      onChange: () => options.onChange(),
+      ownApps: OWN_APPS,
+      onChange: () => {
+        options.onChange();
+        options.onTaskChange?.(this.operator.view());
+      },
     });
     // Inside the models folder, so wiping that folder removes the bundle with it.
     this.laya = new LayaBundleManager({
@@ -961,6 +975,49 @@ export class TwinRuntime {
     const job = writeRecap(view, hits, createOllamaChat({ record })).finally(() => this.recapsRunning.delete(view.day));
     this.recapsRunning.set(view.day, job);
     return job;
+  }
+
+  /** Remembers the app in front as the bar opens, so a task from the bar starts where the person was. */
+  async rememberFrontApp(): Promise<void> {
+    this.barFrontApp = await (this.platform?.frontmost().catch(() => undefined) ?? Promise.resolve(undefined));
+  }
+
+  /**
+   * Runs a task typed in the bar. The local model plans it from the words, the apps that are running and the app that was
+   * in front: the app to start in and a few steps. Then the operator does it as it does a task from the Tasks page, every
+   * step checked and the risky ones asked about. Without a plan, the task starts in the app that was in front.
+   */
+  async runPrompt(prompt: unknown): Promise<TaskPlanView> {
+    const goal = typeof prompt === 'string' ? prompt.trim() : '';
+    if (goal.length === 0 || goal.length > 500) throw new Error('Describe the task in 1 to 500 characters.');
+    // The twin's own window and the excluded apps are never planned into, as the operator never acts in them.
+    const off = new Set([...this.agent.configuration.excludedApps, ...OWN_APPS].map(name => name.toLowerCase()));
+    const front = this.barFrontApp && !off.has(this.barFrontApp.toLowerCase()) ? this.barFrontApp : undefined;
+    const running = (await this.runningApps()).filter(name => !off.has(name.toLowerCase()));
+    const record = (entry: NetworkEntry): void => this.agent.recordNetworkCall(entry);
+    let plan: TaskPlan | undefined;
+    try {
+      plan = await planTask(goal, { running, ...(front ? { front } : {}) }, createOllamaChat({ record }), AbortSignal.timeout(PLAN_TIMEOUT_MS));
+    } catch {
+      plan = undefined;
+    }
+    const app = plan && !off.has(plan.app.toLowerCase()) ? plan.app : (front ?? 'Finder');
+    const steps = plan?.steps ?? [];
+    await this.operator.start({ goal, app, plan: steps });
+    return { app, steps, planned: plan !== undefined };
+  }
+
+  /** The apps with windows the person works in, by name, as agent-desktop lists them. Empty when it cannot. */
+  private async runningApps(): Promise<string[]> {
+    const binary = this.agent.configuration.agentDesktopPath.trim();
+    if (!isAbsolute(binary)) return [];
+    try {
+      const { stdout } = await execFileAsync(binary, ['list-apps'], { timeout: 5_000, maxBuffer: 2 * 1024 * 1024 });
+      const apps = (JSON.parse(stdout) as { data?: { apps?: Array<{ name?: unknown; presentation?: unknown }> } }).data?.apps ?? [];
+      return [...new Set(apps.filter(app => app.presentation === 'foreground' && typeof app.name === 'string').map(app => app.name as string))];
+    } catch {
+      return [];
+    }
   }
 
   /** Starts a task from the Tasks page. The operator checks every step; this only passes the request on. */

@@ -183,6 +183,10 @@ export function agentDesktopHands(binary: string, exec: Exec = defaultExec, curs
       if (result?.error?.code === 'WINDOW_NOT_FOUND') {
         return { app, controls: [], note: 'No window of the app is on the screen. It may have none open, or it may be on another desktop.' };
       }
+      // An app that is not running is a state too: the model can launch it, as a task typed in the bar often needs.
+      if (result?.error?.code === 'APP_NOT_FOUND') {
+        return { app, controls: [], note: 'The app is not running. Launch it with the launch action to start.' };
+      }
       if (!result?.ok) throw new Error('agent-desktop could not read that application.');
       // The window title tells the model where the app is, so it can see that a step such as opening a folder worked.
       const title = clean((result.data as { window?: { title?: unknown } } | undefined)?.window?.title, MAX_TITLE);

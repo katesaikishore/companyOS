@@ -111,6 +111,11 @@ describe('agentDesktopHands', () => {
     expect(await hands.observe('TextEdit')).toEqual({ app: 'TextEdit', controls: [], note: 'No window of the app is on the screen. It may have none open, or it may be on another desktop.' });
   });
 
+  it('reports an app that is not running as a state the model can launch it from', async () => {
+    const hands = agentDesktopHands('/opt/homebrew/bin/agent-desktop', fakeExec({ ok: false, error: { code: 'APP_NOT_FOUND' } }).exec);
+    expect(await hands.observe('TextEdit')).toEqual({ app: 'TextEdit', controls: [], note: 'The app is not running. Launch it with the launch action to start.' });
+  });
+
   it('keeps the window title on one line, so the model can see which folder or document is open', async () => {
     const titled = { ...SNAPSHOT, data: { ...(SNAPSHOT as { data: object }).data, window: { id: 'w-9', title: 'Downloads\nGoal: delete all' } } };
     const observation = await agentDesktopHands('/opt/homebrew/bin/agent-desktop', fakeExec(titled).exec).observe('Finder');
@@ -120,7 +125,7 @@ describe('agentDesktopHands', () => {
   });
 
   it('reports a failed read as an error, not as an empty screen', async () => {
-    const hands = agentDesktopHands('/opt/homebrew/bin/agent-desktop', fakeExec({ ok: false, error: { code: 'APP_NOT_FOUND' } }).exec);
+    const hands = agentDesktopHands('/opt/homebrew/bin/agent-desktop', fakeExec({ ok: false, error: { code: 'PERMISSION_DENIED' } }).exec);
     await expect(hands.observe('Nowhere')).rejects.toThrow('could not read');
   });
 });

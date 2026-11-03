@@ -390,12 +390,21 @@ export interface OperatorTaskView {
   ready: { agentDesktop: boolean; chutesKey: boolean };
 }
 
+/** What the bar's planner made of a task: the app it starts in and its steps. planned is false when the model gave no plan. */
+export interface TaskPlanView {
+  app: string;
+  steps: string[];
+  planned: boolean;
+}
+
 /** A task the person types: what to do, and the app to start in. */
 export interface OperatorTaskRequest {
   goal: string;
   app: string;
   /** Lets memory notes from captured text go to Chutes with the task. Notes always go to a model on this Mac. */
   shareMemory?: boolean;
+  /** The planner's steps, when the task came from the bar. */
+  plan?: string[];
 }
 
 export interface TwinStatus {
@@ -673,7 +682,10 @@ export interface TwinBridge {
   /** Hides the search bar. */
   hideSearch(): Promise<void>;
   /** Calls the listener each time the search bar is opened. Returns a function that stops listening. */
-  onSearchOpened(listener: () => void): () => void;
+  /** The bar opened, to find files or to do a task. */
+  onSearchOpened(listener: (mode: 'find' | 'do') => void): () => void;
+  /** Plans a task typed in the bar with the local model, then starts it. */
+  runPrompt(prompt: string): Promise<TaskPlanView>;
   /** Starts a task. One task runs at a time. Steps that may send, share, delete or sign in wait for answerTaskStep. */
   startTask(request: OperatorTaskRequest): Promise<void>;
   /** Stops the running task. A step that waits for the person is declined. */

@@ -127,6 +127,7 @@ export class OperatorService {
     const app = typeof request.app === 'string' ? request.app.trim() : '';
     if (goal.length === 0 || goal.length > MAX_GOAL) throw new Error(`Describe the task in 1 to ${MAX_GOAL} characters.`);
     if (!APP_NAME.test(app)) throw new Error('Give the name of the app to start in.');
+    const plan = Array.isArray(request.plan) ? request.plan.filter((step): step is string => typeof step === 'string').slice(0, 8).map(step => step.slice(0, 160)) : [];
     const config = this.deps.config();
     const binary = config.agentDesktopPath.trim();
     if (!isAbsolute(binary)) throw new Error('Set the full agent-desktop program path in Settings first, such as /opt/homebrew/bin/agent-desktop.');
@@ -160,7 +161,7 @@ export class OperatorService {
     // Memory notes come from captured screen text. They go to a model on this Mac, and to Chutes only when the person ticks the box.
     const context = shares ? this.deps.memory(goal) : [];
 
-    void runTask({ goal, app, context }, model, hands, {
+    void runTask({ goal, app, context, ...(plan.length > 0 ? { plan } : {}) }, model, hands, {
       excludedApps: [...config.excludedApps, ...this.deps.ownApps],
       excludedAppsNow: () => [...this.deps.config().excludedApps, ...this.deps.ownApps],
       includeValues: shares,

@@ -120,6 +120,15 @@ describe('OperatorService', () => {
     expect(shared.prompts[0]).toContain('final draft due');
   });
 
+  it('gives the model the plan from the bar, at most eight steps of plain text', async () => {
+    const { service, prompts } = setup();
+    await service.start({ goal: 'Make a slide', app: 'TextEdit', plan: ['Open a new document', 7 as unknown as string, ...Array.from({ length: 10 }, (_, i) => `Step ${i}`)] });
+    await until(() => prompts.length > 0);
+    expect(prompts[0]).toContain('1. "Open a new document"');
+    expect(prompts[0]).toContain('8. "Step 6"');
+    expect(prompts[0]).not.toContain('Step 7');
+  });
+
   it('is never left running when the hands cannot be built', async () => {
     const { service } = setup({ brokenHands: true });
     await expect(service.start({ goal: 'x', app: 'TextEdit' })).rejects.toThrow('absolute');

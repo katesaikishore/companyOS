@@ -46,6 +46,7 @@ export const IPC = {
   openIndexedFile: 'twin:open-indexed-file',
   indexFiles: 'twin:index-files',
   searchOpened: 'twin:search-opened',
+  runPrompt: 'twin:run-prompt',
   hideSearch: 'twin:hide-search',
   startTask: 'twin:start-task',
   stopTask: 'twin:stop-task',

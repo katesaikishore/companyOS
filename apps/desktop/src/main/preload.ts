@@ -53,6 +53,7 @@ const CHANNEL = {
   indexFiles: 'twin:index-files',
   searchOpened: 'twin:search-opened',
   hideSearch: 'twin:hide-search',
+  runPrompt: 'twin:run-prompt',
   startTask: 'twin:start-task',
   stopTask: 'twin:stop-task',
   answerTaskStep: 'twin:answer-task-step',
@@ -117,8 +118,9 @@ const bridge: TwinBridge = {
   openIndexedFile: (path, reveal) => ipcRenderer.invoke(CHANNEL.openIndexedFile, path, reveal),
   indexFiles: () => ipcRenderer.invoke(CHANNEL.indexFiles),
   hideSearch: () => ipcRenderer.invoke(CHANNEL.hideSearch),
+  runPrompt: prompt => ipcRenderer.invoke(CHANNEL.runPrompt, prompt),
   onSearchOpened: listener => {
-    const wrapped = () => listener();
+    const wrapped = (_event: unknown, mode: unknown) => listener(mode === 'do' ? 'do' : 'find');
     ipcRenderer.on(CHANNEL.searchOpened, wrapped);
     return () => ipcRenderer.removeListener(CHANNEL.searchOpened, wrapped);
   },

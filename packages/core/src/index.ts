@@ -53,6 +53,7 @@ export * from './apps/vision';
 export * from './week/ahead';
 export * from './operator/actions';
 export * from './operator/loop';
+export * from './operator/plan-task';
 export * from './operator/understand';
 export * from './recap';
 export * from './discord';
