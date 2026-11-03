@@ -162,8 +162,12 @@ name routines. Typing, clicking and sending are not built, and no release has be
 
 ## Install
 
-**Windows:** download the installer from [v0.1.0](https://github.com/katesaikishore/companyOS/releases/tag/v0.1.0) and
-run it. It is a 64-bit NSIS `.exe`, built by the release workflow on GitHub-hosted Windows. It is not code-signed, so
+| | Installer | Status |
+| --- | --- | --- |
+| <img src="https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/windows.svg" width="18" alt="" /> **Windows** (64-bit) | [companyOS-Twin-0.1.0-x64.exe](https://github.com/katesaikishore/companyOS/releases/download/v0.1.0/companyOS-Twin-0.1.0-x64.exe) | Available in v0.1.0 |
+| <img src="https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/apple.svg" width="18" alt="" /> **macOS** (Apple silicon) | Not yet | Needs a Developer ID signed and notarised build |
+
+**Windows:** download the installer from the table above and run it. It is a 64-bit NSIS `.exe`, built by the release workflow on GitHub-hosted Windows. It is not code-signed, so
 Windows may warn that the publisher is unknown. Its first run on a real Windows machine is still to be checked.
 
 **macOS and Linux:** no installer is attached to a release yet. The macOS build needs a Developer ID certificate and
