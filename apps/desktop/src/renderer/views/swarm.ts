@@ -2,7 +2,7 @@ import type { AutomationView, LiveRunView, TwinStatus } from '@companyos/twin-co
 import { h } from '../dom.js';
 import { button, emptyState, pageHeader } from '../components/ui.js';
 import { levelLabel } from '../labels.js';
-import { call, go, pending, requestRender, state } from '../store.js';
+import { call, go, pending, requestRender, setNotice, state } from '../store.js';
 
 const KEY = 'swarm';
 /** The most automations one swarm starts. Mirrors SWARM_MAX in the main process. */
@@ -107,7 +107,7 @@ function pickCard(ready: readonly AutomationView[]): HTMLElement {
                   state.swarmName = '';
                   // Not awaited: the swarm works on while the page is free to start another, and the live view follows them all.
                   twin.runSwarm(picked, name).catch((error: unknown) => {
-                    state.notice = { tone: 'error', text: error instanceof Error ? error.message : 'The swarm could not start.' };
+                    setNotice(error instanceof Error ? error.message : 'The swarm could not start.');
                     requestRender();
                   });
                 }),
