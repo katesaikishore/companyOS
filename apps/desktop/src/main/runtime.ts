@@ -327,9 +327,13 @@ export class TwinRuntime {
     );
     this.discord = new DiscordReader({
       binary: () => this.agent.configuration.agentDesktopPath,
+      // Screen text must be on and allowed, and capture must not be paused or locked. Being idle does not stop it: the window
+      // shows the same messages whether the person is at the desk or not, and the reader only reads what is shown.
       allowed: () => {
         const config = this.agent.configuration;
-        return config.discordReadingEnabled && this.screenState() === 'on' && !isExcludedApp('discord', config.excludedApps);
+        const { locked, paused } = this.captureFlags();
+        const screen = this.screenState();
+        return config.discordReadingEnabled && (screen === 'on' || screen === 'paused') && !locked && !paused && !isExcludedApp('discord', config.excludedApps);
       },
       store: message => this.agent.ingestScreen({ ts: message.ts, app: DISCORD_MESSAGES_APP, windowClass: 'chat', text: discordLine(message), mediaId: null }),
       seenFile: join(options.userData, 'discord-seen.json'),
