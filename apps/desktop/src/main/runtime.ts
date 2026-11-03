@@ -27,7 +27,7 @@ import {
   type CapturePermission,
   type CaptureSearchRequest,
   type Decision,
-  type Approval,
+  type StepApproval,
   type DraftStep,
   type Executor,
   type HardwareProfile,
@@ -58,6 +58,13 @@ import {
   normalizeAppName,
 } from '@companyos/twin-core';
 import { SPEAKER_MIN_SAMPLES, SPEAKER_MODEL_ID, WHISPER_MODEL_ID } from '@companyos/twin-core';
+import { discoverFromScreen, type ScreenDiscovery } from '@companyos/twin-core';
+import { readSurface } from './app-surface';
+import { createOllamaChat, createOllamaVision, visionModelReady } from './vision-ollama';
+import type { OperatorModel, OperatorTaskRequest } from '@companyos/twin-core';
+import { OperatorService, type OperatorModelChoice } from './operator-service';
+import { agentDesktopHands } from './operator-hands';
+import { createChutesChat, validChutesKey } from './remote-model';
 import { app, clipboard, desktopCapturer, systemPreferences } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { rmSync } from 'node:fs';
@@ -70,7 +77,16 @@ import { createKeyboardSource } from './keyboard';
 import { KeystrokeService } from './keystroke-service';
 import { AudioCaptureService, WhisperTranscriber, microphoneGranted, type SpeakerIdentifier } from './audio-capture';
 import { SpeakerEmbedder } from './speaker-embedder';
-import { destroyStoredSecrets, loadOrCreateApiToken, loadOrCreateDataKey, rotateApiToken as replaceApiToken } from './keys';
+import {
+  clearChutesKey as removeChutesKey,
+  destroyStoredSecrets,
+  hasChutesKey,
+  loadChutesKey,
+  loadOrCreateApiToken,
+  loadOrCreateDataKey,
+  rotateApiToken as replaceApiToken,
+  saveChutesKey,
+} from './keys';
 import { LOCAL_API_HOST, LOCAL_API_PORT, createLocalApi, withheldFromLocalApi, type LocalApi } from './local-api';
 import { MediaStore } from './media-store';
 import { readAccessibleText } from './accessibility';
@@ -92,7 +108,7 @@ import type { LocalConnectorKind } from './connectors-validate';
 export interface RuntimeOptions {
   userData: string;
   /** Asks a person to approve one step. The main process shows a native dialog. */
-  approve: (automation: Automation, step: Step, decision: Decision) => Promise<Approval>;
+  approve: (automation: Automation, step: Step, decision: Decision) => Promise<StepApproval>;
   /**
    * Asks the person once whether to start a plan's runs, naming each automation. The main process shows a native dialog.
    * Saying yes starts the runs; each one still asks before any step that acts on an app.
@@ -160,6 +176,12 @@ const MAX_FRAME_BYTES = 512 * 1024;
  * Connects the twin engine to the operating system and to the model installer. It is the only thing the IPC
  * layer talks to, so the page never receives a key, a raw event, or a path it did not ask for.
  */
+/** Why an on-demand job search stopped before the model ran. */
+export type FindJobsRefusal = 'no_surface' | 'not_in_front' | 'not_allowed' | 'model_offline' | 'model_missing' | 'no_frame';
+
+/** The longest an on-demand screen grab may take before it counts as no frame. */
+const FIND_JOBS_GRAB_MS = 10_000;
+
 export class TwinRuntime {
   private readonly agent: TwinAgent;
   private readonly capture: CaptureService;
@@ -167,6 +189,8 @@ export class TwinRuntime {
   private readonly keystrokes: KeystrokeService;
   private readonly platform: Platform | undefined;
   private readonly models: ModelManager;
+  /** The task operator behind the Tasks page. One task runs at a time. */
+  private readonly operator: OperatorService;
   /** The optional decision-model bundle. Nothing in the app asks it for a decision. */
   private readonly laya: LayaBundleManager;
   /** Listens for visits from the browser extension. Exists only while browser capture is on. */
@@ -324,6 +348,16 @@ export class TwinRuntime {
         options.onChange();
       },
       fetchImpl: options.fetchImpl,
+    });
+    this.operator = new OperatorService({
+      config: () => this.agent.configuration,
+      hands: binary => agentDesktopHands(binary),
+      model: (choice, modelOptions) => this.operatorModel(choice, modelOptions.sharesScreenText),
+      memory: goal => this.memoryNotes(goal),
+      hasChutesKey: () => hasChutesKey(options.userData),
+      // The twin never operates its own window: its pages show captured text and the approvals themselves.
+      ownApps: ['companyOS Twin', 'companyOS', 'Electron'],
+      onChange: () => options.onChange(),
     });
     // Inside the models folder, so wiping that folder removes the bundle with it.
     this.laya = new LayaBundleManager({
@@ -518,6 +552,7 @@ export class TwinRuntime {
       ...(this.lastPlan ? { lastPlan: this.lastPlan } : {}),
       activeRuns: this.activeRuns,
       liveRuns: this.liveRuns(),
+      operator: this.operator.view(),
       stats: {
         routinesLearned: suggestions.length + automations.length,
         waiting: suggestions.length + drafts,
@@ -581,7 +616,70 @@ export class TwinRuntime {
   }
 
   stopAllAutomations(): void {
+    // The task stops first, so a failed settings write cannot leave it running.
+    this.operator.stop();
     this.agent.updateConfig({ automationsEnabled: false });
+  }
+
+  /** Starts a task from the Tasks page. The operator checks every step; this only passes the request on. */
+  startTask(request: OperatorTaskRequest): Promise<void> {
+    return this.operator.start(request);
+  }
+
+  stopTask(): void {
+    this.operator.stop();
+  }
+
+  answerTaskStep(id: string, approve: boolean): void {
+    this.operator.answer(id, approve);
+  }
+
+  /** Saves the Chutes key in the keychain. It is never sent back to a page. */
+  async setChutesKey(key: string): Promise<void> {
+    if (!validChutesKey(key)) throw new Error('That is not a Chutes key. A Chutes key starts with cpk_.');
+    await saveChutesKey(this.options.userData, key);
+    this.options.onChange();
+  }
+
+  clearChutesKey(): void {
+    removeChutesKey(this.options.userData);
+    this.options.onChange();
+  }
+
+  /** The model the operator uses. Chutes needs a saved key; without one there is no model, and the task does not start. */
+  private async operatorModel(choice: OperatorModelChoice, sharesScreenText: boolean): Promise<OperatorModel | undefined> {
+    const record = (entry: NetworkEntry): void => this.agent.recordNetworkCall(entry);
+    if (choice === 'local') return createOllamaChat({ record });
+    const key = await loadChutesKey(this.options.userData);
+    return key && validChutesKey(key) ? createChutesChat({ apiKey: key, sharesScreenText, record }) : undefined;
+  }
+
+  /**
+   * Short notes from the last week of captured screen text that share a word with the goal. The search already leaves out
+   * excluded apps. The notes are information for the model, never instructions.
+   */
+  private memoryNotes(goal: string): string[] {
+    const words = [...new Set(goal.toLowerCase().match(/[\p{L}\p{N}]{4,}/gu) ?? [])].sort((a, b) => b.length - a.length).slice(0, 3);
+    const to = Date.now();
+    const from = to - 7 * 86_400_000;
+    const seen = new Set<string>();
+    const notes: string[] = [];
+    for (const word of words) {
+      let hits: CaptureHitView[] = [];
+      try {
+        // Screen text only. What the microphone heard is never sent with a task.
+        hits = this.agent.searchCapture({ text: word, kind: 'screen', from, to });
+      } catch {
+        continue;
+      }
+      for (const hit of hits.slice(0, 4)) {
+        if (seen.has(hit.id)) continue;
+        seen.add(hit.id);
+        notes.push(`${hit.app ?? 'an app'}, ${new Date(hit.ts).toLocaleString()}: ${hit.snippet}`);
+        if (notes.length >= 8) return notes;
+      }
+    }
+    return notes;
   }
 
   acceptRoutine(routineId: string, name?: string): AutomationView {
@@ -610,6 +708,37 @@ export class TwinRuntime {
   }
 
   /** Confirms, renames, merges or splits one of a day's tasks. The engine checks the decision before it is stored. */
+  /**
+   * On demand, for the application in front: reads its controls and the screen, and asks the local vision model what jobs it
+   * can do. The result is proposals only. Nothing runs, nothing is saved, and the picture stays on this Mac. It needs the
+   * agent-desktop program path in Settings, the application in front, a readable screen, and the Ollama server running.
+   * The picture is the whole primary display, as the screen channel captures it, so a window of another app that is visible
+   * on that display can be in it. Excluded apps are checked only for the app in front.
+   */
+  async findJobs(app: string): Promise<ScreenDiscovery | { reason: FindJobsRefusal }> {
+    const binary = this.agent.configuration.agentDesktopPath.trim();
+    if (binary === '') return { reason: 'no_surface' };
+    await this.refreshFrontApp();
+    if (this.frontApp !== app) return { reason: 'not_in_front' };
+    // The screen rules run before anything is read: the setting, a pause or lock, an excluded app, a browser, and secure input.
+    const secureInput = await this.checkSecureInput();
+    if (!screenDecision({ ...this.screenContext(), secureInput }).capture) return { reason: 'not_allowed' };
+    let surface;
+    try {
+      surface = await readSurface(binary, app);
+    } catch {
+      return { reason: 'no_surface' };
+    }
+    const model = await visionModelReady({ record: entry => this.agent.recordNetworkCall(entry) });
+    if (model !== 'ready') return { reason: model === 'server_down' ? 'model_offline' : 'model_missing' };
+    // The grab has a time limit, and a failed grab is a missing frame, not an error.
+    const timeout = new Promise<null>(resolve => setTimeout(() => resolve(null), FIND_JOBS_GRAB_MS));
+    const frame = await Promise.race([this.grabFrame().catch((): null => null), timeout]);
+    if (!frame) return { reason: 'no_frame' };
+    const vision = createOllamaVision({ record: entry => this.agent.recordNetworkCall(entry) });
+    return discoverFromScreen(vision, surface, frame.png);
+  }
+
   decideTask(input: unknown): void {
     this.agent.decideTask(input);
   }
@@ -1022,6 +1151,7 @@ export class TwinRuntime {
    * their folders go, so nothing can be written back into them. Nothing can be recovered afterwards.
    */
   async deleteAll(): Promise<void> {
+    this.operator.stop();
     this.stop();
     await this.stopCapture();
     this.disableBrowserCapture();

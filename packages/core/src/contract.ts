@@ -314,6 +314,37 @@ export interface CaptureHitView {
   speaker?: string;
 }
 
+/** One step of a task, as the Tasks page shows it. */
+export interface OperatorStepView {
+  n: number;
+  /** The step in plain words, such as: Click "New Document". */
+  text: string;
+  outcome: 'landed' | 'unverified' | 'not_landed' | 'may_have_landed' | 'held' | 'refused' | 'finished' | 'invalid' | 'no_answer';
+  why?: string;
+}
+
+/** The task operator: the task running now, the step waiting for the person, and how the last task ended. */
+export interface OperatorTaskView {
+  state: 'idle' | 'running' | 'waiting';
+  goal?: string;
+  app?: string;
+  model: 'local' | 'chutes';
+  steps: OperatorStepView[];
+  /** The step that waits for the person. Answer it with answerTaskStep. */
+  pending?: { id: string; text: string; why: string; detail?: string };
+  result?: { status: 'done' | 'failed' | 'refused' | 'declined' | 'stopped' | 'step_limit'; summary?: string };
+  /** Whether a task can start: the agent-desktop path is set, and a Chutes key is saved when Chutes is chosen. */
+  ready: { agentDesktop: boolean; chutesKey: boolean };
+}
+
+/** A task the person types: what to do, and the app to start in. */
+export interface OperatorTaskRequest {
+  goal: string;
+  app: string;
+  /** Lets memory notes from captured text go to Chutes with the task. Notes always go to a model on this Mac. */
+  shareMemory?: boolean;
+}
+
 export interface TwinStatus {
   /**
    * Activity capture (state and detail), then screen text, microphone text and the local API. Counts and sizes cover
@@ -372,6 +403,8 @@ export interface TwinStatus {
   connectorCounts?: Record<string, number>;
   /** The cloud accounts the app can connect, read-only: Google Calendar and GitHub. Optional, so a status built without it still type-checks. */
   cloudAccounts?: CloudAccountView[];
+  /** The task operator's current task, if any. */
+  operator: OperatorTaskView;
   /** The newest kept run of each write pipe, by pipe id. A pipe with no entry has no kept run. Holds no text. */
   pipeOutputs?: Record<string, PipeOutputSummaryView>;
   /** Automations ranked by the Recall observations of their apps over the last seven days, highest priority first. */
@@ -561,6 +594,15 @@ export interface TwinBridge {
   connectCloud(provider: CloudAccountView['provider']): Promise<number>;
   /** Disconnects a cloud account: deletes its sealed tokens and its items, and removes it from the list. */
   disconnectCloud(provider: CloudAccountView['provider']): Promise<void>;
+  /** Starts a task. One task runs at a time. Steps that may send, share, delete or sign in wait for answerTaskStep. */
+  startTask(request: OperatorTaskRequest): Promise<void>;
+  /** Stops the running task. A step that waits for the person is declined. */
+  stopTask(): Promise<void>;
+  /** Answers the step that waits for the person. */
+  answerTaskStep(id: string, approve: boolean): Promise<void>;
+  /** Saves the Chutes key in the OS keychain. The key never returns to the page. */
+  setChutesKey(key: string): Promise<void>;
+  clearChutesKey(): Promise<void>;
 
   exportData(): Promise<string>;
   deleteAll(): Promise<void>;

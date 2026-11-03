@@ -73,8 +73,28 @@ export async function rotateApiToken(userData: string): Promise<string> {
   return token;
 }
 
+const CHUTES_KEY_FILE = 'chutes-key.bin';
+
+/** The Chutes API key the person saved, sealed like the data key. Undefined when none is saved. */
+export async function loadChutesKey(userData: string): Promise<string | undefined> {
+  return (await readSealed(join(userData, CHUTES_KEY_FILE)))?.toString('utf8');
+}
+
+export async function saveChutesKey(userData: string, key: string): Promise<void> {
+  await writeSealed(join(userData, CHUTES_KEY_FILE), Buffer.from(key, 'utf8'));
+}
+
+export function clearChutesKey(userData: string): void {
+  rmSync(join(userData, CHUTES_KEY_FILE), { force: true });
+}
+
+export function hasChutesKey(userData: string): boolean {
+  return existsSync(join(userData, CHUTES_KEY_FILE));
+}
+
 /** Removes every sealed secret. Without the data key the stored records are unreadable. */
 export function destroyStoredSecrets(userData: string): void {
   rmSync(join(userData, 'data-key.bin'), { force: true });
   rmSync(join(userData, 'api-key.bin'), { force: true });
+  rmSync(join(userData, CHUTES_KEY_FILE), { force: true });
 }

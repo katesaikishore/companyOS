@@ -84,7 +84,7 @@ const DESKTOP_OPS: readonly Step['op'][] = ['click', 'paste_text', 'press_key', 
  * A person's answer to one step's approval: no, yes for this step, or yes for every step of this run. The last still
  * runs each step through the policy, so a denied step stops the run; it only spares the person a question per step.
  */
-export type Approval = boolean | 'run';
+export type StepApproval = boolean | 'run';
 
 export type RunMode = 'dry_run' | 'supervised' | 'unattended';
 
@@ -120,7 +120,7 @@ export interface RunRequest {
   /** Called as each step begins, before it is checked or asked about, so a live view can say what the run is doing. */
   onStep?: (index: number, total: number, step: Step) => void;
   /** Called only for steps the policy marks 'ask', and only in supervised mode. 'run' approves the rest of this run. */
-  approve?: (step: Step, decision: Decision) => Promise<Approval>;
+  approve?: (step: Step, decision: Decision) => Promise<StepApproval>;
   /**
    * How long the postcondition of an open or key step waits for the OS to bring the expected app forward. Focus
    * can take a moment to move. Defaults to 1.5 seconds. Tests set it to 0.
