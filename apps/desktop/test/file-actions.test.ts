@@ -60,6 +60,17 @@ describe.runIf(process.platform !== 'win32')('gatherDuplicates', () => {
     expect(existsSync(join(h, 'Review', 'earlier.txt'))).toBe(true);
   });
 
+  it('never moves a file out of a code project or a dependency folder', async () => {
+    const h = home();
+    file(join(h, 'Downloads', 'products.csv'), 'id,name', 3);
+    file(join(h, 'Downloads', 'app', 'package.json'), '{}', 2);
+    file(join(h, 'Downloads', 'app', 'public', 'products.csv'), 'id,name', 1);
+    file(join(h, 'Downloads', 'tool', 'node_modules', 'x', 'products.csv'), 'id,name', 1);
+    const result = await gatherDuplicates(h, ['~/Downloads'], '~/Review', NOW);
+    expect(result.moved).toBe(0);
+    expect(existsSync(join(h, 'Downloads', 'app', 'public', 'products.csv'))).toBe(true);
+  });
+
   it('refuses a folder outside home, a missing folder, and a review folder inside a scanned one, before moving anything', async () => {
     const h = home();
     file(join(h, 'Downloads', 'a.txt'), 'dup', 2);

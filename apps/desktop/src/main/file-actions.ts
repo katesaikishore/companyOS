@@ -10,8 +10,8 @@ import { StepRefusedError } from '@companyos/twin-core';
  * the review folder, under the path it had below the home folder, so the person can look before deleting anything. A
  * manifest in the review folder lists every move, so it can be undone. Nothing is deleted.
  *
- * Only regular files that are on this disk are read. Hidden files and folders, app and other bundles, symbolic links and
- * the review folder itself are skipped. A file whose contents are only in iCloud has no blocks on disk; reading it would
+ * Only regular files that are on this disk are read. Hidden files and folders, app and other bundles, symbolic links, the
+ * review folder itself, and code projects and their dependency folders are skipped, so no project loses a file. A file whose contents are only in iCloud has no blocks on disk; reading it would
  * download it and use the space being freed, so it is skipped too.
  */
 
@@ -19,6 +19,10 @@ import { StepRefusedError } from '@companyos/twin-core';
 const MAX_DEPTH = 6;
 const MAX_FILES = 50_000;
 /** Folders with these extensions are bundles macOS shows as one file, such as an app or a photo library. */
+/** Files that mark a folder as a code project. A project's files are never moved, since moving one could break it. */
+const PROJECT_MARKERS = ['.git', 'package.json', 'pyproject.toml', 'setup.py', 'Cargo.toml', 'go.mod', 'pom.xml', 'build.gradle', 'composer.json', 'Gemfile'];
+/** Folders of installed dependencies, which hold many identical files on purpose. */
+const DEPENDENCY_FOLDER = /^(node_modules|vendor|site-packages|bower_components|Pods)$/;
 const BUNDLE = /\.(app|bundle|framework|photoslibrary|musiclibrary|tvlibrary|pkg|plugin|kext|xcodeproj|xcworkspace|lproj|rtfd|key|pages|numbers)$/i;
 
 const MESSAGES = {
@@ -51,6 +55,8 @@ async function walk(folder: string, skip: string, depth: number, out: Found[]): 
   } catch {
     return;
   }
+  // A code project is left whole: none of its files is a candidate to move.
+  if (entries.some(entry => PROJECT_MARKERS.includes(entry.name))) return;
   for (const entry of entries) {
     if (out.length >= MAX_FILES) return;
     if (entry.name.startsWith('.')) continue;
@@ -58,7 +64,7 @@ async function walk(folder: string, skip: string, depth: number, out: Found[]): 
     if (path === skip) continue;
     if (entry.isSymbolicLink()) continue;
     if (entry.isDirectory()) {
-      if (!BUNDLE.test(entry.name)) await walk(path, skip, depth + 1, out);
+      if (!BUNDLE.test(entry.name) && !DEPENDENCY_FOLDER.test(entry.name)) await walk(path, skip, depth + 1, out);
       continue;
     }
     if (!entry.isFile()) continue;
