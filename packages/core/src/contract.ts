@@ -7,6 +7,7 @@ import type { EffectClass, TwinConfig, AutonomyLevel, CaptureKind, WindowClass }
 import type { DownloadState, HardwareProfile, InstalledModel, LayaBundleView, NetworkEntry, SetupPlan } from './models/types';
 import type { RunResult } from './runner';
 import type { TaskDecision } from './tasks';
+import type { ProposedTask } from './operator/understand';
 
 /**
  * The contract between the desktop main process and its pages (the app and the tray).
@@ -594,6 +595,11 @@ export interface TwinBridge {
   connectCloud(provider: CloudAccountView['provider']): Promise<number>;
   /** Disconnects a cloud account: deletes its sealed tokens and its items, and removes it from the list. */
   disconnectCloud(provider: CloudAccountView['provider']): Promise<void>;
+  /**
+   * Reads the last day's screen text, groups it by meaning with a small embedding model on this Mac, and asks the local
+   * model for one next step per piece of work. Proposals only: nothing runs until startTask.
+   */
+  proposeTasks(): Promise<ProposedTask[]>;
   /** Starts a task. One task runs at a time. Steps that may send, share, delete or sign in wait for answerTaskStep. */
   startTask(request: OperatorTaskRequest): Promise<void>;
   /** Stops the running task. A step that waits for the person is declined. */

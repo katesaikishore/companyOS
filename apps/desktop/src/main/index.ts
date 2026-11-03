@@ -244,6 +244,8 @@ function registerIpc(): void {
   // The engine checks the decision's shape and that it still fits the day's tasks, so the page cannot store anything else.
   handle(IPC.decideTask, decision => requireRuntime().decideTask(decision));
 
+  handle(IPC.proposeTasks, () => requireRuntime().proposeTasks());
+
   // The operator checks every step of a task. Here only the request's shape is checked.
   handle(IPC.startTask, request => {
     if (typeof request !== 'object' || request === null) throw new Error('Invalid task.');

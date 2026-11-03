@@ -37,6 +37,7 @@ export const IPC = {
   rotateApiToken: 'twin:rotate-api-token',
   requestPermission: 'twin:request-permission',
   openPrivacySettings: 'twin:open-privacy-settings',
+  proposeTasks: 'twin:propose-tasks',
   startTask: 'twin:start-task',
   stopTask: 'twin:stop-task',
   answerTaskStep: 'twin:answer-task-step',

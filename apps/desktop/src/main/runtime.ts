@@ -58,9 +58,9 @@ import {
   normalizeAppName,
 } from '@companyos/twin-core';
 import { SPEAKER_MIN_SAMPLES, SPEAKER_MODEL_ID, WHISPER_MODEL_ID } from '@companyos/twin-core';
-import { discoverFromScreen, type ScreenDiscovery } from '@companyos/twin-core';
+import { discoverFromScreen, proposeTasks, type ProposedTask, type ScreenDiscovery } from '@companyos/twin-core';
 import { readSurface } from './app-surface';
-import { createOllamaChat, createOllamaVision, visionModelReady } from './vision-ollama';
+import { createOllamaChat, createOllamaEmbedder, createOllamaVision, visionModelReady } from './vision-ollama';
 import type { OperatorModel, OperatorTaskRequest } from '@companyos/twin-core';
 import { OperatorService, type OperatorModelChoice } from './operator-service';
 import { agentDesktopHands } from './operator-hands';
@@ -184,6 +184,8 @@ type FindJobsRefusal = 'no_surface' | 'not_in_front' | 'not_allowed' | 'model_of
 
 /** The longest an on-demand screen grab may take before it counts as no frame. */
 const FIND_JOBS_GRAB_MS = 10_000;
+/** How far back the screen text that tasks are proposed from goes. */
+const UNDERSTAND_WINDOW_MS = 24 * 3_600_000;
 
 export class TwinRuntime {
   private readonly agent: TwinAgent;
@@ -648,6 +650,24 @@ export class TwinRuntime {
     // The task stops first, so a failed settings write cannot leave it running.
     this.operator.stop();
     this.agent.updateConfig({ automationsEnabled: false });
+  }
+
+  /**
+   * Proposes tasks from the last day's screen text, on this Mac: a small embedding model groups the reads by meaning, and
+   * the local text model names the work and one next step for each group. Nothing runs here. Excluded apps are left out by the search and again by
+   * the proposer.
+   */
+  async proposeTasks(): Promise<ProposedTask[]> {
+    const to = Date.now();
+    const hits = this.agent.searchCapture({ text: '', kind: 'screen', from: to - UNDERSTAND_WINDOW_MS, to });
+    const record = (entry: NetworkEntry): void => this.agent.recordNetworkCall(entry);
+    return proposeTasks(hits, {
+      embedder: createOllamaEmbedder({ record }),
+      // Screen text is text, and the 4B planner understood it far better than the 2B vision model on the same documents.
+      // Using one model for both stages also keeps a single model in memory.
+      model: createOllamaChat({ record }),
+      excludedApps: this.agent.configuration.excludedApps,
+    });
   }
 
   /** Starts a task from the Tasks page. The operator checks every step; this only passes the request on. */

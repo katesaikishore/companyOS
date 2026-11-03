@@ -107,6 +107,13 @@ describe('parseAction', () => {
     expect(parseAction({ action: 'launch', app: '/bin/sh', reason: 'x' }, textEditPicker)).toHaveProperty('invalid');
     expect(parseAction({ action: 'launch', app: 'com.apple.Terminal', reason: 'x' }, textEditPicker)).toHaveProperty('invalid');
   });
+
+  it('treats a target field too long to name anything as empty, so a done reply that fills it with the document still counts', () => {
+    const page = 'Mobile app 2.4 release notes (draft) '.repeat(5);
+    expect(parseAction({ action: 'done', ref: '', name: page, text: '', reason: 'Added the line.' }, textEditDocument)).toEqual({ action: { type: 'done', summary: 'Added the line.' } });
+    // A long name can never pick a control, so a click with one and no ref is still refused.
+    expect(parseAction({ action: 'click', ref: '', name: `New Document ${page}`, reason: 'x' }, textEditPicker)).toEqual({ invalid: 'The ref is not on the screen.' });
+  });
 });
 
 describe('judge', () => {
@@ -127,6 +134,9 @@ describe('judge', () => {
   it('lets local editing run in an allowed app, and holds what may send or lose work there too', () => {
     expect(judge({ type: 'click', ref: '@s1:e1', reason: 'x' }, textEditPicker, RULES).verdict).toBe('allow');
     expect(judge({ type: 'click', ref: '@s2:e2', reason: 'x' }, textEditDocument, RULES).verdict).toBe('ask');
+    // Closing a window can drop unsaved work, so the window's own Close button waits for the person too.
+    const withClose: Observation = { app: 'TextEdit', controls: [{ ref: '@s4:e5', role: 'button', name: 'Close' }] };
+    expect(judge({ type: 'click', ref: '@s4:e5', reason: 'x' }, withClose, RULES).verdict).toBe('ask');
     expect(judge({ type: 'click', ref: '@s2:e3', reason: 'x' }, textEditDocument, RULES).verdict).toBe('ask');
     expect(judge({ type: 'press', keys: 'return', reason: 'x' }, textEditDocument, RULES).verdict).toBe('allow');
     expect(judge({ type: 'press', keys: 'cmd+q', reason: 'x' }, textEditDocument, RULES).verdict).toBe('ask');
@@ -208,6 +218,20 @@ describe('runTask', () => {
     expect(result.status).toBe('declined');
     expect(result.summary).toContain('repeats the last step');
     expect(acted).toHaveLength(1);
+  });
+
+  it('holds the same text typed into the same field again, even when the ref is new and another step came between', async () => {
+    const turn = (n: number): Observation => ({ app: 'TextEdit', controls: [{ ref: `@t${n}:e2`, role: 'textfield', name: '', value: 'Notes' }] });
+    const { hands, acted } = fakeHands([turn(1), turn(2), turn(3)]);
+    const { model } = scriptedModel([
+      { action: 'type', ref: '@t1:e2', text: '\nSend the renewal.', reason: 'add it' },
+      { action: 'scroll', ref: '@t2:e2', direction: 'down', reason: 'look' },
+      { action: 'type', ref: '@t3:e2', text: '\nSend the renewal.', reason: 'add it' },
+    ]);
+    const result = await runTask({ goal: 'x', app: 'TextEdit' }, model, hands, { ...RULES, approve: never });
+    expect(result.status).toBe('declined');
+    expect(result.summary).toBe('This text was already typed into this field.');
+    expect(acted.map(action => action.type)).toEqual(['type', 'scroll']);
   });
 
   it('stays in the same app when a launch does not land', async () => {

@@ -37,7 +37,7 @@ describe('controlsOf', () => {
   it('keeps addressable controls only, and keeps the description beside the name', () => {
     const controls = controlsOf(SNAPSHOT);
     expect(controls.map(control => control.ref)).toEqual(['@s1:e1', '@s1:e2', '@s1:e3', '@s1:e4', '@s1:e5', '@s1:e6']);
-    expect(controls[1].value).toHaveLength(80);
+    expect(controls[1].value).toHaveLength(200);
     expect(controls[2]).toEqual({ ref: '@s1:e3', role: 'button', name: 'Close' });
     expect(controls[3]).toMatchObject({ name: 'paperplane', description: 'Send message' });
   });
@@ -122,5 +122,79 @@ describe('agentDesktopHands', () => {
   it('reports a failed read as an error, not as an empty screen', async () => {
     const hands = agentDesktopHands('/opt/homebrew/bin/agent-desktop', fakeExec({ ok: false, error: { code: 'APP_NOT_FOUND' } }).exec);
     await expect(hands.observe('Nowhere')).rejects.toThrow('could not read');
+  });
+});
+
+describe('text fields and inert controls', () => {
+  const OK = { ok: true, data: { disposition: { delivery: 'delivered_verified' } } };
+  const document: Observation = { app: 'TextEdit', controls: [{ ref: '@d:e2', role: 'textfield', name: '', value: 'Release notes' }] };
+
+  it('leaves out disabled and hidden controls, but still reads their children', () => {
+    const controls = controlsOf({
+      ok: true,
+      data: {
+        tree: {
+          role: 'window',
+          children: [
+            { ref_id: '@d:e8', role: 'menubutton', name: 'document actions', states: ['disabled'] },
+            { ref_id: '@d:e3', role: 'scrollbar', name: '', states: ['disabled', 'hidden'] },
+            { ref_id: '@d:e1', role: 'group', name: 'Toolbar', states: ['hidden'], children: [{ ref_id: '@d:e4', role: 'button', name: 'Bold' }] },
+          ],
+        },
+      },
+    });
+    expect(controls.map(control => control.ref)).toEqual(['@d:e4']);
+  });
+
+  it('delivers a click on a text field as a focus, and other clicks as clicks', () => {
+    expect(argsFor({ type: 'click', ref: '@d:e2', reason: 'x' }, document)).toEqual(['focus', '--', '@d:e2']);
+    expect(argsFor({ type: 'click', ref: '@s1:e1', reason: 'x' }, OBSERVATION)).toEqual(['click', '--', '@s1:e1']);
+  });
+
+  it('keeps the start and the end of a long field, so a line typed at the end can be seen', () => {
+    const body = `Release notes ${'filler '.repeat(60)}New: faster photo upload.`;
+    const [field] = controlsOf({ ok: true, data: { tree: { ref_id: '@d:e2', role: 'textfield', name: '', value: body } } });
+    expect(field.value).toHaveLength(200);
+    expect(field.value?.startsWith('Release notes')).toBe(true);
+    expect(field.value?.endsWith('New: faster photo upload.')).toBe(true);
+  });
+
+  it('moves to the end of a field that holds text before typing, so the text is added after it', async () => {
+    const { exec, calls } = fakeExec(OK);
+    const result = await agentDesktopHands('/bin/agent-desktop', exec).act({ type: 'type', ref: '@d:e2', text: '\nFaster photo upload.', reason: 'x' }, document);
+    expect(result.delivery).toBe('delivered');
+    expect(calls).toEqual([
+      ['focus', '--', '@d:e2'],
+      ['press', '--app', 'TextEdit', '--', 'cmd+down'],
+      ['type', '--', '@d:e2', '\nFaster photo upload.'],
+    ]);
+  });
+
+  it('starts text added to a document on a new line, and leaves a one-line field alone', async () => {
+    const doc: Observation = { app: 'TextEdit', controls: [{ ref: '@d:e2', role: 'textfield', name: '', value: 'Notes Action items', multiline: true }] };
+    const { exec, calls } = fakeExec(OK);
+    await agentDesktopHands('/bin/agent-desktop', exec).act({ type: 'type', ref: '@d:e2', text: 'Book the Q4 call.', reason: 'x' }, doc);
+    expect(calls.at(-1)).toEqual(['type', '--', '@d:e2', '\nBook the Q4 call.']);
+    const already = fakeExec(OK);
+    await agentDesktopHands('/bin/agent-desktop', already.exec).act({ type: 'type', ref: '@d:e2', text: '\nBook it.', reason: 'x' }, doc);
+    expect(already.calls.at(-1)).toEqual(['type', '--', '@d:e2', '\nBook it.']);
+    const single = fakeExec(OK);
+    await agentDesktopHands('/bin/agent-desktop', single.exec).act({ type: 'type', ref: '@d:e2', text: ' more', reason: 'x' }, document);
+    expect(single.calls.at(-1)).toEqual(['type', '--', '@d:e2', ' more']);
+  });
+
+  it('marks a field with several lines of text as multi-line', () => {
+    const [field] = controlsOf({ ok: true, data: { tree: { ref_id: '@d:e2', role: 'textfield', name: '', value: 'one\ntwo' } } });
+    expect(field).toMatchObject({ value: 'one two', multiline: true });
+  });
+
+  it('types straight into an empty field, and stops when the focus does not land', async () => {
+    const empty = fakeExec(OK);
+    await agentDesktopHands('/bin/agent-desktop', empty.exec).act({ type: 'type', ref: '@d:e2', text: 'Hi', reason: 'x' }, { app: 'TextEdit', controls: [{ ref: '@d:e2', role: 'textfield', name: '' }] });
+    expect(empty.calls).toEqual([['type', '--', '@d:e2', 'Hi']]);
+    const refused = fakeExec({ ok: false, error: { code: 'ELEMENT_NOT_FOUND', disposition: { delivery: 'not_delivered' } } });
+    const result = await agentDesktopHands('/bin/agent-desktop', refused.exec).act({ type: 'type', ref: '@d:e2', text: 'Hi', reason: 'x' }, document);
+    expect(result.delivery).toBe('not_delivered');
+    expect(refused.calls).toHaveLength(1);
   });
 });
