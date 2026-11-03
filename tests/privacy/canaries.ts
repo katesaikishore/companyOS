@@ -56,7 +56,7 @@ export const CANARIES = {
   encodedForms: 'CANARY_FORMS_?>?/B2F90',
 } as const;
 
-export type CanaryName = keyof typeof CANARIES;
+type CanaryName = keyof typeof CANARIES;
 
 /**
  * Canaries a decrypted surface holds on purpose. Text is stored encrypted, and the owner's data key opens it, so the decrypted
@@ -65,7 +65,7 @@ export type CanaryName = keyof typeof CANARIES;
  * Every other surface, including disk, console, export and notices, is checked strictly. Each excepted pair has a positive
  * control in the suite that asserts the copy really is there, so the exception cannot pass on an empty store.
  */
-export const HELD_BY_DESIGN: Readonly<Record<string, readonly CanaryName[]>> = {
+const HELD_BY_DESIGN: Readonly<Record<string, readonly CanaryName[]>> = {
   'store:decrypted:capture': ['screenOcr', 'keystrokeStored', 'systemAudioTranscript'],
   'store:decrypted:pipeOutputs': ['pipeOutput'],
   'store:decrypted:speakers': ['voiceprint'],
@@ -89,7 +89,7 @@ function base64Needles(bytes: Buffer, alphabet: 'base64' | 'base64url'): string[
  * The forms a copy of a canary can take in stored or sent bytes. Base64 and base64url are matched at each of the three
  * byte alignments, because a copy can start at any position in a longer stream. Matching is case-insensitive.
  */
-export function encodingsOf(canary: string): Array<{ encoding: Encoding; needle: string }> {
+function encodingsOf(canary: string): Array<{ encoding: Encoding; needle: string }> {
   const bytes = Buffer.from(canary, 'utf8');
   const candidates: Array<{ encoding: Encoding; needle: string }> = [
     { encoding: 'raw', needle: canary },
@@ -113,7 +113,7 @@ export interface Surface {
   text: string;
 }
 
-export interface Leak {
+interface Leak {
   surface: string;
   canary: string;
   encoding: Encoding;

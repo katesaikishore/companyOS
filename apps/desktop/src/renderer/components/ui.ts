@@ -81,15 +81,6 @@ export function progressBar(fraction: number, extra: Props = {}): HTMLElement {
   );
 }
 
-/** Six segments, filled up to and including the level. */
-export function levelMeter(level: number): HTMLElement {
-  return h(
-    'span',
-    { class: 'meter', 'aria-hidden': 'true' },
-    ...[0, 1, 2, 3, 4, 5].map(index => h('span', { class: index <= level ? 'meter-seg is-on' : 'meter-seg' })),
-  );
-}
-
 export function toggleRow(options: {
   testid: string;
   label: string;

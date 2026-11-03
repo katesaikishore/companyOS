@@ -13,7 +13,7 @@ import { join, resolve as resolvePath, win32 } from 'node:path';
  * A file found in a folder. The shape matches the core FolderEntry. It is repeated here because the desktop main build
  * cannot import the core sources, and the two are compared by shape, not by name.
  */
-export interface LocalFolderEntry {
+interface LocalFolderEntry {
   /** The path inside the folder, with "/" between segments. */
   relativePath: string;
   mtimeMs: number;
@@ -21,13 +21,13 @@ export interface LocalFolderEntry {
 }
 
 /** What a folder walk found. `truncated` is true when the entry budget ended the walk before it had visited everything. */
-export interface FolderListing {
+interface FolderListing {
   files: LocalFolderEntry[];
   truncated: boolean;
 }
 
 /** The most directory entries one listing visits, files and folders together. */
-export const FOLDER_SCAN_LIMIT = 20_000;
+const FOLDER_SCAN_LIMIT = 20_000;
 
 /** The most commits one history read takes. Git lists the newest first, so a longer history keeps its latest commits. */
 export const GIT_LOG_MAX_COMMITS = 5000;
@@ -42,7 +42,7 @@ export const GIT_LOG_LIMIT_MESSAGE = 'The Git history took too long to read, or 
  * lines, which a user's own configuration could otherwise add between the commits. The read stops at GIT_LOG_MAX_COMMITS,
  * so a longer history is imported in part: its newest 5,000 commits.
  */
-export const GIT_LOG_ARGS: readonly string[] = [
+const GIT_LOG_ARGS: readonly string[] = [
   '-c',
   'log.showSignature=false',
   'log',

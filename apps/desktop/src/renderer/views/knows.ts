@@ -71,7 +71,7 @@ function routineRow(view: RoutineView): HTMLElement {
     ),
     h('p', { class: 'kn-steps' }, ...stepChain(view.steps)),
     view.when ? h('p', { class: 'kn-when' }, view.when) : undefined,
-    h('div', { class: 'kn-row-actions' }, view.status === 'suggested' ? forgetButton(view) : openAutomationLink(view)),
+    view.status === 'suggested' ? h('div', { class: 'kn-row-actions' }, forgetButton(view)) : undefined,
   );
 }
 
@@ -92,21 +92,6 @@ function forgetButton(view: RoutineView): HTMLButtonElement {
     disabled: pending(key),
     onClick: () => void call(key, twin => twin.dismissRoutine(view.routineId)),
   });
-}
-
-/** An accepted routine is an automation now, so its level and runs are managed on its own page. */
-function openAutomationLink(view: RoutineView): HTMLElement | undefined {
-  if (view.automationId === undefined) return undefined;
-  return h(
-    'a',
-    {
-      class: 'btn btn-secondary btn-small',
-      href: `#/automations/${encodeURIComponent(view.automationId)}`,
-      'data-testid': 'knows-automation',
-      'aria-label': `${COPY.openAutomation} ${view.name}`,
-    },
-    COPY.openAutomation,
-  );
 }
 
 function declinedPanel(declined: readonly DeclinedRoutineView[], now: number): HTMLElement {

@@ -29,7 +29,7 @@ const LEGACY_PIPES_FOLDER = 'pipes';
 const PIPE_FAILED = 'A pipe did not run. Its text is not logged.';
 const CHECK_FAILED = 'The pipes could not be checked. Their text is not logged.';
 
-export interface PipeSchedulerOptions {
+interface PipeSchedulerOptions {
   now: () => number;
   /** The saved pipes, read on each check, so an edit takes effect at the next one. */
   pipes: () => readonly Pipe[];

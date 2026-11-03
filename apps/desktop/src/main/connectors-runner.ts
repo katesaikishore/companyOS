@@ -38,7 +38,7 @@ export interface ConnectorStore {
   updateConfig(patch: Partial<TwinConfig>): TwinConfig;
 }
 
-export interface LocalImportDeps {
+interface LocalImportDeps {
   agent: ConnectorStore;
   /** Milliseconds since the epoch. Sets the calendar window and the time of the import. */
   now: () => number;
@@ -52,13 +52,13 @@ const MB = 1024 * 1024;
 export const CALENDAR_MAX_BYTES = 10 * MB;
 export const MAIL_MAX_BYTES = 50 * MB;
 /** A calendar import keeps events from this many days before the import to this many days after it. */
-export const CALENDAR_DAYS_BACK = 180;
-export const CALENDAR_DAYS_AHEAD = 365;
-export const MAIL_MAX_MESSAGES = 5000;
+const CALENDAR_DAYS_BACK = 180;
+const CALENDAR_DAYS_AHEAD = 365;
+const MAIL_MAX_MESSAGES = 5000;
 /** A folder import reads at most this many supported files. A folder with more is refused, so its earlier items stay. */
 export const FOLDER_MAX_FILES = 5000;
 /** A folder import keeps at most this many characters of item text. A folder with more is refused, as above. */
-export const FOLDER_MAX_CHARS = 64_000_000;
+const FOLDER_MAX_CHARS = 64_000_000;
 /** Items are stored in batches, so a large import does not hold the main process for one long write. */
 const STORE_BATCH = 200;
 
@@ -178,7 +178,7 @@ async function readItems(source: ConnectorSource, now: number): Promise<Connecto
 }
 
 /** The limits of a folder read. The import uses the defaults; a test may pass smaller ones. */
-export interface FolderReadLimits {
+interface FolderReadLimits {
   /** Directory entries the walk visits. */
   scanLimit?: number;
   /** Supported files one import reads. */

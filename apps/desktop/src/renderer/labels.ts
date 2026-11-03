@@ -1,12 +1,7 @@
-import type { AutomationView, CaptureChannelState, EffectClass, Fit, LayaBundleView, Locator, Param, RunRecord, Step, TwinStatus } from '@companyos/twin-core';
+import type { CaptureChannelState, Fit, LayaBundleView, Locator, Param, Step, TwinStatus } from '@companyos/twin-core';
 import { formatBytes, formatDecimalBytes, clamp01 } from './format.js';
 
-export const LEVEL_NAMES = ['Observe', 'Suggest', 'Draft', 'Run with you', 'On its own', 'External'];
-
-/** Mirrors PROMOTION_RULES in the core engine. The contract does not carry these numbers, so the gate shows them here. */
-export const GATE = { supervisedRuns: 10, windowDays: 14, runsInWindow: 25, passRate: 0.99 } as const;
-
-const LOCAL_EFFECTS: readonly EffectClass[] = ['read_only', 'local_reversible'];
+const LEVEL_NAMES = ['Observe', 'Suggest', 'Draft', 'Run with you', 'On its own', 'External'];
 
 export function levelLabel(level: number): string {
   return `L${level} · ${LEVEL_NAMES[level] ?? 'Unknown'}`;
@@ -18,10 +13,6 @@ export function levelTone(level: number): 'teal' | 'ink' | 'neutral' {
   return 'neutral';
 }
 
-export function effectLabel(effect: EffectClass): string {
-  return effect.replace(/_/g, ' ');
-}
-
 /**
  * What capture records from browsers, by platform. The browser bridge runs on macOS and Linux only. The setup and
  * settings pages both show this, so they say the same thing. Only what the engine really does is said here.
@@ -30,10 +21,6 @@ export function browserCaptureNote(bridgeSupported: boolean): string {
   return bridgeSupported
     ? 'On macOS and Linux, the companyOS Twin extension in Chrome and Edge sends only the host and path shape of the active tab, never a query, a fragment or a title. It never reads a private or incognito window. A page the extension does not send, such as a new tab, and any private window, record only the app name, because the twin cannot tell windows apart. Other browsers record only the app name.'
     : 'Without the browser bridge, as on Windows, Chrome and Edge record only the app name, and their private windows cannot be told apart. Other browsers do the same. No page addresses are recorded.';
-}
-
-export function effectsAreLocal(effects: readonly EffectClass[]): boolean {
-  return effects.every(effect => LOCAL_EFFECTS.includes(effect));
 }
 
 export function fitLabel(fit: Fit): string {
@@ -52,14 +39,8 @@ function paramRef(value: string, params: readonly Param[]): Param | undefined {
   return params.find(param => `$${param.name}` === value);
 }
 
-export function paramFor(step: Step, params: readonly Param[]): Param | undefined {
+function paramFor(step: Step, params: readonly Param[]): Param | undefined {
   return paramRef(step.app, params);
-}
-
-/** The app a step focuses, or the options when the app is a parameter that varies between runs. */
-export function stepAppLabel(step: Step, params: readonly Param[]): string {
-  const param = paramFor(step, params);
-  return param ? param.options.join(' or ') : step.app;
 }
 
 /** The host of an address. The path and any query stay out of the label, as they stay out of the store. */
@@ -136,42 +117,6 @@ export function stepDetail(step: Step, params: readonly Param[]): string | undef
   return urlParam ? `${app} · ${variesLabel(urlParam, hostOf)}` : app;
 }
 
-export function appsSummary(view: AutomationView): string {
-  const labels: string[] = [];
-  // A playbook may have no focus steps, so its apps come from every step instead.
-  const focusOnly = view.automation.steps.some(step => step.op === 'focus_app');
-  for (const step of view.automation.steps) {
-    if (focusOnly && step.op !== 'focus_app') continue;
-    const label = stepAppLabel(step, view.automation.params);
-    if (labels[labels.length - 1] !== label) labels.push(label);
-  }
-  return labels.join(' → ') || '—';
-}
-
-export function passRate(runs: readonly RunRecord[]): number | undefined {
-  const passed = runs.reduce((sum, run) => sum + run.postconditionsPassed, 0);
-  const failed = runs.reduce((sum, run) => sum + run.postconditionsFailed, 0);
-  return passed + failed === 0 ? undefined : passed / (passed + failed);
-}
-
-export function runOutcomeLabel(run: RunRecord): string {
-  switch (run.status) {
-    case 'completed':
-      return run.postconditionsFailed === 0 ? 'Passed' : 'Checks failed';
-    case 'blocked':
-      return 'Blocked';
-    case 'failed':
-      return 'Failed';
-    case 'dry_run':
-      return 'Dry run';
-  }
-}
-
-/** Fraction of the promotion gate met by a value, capped at one. */
-export function gateFraction(value: number, target: number): number {
-  return clamp01(value / target);
-}
-
 const CAPTURE_TITLES: Record<TwinStatus['capture']['state'], string> = {
   capturing: 'Observing',
   paused: 'Paused',
@@ -208,7 +153,7 @@ export function captureChannelNote(state: CaptureChannelState): string | undefin
   return CHANNEL_NOTES[state];
 }
 
-export type ModelState = 'not_installed' | 'downloading' | 'installed' | 'cancelled' | 'failed';
+type ModelState = 'not_installed' | 'downloading' | 'installed' | 'cancelled' | 'failed';
 
 /** Derived from the download record and the installed list. Only these five states are shown. */
 export function modelState(status: TwinStatus, modelId: string): ModelState {
@@ -254,7 +199,7 @@ export function modelStateLabel(status: TwinStatus, modelId: string): string {
   }
 }
 
-export type LayaUiState = 'unsupported' | ModelState;
+type LayaUiState = 'unsupported' | ModelState;
 
 /** The decision-model bundle in the five states the page shows. Downloading covers the checksum pass too. */
 export function layaState(laya: LayaBundleView): LayaUiState {

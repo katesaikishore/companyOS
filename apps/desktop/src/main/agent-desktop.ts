@@ -37,7 +37,7 @@ import {
  */
 
 /** How long one call may run before the program is stopped. */
-export const AGENT_DESKTOP_TIMEOUT_MS = 10_000;
+const AGENT_DESKTOP_TIMEOUT_MS = 10_000;
 /** The most output, across stdout and stderr, that one call may produce. Output is counted and discarded, never kept. */
 const MAX_OUTPUT_BYTES = 16 * 1024;
 /** The most output a find or list-windows call made by a desktop step may produce. A busy web page has a large tree. */
@@ -238,7 +238,7 @@ const CURSOR_LABEL_MAX = 60;
 /** How long the menu may take to close after the last click. */
 const MENU_CLOSE_MS = 2_000;
 /** The longest menu path the program can choose for now: a menu bar item and one item in its menu. */
-export const SUPPORTED_MENU_DEPTH = 2;
+const SUPPORTED_MENU_DEPTH = 2;
 
 /** Cursor colours, far enough apart to tell runs apart at a glance. A design choice. */
 export const CURSOR_COLOURS = ['#E5484D', '#30A46C', '#0090FF', '#F76B15', '#8E4EC6', '#12A594', '#D6409F', '#AD7F58', '#FFB224'] as const;
@@ -651,7 +651,7 @@ export function refused(failure: HandsFailure, reason: string): HandsResult {
 }
 
 /** What one call ended with. The output is set only when the caller asked for it, and it is not kept past the caller. */
-export interface CallResult {
+interface CallResult {
   result: HandsResult;
   exit: number | HandsFailure;
   output?: Buffer;
@@ -707,7 +707,7 @@ function windowCount(output: Buffer | undefined): number {
  * The CLI's error code from its JSON envelope, or undefined when the output has none. The message is read past and never
  * returned, because it can name an app or a window.
  */
-export function errorCodeOf(output: Buffer | undefined): string | undefined {
+function errorCodeOf(output: Buffer | undefined): string | undefined {
   if (output === undefined) return undefined;
   try {
     const envelope = JSON.parse(output.toString('utf8')) as { ok?: unknown; error?: { code?: unknown } } | null;

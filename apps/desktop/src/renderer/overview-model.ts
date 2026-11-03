@@ -23,14 +23,14 @@ export function networkCallsThisWeek(network: readonly { ts: number }[], now: nu
   return network.filter(entry => entry.ts >= weekAgo).length;
 }
 
-export interface NetworkDay {
+interface NetworkDay {
   /** The day as a short date, such as "24 Oct". */
   label: string;
   downloads: number;
   checks: number;
 }
 
-export interface NetworkSummary {
+interface NetworkSummary {
   calls: number;
   bytes: number;
   downloads: number;

@@ -2,7 +2,7 @@
 export type Tone = 'blue' | 'green' | 'orange' | 'purple' | 'cyan' | 'steel';
 
 /** An app's brand colour from tokens.css, as the design draws app marks. The class app-<name> sets --app. */
-export type AppColour = 'excel' | 'word' | 'outlook' | 'powerpoint' | 'teams' | 'onenote' | 'code' | 'slack' | 'figma' | 'other';
+type AppColour = 'excel' | 'word' | 'outlook' | 'powerpoint' | 'teams' | 'onenote' | 'code' | 'slack' | 'figma' | 'other';
 
 /** Known apps take the colour people know them by. The first whole word found in the name wins. */
 const APP_COLOURS: ReadonlyArray<[word: RegExp, colour: AppColour]> = [

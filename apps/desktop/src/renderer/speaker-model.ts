@@ -6,7 +6,7 @@
 export const SPEAKER_MODEL_ID = 'speaker-wespeaker-resnet34';
 
 /** 'Speaker' and a number from 1 to 999, as a session label is written. A name the person gave does not match. */
-export const SESSION_SPEAKER_LABEL = /^Speaker [1-9][0-9]{0,2}$/;
+const SESSION_SPEAKER_LABEL = /^Speaker [1-9][0-9]{0,2}$/;
 
 /** True for a label the app gave to a voice nobody has named yet, such as 'Speaker 2'. */
 export function isUnnamedSpeaker(label: string): boolean {

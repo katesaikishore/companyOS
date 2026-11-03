@@ -13,7 +13,6 @@ import {
   type HandsOptions,
   type HandsRecord,
 } from '../src/main/agent-desktop';
-import { draftReady, parseMenuPath } from '../src/renderer/menu-automation-model';
 
 /** The fake starts as a script with a shebang line, which Windows cannot run directly. */
 const STARTS_FAKE_PROGRAM = process.platform !== 'win32';
@@ -146,21 +145,6 @@ describe('cursorLabel', () => {
     expect(cursorLabel('---', 'Click OK')).toBe('companyOS · Click OK');
     expect(cursorLabel('Ops\u0007 run', 'Fill x').includes('\u0007')).toBe(false);
     expect(cursorLabel('Analyst', 'x'.repeat(200)).length).toBeLessThanOrEqual(60);
-  });
-});
-
-describe('parseMenuPath', () => {
-  it('splits on > and → and drops empty labels', () => {
-    expect(parseMenuPath('View > Clean Up By > Name')).toEqual(SUBMENU);
-    expect(parseMenuPath('File→Save As… > ')).toEqual(['File', 'Save As…']);
-    expect(parseMenuPath('View > Open / Close')).toEqual(['View', 'Open / Close']);
-  });
-
-  it('accepts two to four labels in the form', () => {
-    expect(draftReady({ name: 'n', app: 'Finder', path: 'View' })).toBe(false);
-    expect(draftReady({ name: 'n', app: 'Finder', path: 'View > Clean Up' })).toBe(true);
-    expect(draftReady({ name: 'n', app: 'Finder', path: 'View > Clean Up By > Name' })).toBe(true);
-    expect(draftReady({ name: 'n', app: 'Finder', path: 'a > b > c > d > e' })).toBe(false);
   });
 });
 

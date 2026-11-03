@@ -16,14 +16,14 @@ export function openSetup(step: number): void {
   goStep(step);
 }
 
-export function goStep(step: number): void {
+function goStep(step: number): void {
   state.wizardStep = Math.min(LAST_STEP, Math.max(1, step));
   state.altOpen = false;
   if (state.wizardStep === 4) void loadPlan();
   requestRender();
 }
 
-export async function loadPlan(): Promise<void> {
+async function loadPlan(): Promise<void> {
   if (state.setup.loading || state.setup.plan) return;
   state.setup = { loading: true };
   requestRender();

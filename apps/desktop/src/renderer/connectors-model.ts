@@ -16,7 +16,7 @@ export const CONNECTOR_LIMITS = {
 export const LOCAL_CONNECTOR_KINDS = ['folder', 'git', 'calendar', 'mail'] as const;
 export type LocalConnectorKind = (typeof LOCAL_CONNECTOR_KINDS)[number];
 
-export const CONNECTOR_KIND_LABELS: Record<LocalConnectorKind, string> = {
+const CONNECTOR_KIND_LABELS: Record<LocalConnectorKind, string> = {
   folder: 'Folder',
   git: 'Git repository',
   calendar: 'Calendar file',

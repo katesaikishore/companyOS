@@ -37,14 +37,14 @@ export interface NetworkDeps {
   now?: () => number;
 }
 
-export interface AuthorizeDeps extends NetworkDeps {
+interface AuthorizeDeps extends NetworkDeps {
   /** Opens the authorization URL in the person's browser. */
   openUrl(url: string): Promise<void>;
   /** How long to wait for the browser to come back. Defaults to three minutes. */
   timeoutMs?: number;
 }
 
-export type CloudConnectorErrorCode =
+type CloudConnectorErrorCode =
   | 'not_configured'
   | 'timeout'
   | 'state'
@@ -75,13 +75,13 @@ export class CloudConnectorError extends Error {
 }
 
 export const NOT_CONFIGURED_MESSAGE = 'This connector is not configured yet, so it cannot connect.';
-export const SIGN_IN_TIMEOUT_MS = 3 * 60 * 1000;
+const SIGN_IN_TIMEOUT_MS = 3 * 60 * 1000;
 export const TIMEOUT_MESSAGE = 'Sign-in timed out after 3 minutes. Nothing was connected.';
 export const REAUTH_MESSAGE = 'Your sign-in has expired. Connect the account again.';
 /** Responses are read up to this many bytes. A larger response is refused before it is parsed. */
 export const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 /** A token is treated as expired this long before its real expiry, so a request does not start with a dead token. */
-export const EXPIRY_SKEW_MS = 60_000;
+const EXPIRY_SKEW_MS = 60_000;
 
 const CALLBACK_PATH = '/callback';
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -180,7 +180,7 @@ function capitalise(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-export function configuredClientId(provider: ConfiguredProvider): string {
+function configuredClientId(provider: ConfiguredProvider): string {
   const clientId = provider.clientId?.trim();
   if (!clientId) throw new CloudConnectorError('not_configured', NOT_CONFIGURED_MESSAGE);
   return clientId;

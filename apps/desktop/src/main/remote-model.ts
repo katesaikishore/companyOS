@@ -6,8 +6,8 @@ import type { CompletionRequest, NetworkEntry, OperatorModel } from '@companyos/
  * for that task. Every call is written to the ledger with the host, the path, the bytes sent and whether it carried
  * screen text, never the content. Redirects are refused, so the request cannot be carried to another host.
  */
-export const CHUTES_ENDPOINT = 'https://llm.chutes.ai/v1/chat/completions';
-export const CHUTES_MODEL = 'Qwen/Qwen3.5-397B-A17B-TEE';
+const CHUTES_ENDPOINT = 'https://llm.chutes.ai/v1/chat/completions';
+const CHUTES_MODEL = 'Qwen/Qwen3.5-397B-A17B-TEE';
 const KEY_SHAPE = /^cpk_[A-Za-z0-9._-]{10,200}$/;
 const CALL_TIMEOUT_MS = 120_000;
 
@@ -15,7 +15,7 @@ export function validChutesKey(key: string): boolean {
   return KEY_SHAPE.test(key);
 }
 
-export interface ChutesChatOptions {
+interface ChutesChatOptions {
   apiKey: string;
   model?: string;
   /** Whether this task sends text from the screen or memory notes. The ledger shows it on every call. */

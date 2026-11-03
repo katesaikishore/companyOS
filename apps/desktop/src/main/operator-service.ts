@@ -20,7 +20,7 @@ import { APP_NAME } from './app-surface';
 
 export type OperatorModelChoice = 'local' | 'chutes';
 
-export interface OperatorServiceDeps {
+interface OperatorServiceDeps {
   config: () => { excludedApps: readonly string[]; agentDesktopPath: string; operatorModel: OperatorModelChoice };
   hands: (binary: string) => OperatorHands;
   /** The chosen model, or undefined when it cannot be used, such as Chutes with no saved key. */

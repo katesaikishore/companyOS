@@ -53,7 +53,7 @@ function workday(day: number): Array<Record<string, unknown>> {
   ];
 }
 
-export interface Planted {
+interface Planted {
   /** The ingest surface that carries the canary. */
   label: string;
   /** What the pipeline must do with the input. */
@@ -94,7 +94,7 @@ const FRAME_WIDTH = 64;
 const FRAME_HEIGHT = 36;
 
 /** A stand-in screen frame: the app in front, the window class and the policy inputs that differ from a clear screen. */
-export interface PlantedFrame {
+interface PlantedFrame {
   label: string;
   outcome: Outcome;
   app: string;
@@ -123,7 +123,7 @@ export const PLANTED_FRAMES: readonly PlantedFrame[] = [
  * A stand-in audio segment, from the microphone or from system sound, with the policy inputs that differ from a clear
  * source. The source's own setting is read from the agent, as the runtime reads it.
  */
-export interface PlantedSegment {
+interface PlantedSegment {
   label: string;
   outcome: Outcome;
   source: 'microphone' | 'system';

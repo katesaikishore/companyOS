@@ -65,12 +65,12 @@ import type { OperatorModel, OperatorTaskRequest } from '@companyos/twin-core';
 import { OperatorService, type OperatorModelChoice } from './operator-service';
 import { agentDesktopHands } from './operator-hands';
 import { createChutesChat, validChutesKey } from './remote-model';
-import { app, clipboard, desktopCapturer, systemPreferences } from 'electron';
+import { app, clipboard, desktopCapturer, shell, systemPreferences } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { CLOUD_TOKEN_FOLDER } from './connectors-cloud/seal';
+import { CLOUD_TOKEN_FOLDER, createCloudTokenStore } from './connectors-cloud/seal';
 import { BROWSER_APP_NAMES, startBrowserBridge, type BrowserBridge, type BrowserVisit } from './browser-bridge';
 import { CaptureService } from './capture';
 import { createKeyboardSource } from './keyboard';
@@ -103,9 +103,12 @@ import { gatherDuplicates } from './file-actions';
 import { choosePlatform, executorFor, type Platform } from './platform';
 import { PipeScheduler, removeLegacyPipeFiles } from './pipes';
 import { LocalConnectorService } from './connectors-scheduler';
+import { CloudConnectorService } from './connectors-cloud-service';
+import { clientIdsFor } from './connectors-cloud/client-ids';
+import { CLOUD_PROVIDER_IDS, type CloudProviderId } from './connectors-cloud/providers';
 import type { LocalConnectorKind } from './connectors-validate';
 
-export interface RuntimeOptions {
+interface RuntimeOptions {
   userData: string;
   /** Asks a person to approve one step. The main process shows a native dialog. */
   approve: (automation: Automation, step: Step, decision: Decision) => Promise<StepApproval>;
@@ -151,7 +154,7 @@ const DAY_MS = 86_400_000;
 /** How long a finished run stays in the live view. */
 const LIVE_KEEP_MS = 2 * 60_000;
 /** The most automations one swarm starts together. Each draws its own cursor, and they share the input step by step. */
-export const SWARM_MAX = 9;
+const SWARM_MAX = 9;
 /** How often the kind labeller looks for routines to label. A look reads the routines, so it is not more often. */
 const KIND_PASS_MS = 60_000;
 /** How long the Laya model stays loaded after labelling, before it is freed. */
@@ -177,7 +180,7 @@ const MAX_FRAME_BYTES = 512 * 1024;
  * layer talks to, so the page never receives a key, a raw event, or a path it did not ask for.
  */
 /** Why an on-demand job search stopped before the model ran. */
-export type FindJobsRefusal = 'no_surface' | 'not_in_front' | 'not_allowed' | 'model_offline' | 'model_missing' | 'no_frame';
+type FindJobsRefusal = 'no_surface' | 'not_in_front' | 'not_allowed' | 'model_offline' | 'model_missing' | 'no_frame';
 
 /** The longest an on-demand screen grab may take before it counts as no frame. */
 const FIND_JOBS_GRAB_MS = 10_000;
@@ -264,6 +267,7 @@ export class TwinRuntime {
   private readonly pipeScheduler: PipeScheduler;
   /** Reads the local sources (folder, Git, calendar, mail) every six hours, and on request. See connectors-scheduler.ts. */
   private readonly connectors: LocalConnectorService;
+  private readonly cloud: CloudConnectorService;
 
   private constructor(
     private readonly options: RuntimeOptions,
@@ -404,6 +408,18 @@ export class TwinRuntime {
       gate: () => this.capture.holds(),
       report: message => console.error(message),
     });
+    // Cloud accounts, read-only, on the same schedule and behind the same gates as the local sources. Their tokens are
+    // sealed with the OS keychain, which is checked only when a token is saved or read.
+    this.cloud = new CloudConnectorService({
+      agent: this.agent,
+      tokens: createCloudTokenStore(options.userData),
+      now: () => Date.now(),
+      gate: () => this.capture.holds(),
+      clientIds: clientIdsFor({ packaged: app.isPackaged, env: process.env }),
+      fetch,
+      openExternal: url => shell.openExternal(url),
+      report: message => console.error(message),
+    });
   }
 
   static async create(options: RuntimeOptions): Promise<TwinRuntime> {
@@ -435,6 +451,7 @@ export class TwinRuntime {
       console.error('The pipe files from an earlier version could not be removed. Their text is not logged.');
     });
     this.connectors.start();
+    this.cloud.start();
     this.startKindLabels();
     this.sweepTimer = setInterval(() => void this.sweepMedia(), DAY_MS);
     this.sweepTimer.unref();
@@ -452,6 +469,7 @@ export class TwinRuntime {
     this.namer.stop();
     this.pipeScheduler.stop();
     this.connectors.stop();
+    this.cloud.stop();
     this.stopKindLabels();
     void this.handsSession.end();
   }
@@ -546,6 +564,7 @@ export class TwinRuntime {
       knownRoutines: this.agent.knownRoutines(),
       connectorItems: this.agent.connectorCount(),
       connectorCounts: this.connectors.lastCounts(),
+      cloudAccounts: this.cloud.accounts(),
       pipeOutputs: this.pipeOutputSummaries(config.pipes),
       assignedTasks: this.agent.assignedTasks(),
       taskRuns: this.agent.taskRuns(),
@@ -606,6 +625,16 @@ export class TwinRuntime {
   }
 
   /** Removes a source and its items. The files it read are not changed. */
+  /** Connects a cloud account through the person's sign-in in the browser. Resolves to the items the first read stored. */
+  connectCloud(provider: unknown): Promise<number> {
+    return this.cloud.connect(cloudProvider(provider));
+  }
+
+  /** Disconnects a cloud account: its sealed tokens and its items are deleted. */
+  disconnectCloud(provider: unknown): Promise<void> {
+    return this.cloud.disconnect(cloudProvider(provider));
+  }
+
   removeConnector(id: string): Promise<void> {
     return this.connectors.removeSource(id);
   }
@@ -1761,4 +1790,10 @@ function screenPermissionGranted(): boolean {
 async function requestScreenAccess(): Promise<void> {
   if (process.platform !== 'darwin') return;
   await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1, height: 1 } }).catch(() => []);
+}
+
+/** A cloud provider the page may name: one of the built-in ones, never a free string. */
+function cloudProvider(value: unknown): CloudProviderId {
+  if (typeof value !== 'string' || !(CLOUD_PROVIDER_IDS as readonly string[]).includes(value)) throw new Error('Unknown cloud account.');
+  return value as CloudProviderId;
 }

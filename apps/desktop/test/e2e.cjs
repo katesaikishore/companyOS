@@ -127,15 +127,6 @@ async function noDocumentScroll(page, label) {
   assert.ok(scrollHeight <= innerHeight, `${label}: the document is ${scrollHeight}px tall in a ${innerHeight}px window`);
 }
 
-/** Clicks an automation tab and waits until the tab reports that it is selected. */
-async function selectTab(page, name) {
-  await page.getByRole('tab', { name, exact: true }).click();
-  await page.waitForFunction(
-    label => [...document.querySelectorAll('[role="tab"]')].find(tab => tab.textContent.trim() === label)?.getAttribute('aria-selected') === 'true',
-    name,
-  );
-}
-
 /** The main window's content size and what the user may change about it. */
 async function windowShape(app) {
   return app.evaluate(({ BrowserWindow }) => {
@@ -356,8 +347,7 @@ async function main(userDataDir, fixtureDir) {
     const suggestionCount = await seedActivity(app);
     assert.ok(suggestionCount >= 1, 'a routine was detected from seeded activity');
     await page.reload();
-    await page.waitForSelector('[data-testid="overview-stats"]', { timeout: 15_000 });
-    await page.waitForSelector('[data-testid="overview-heatmap"]');
+    await page.waitForSelector('[data-testid="overview-heatmap"]', { timeout: 15_000 });
     await shot(page, '04-overview-light');
     await noHorizontalOverflow(page, 'overview @1200');
 
@@ -399,40 +389,7 @@ async function main(userDataDir, fixtureDir) {
     assert.equal(await page.isChecked('[data-testid="settings-audio"]'), false, 'the microphone switch is off without the speech model');
     log('speech model shows as not installed, and the microphone switch is disabled until it is');
 
-    // 7. Suggestions: accept one, then dismiss another.
-    // Suggestions left the sidebar, so the test opens it by its route, as the Overview's "Review all" link does.
-    await page.evaluate(() => {
-      location.hash = '#/suggestions';
-    });
-    await page.waitForSelector('[data-testid="suggestion-card"]');
-    await shot(page, '06-suggestions-light');
-    await page.click('[data-testid="suggestion-accept"]');
-    await waitForStatus(page, status => status.automations.length === 1, { label: 'draft automation' });
-    log('accepted routine is a draft automation');
-
-    // 8. Automation detail: dry run shows previews, and a supervised run is refused below level 3.
-    await page.click('[data-testid="nav-automations"]');
-    await page.waitForSelector('[data-testid="automation-card"]', { timeout: 15_000 });
-    await page.click('[data-testid="automation-card"]');
-    await page.click('[data-testid="automation-run-dry"]');
-    await page.waitForSelector('[data-testid="run-result"]', { timeout: 15_000 });
-    assert.match(await page.textContent('[data-testid="run-result"]'), /dry_run/);
-    assert.equal(await page.isDisabled('[data-testid="automation-run"]'), true, 'run is disabled at draft');
-    // The result strip ends above the 558px content box, which stops 20px above the window bottom.
-    const windowHeight = await page.evaluate(() => window.innerHeight);
-    const foldLimits = { '.auto-ladder-wrap': windowHeight, '.auto-tabs': windowHeight, '[data-testid="run-panel"]': windowHeight - 20 };
-    for (const [selector, limit] of Object.entries(foldLimits)) {
-      const bottom = await page.$eval(selector, element => element.getBoundingClientRect().bottom);
-      assert.ok(bottom <= limit, `${selector} sits below the fold: bottom ${bottom}px of ${limit}px`);
-    }
-    await shot(page, '07-automation-detail-light');
-    for (const name of ['Autonomy', 'Workflow', 'Autonomy']) {
-      await selectTab(page, name);
-      await noDocumentScroll(page, `automation ${name} tab`);
-    }
-    await shot(page, 'automation-autonomy-900');
-
-    // 9. The network ledger shows the verified model download, with no personal data in the request.
+    // 7. The network ledger shows the verified model download, with no personal data in the request.
     await page.click('[data-testid="nav-ledger"]');
     await page.waitForSelector('[data-testid="ledger-entry"]');
     const ledgerText = await page.textContent('[data-testid="ledger-entry"]');
@@ -452,7 +409,7 @@ async function main(userDataDir, fixtureDir) {
     assert.ok(layaEntries.every(entry => entry.path.includes(`/resolve/${LAYA_REVISION}/`)), 'the pinned commit is in every path');
     assert.match(await page.textContent('[data-testid="view-ledger"]'), /127\.0\.0\.1 · laya\.onnx\.data/);
 
-    // 10. Stop switch from the tray. The tray is a separate window; open it and press the button.
+    // 8. Stop switch from the tray. The tray is a separate window; open it and press the button.
     const trayResult = await app.evaluate(({ BrowserWindow }) => {
       const tray = BrowserWindow.getAllWindows().find(win => win.webContents.getURL().endsWith('/tray.html'));
       if (!tray) return 'missing';
@@ -473,7 +430,7 @@ async function main(userDataDir, fixtureDir) {
     await waitForStatus(page, status => status.config.automationsEnabled === true, { timeout: 10_000, label: 'automations on' });
     log('automations switch round-trips');
 
-    // 10b. The twin offers a local routine when its first app opens. Nothing runs until the person approves.
+    // 8b. The twin offers a local routine when its first app opens. Nothing runs until the person approves.
     const offered = await page.evaluate(async () => {
       const status = await window.twin.status();
       const suggestion = status.suggestions.find(item => item.drafted.some(step => step.app === 'microsoft word'));
@@ -516,11 +473,11 @@ async function main(userDataDir, fixtureDir) {
     log('no repeat offer during the cooldown');
 
 
-    // 11. The window has one fixed size. Every main route holds the checks in responsiveProblems at 900x600, and the
+    // 9. The window has one fixed size. Every main route holds the checks in responsiveProblems at 900x600, and the
     // window still reports that it cannot be resized, maximised or made full screen.
-    const ROUTES = ['overview', 'tasks', 'swarm', 'recall', 'suggestions', 'automations', 'readiness', 'knows', 'review', 'connectors', 'ledger', 'settings'];
+    const ROUTES = ['overview', 'tasks', 'recall', 'readiness', 'knows', 'review', 'connectors', 'ledger', 'settings'];
     // These pages have no sidebar link. They open from the Overview or the command palette, and still have to lay out.
-    const UNLINKED = new Set(['suggestions', 'readiness', 'knows', 'review']);
+    const UNLINKED = new Set(['readiness', 'knows', 'review']);
     for (const route of ROUTES) {
       if (UNLINKED.has(route)) {
         await page.evaluate(name => { location.hash = `#/${name}`; }, route);
@@ -528,18 +485,8 @@ async function main(userDataDir, fixtureDir) {
         await page.click(`[data-testid="nav-${route}"]`);
       }
       await page.waitForTimeout(250);
-      if (route === 'connectors') {
-        // Connectors opens Settings at its own section, and a status refresh does not pull the page back to the top.
-        const connectorsTop = () => page.$eval('#settings-connectors', element => element.getBoundingClientRect().top);
-        assert.ok(Math.abs(await connectorsTop()) < 200, `Connectors opens at its section: top ${await connectorsTop()}px`);
-        // A theme change rebuilds the page column. The mark on the old column shows when the new one is in place.
-        const theme = await page.evaluate(async () => (await window.twin.status()).config.theme);
-        await page.$eval('main.main', column => { column.dataset.before = '1'; });
-        await page.evaluate(next => window.twin.updateConfig({ theme: next }), theme === 'dark' ? 'light' : 'dark');
-        await page.waitForFunction(() => !document.querySelector('main.main')?.dataset.before, null, { timeout: 10_000 });
-        assert.ok(Math.abs(await connectorsTop()) < 200, 'a rebuild keeps the place on the Connectors page');
-        await page.evaluate(previous => window.twin.updateConfig({ theme: previous }), theme);
-      }
+      // Connectors is a page of its own, with the local sources and the cloud accounts.
+      if (route === 'connectors') await page.waitForSelector('[data-testid="view-connectors"]', { timeout: 15_000 });
       // The Recall page is reached from its sidebar link, and its view must render at this size.
       if (route === 'recall') await page.waitForSelector('[data-testid="view-recall"]', { timeout: 15_000 });
       await noDocumentScroll(page, `${route} route`);
@@ -578,7 +525,7 @@ async function main(userDataDir, fixtureDir) {
       [],
       'no page errors or CSP violations',
     );
-    // 12. Delete everything removes the decision model too, even while a download of it is running. Install it again,
+    // 10. Delete everything removes the decision model too, even while a download of it is running. Install it again,
     // stall the download, and delete. The native dialog and the relaunch are replaced, so the test can watch the result.
     laya.server.rules.length = 0;
     laya.server.rules.push(({ name }) => (name === LAYA_DATA ? { stallAt: 500_000 } : undefined));

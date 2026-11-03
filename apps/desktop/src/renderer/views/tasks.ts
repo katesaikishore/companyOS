@@ -346,6 +346,5 @@ export function taskRow(task: AssignedTaskView, rank: number): HTMLElement {
       ),
     ),
     h('span', { class: 'ov-signal mono', title: PRIORITY_NOTE }, `priority ${task.priority}`),
-    button('Open', { onClick: () => go(`#/automations/${encodeURIComponent(task.automationId)}`) }, 'ov-accept'),
   );
 }

@@ -60,9 +60,9 @@ export interface ScreenContext extends Omit<ScreenState, 'secureInput'> {
   app: string | null;
 }
 
-export type FrameReason = 'focus' | 'interval';
+type FrameReason = 'focus' | 'interval';
 
-export interface ScreenCaptureDeps {
+interface ScreenCaptureDeps {
   source: FrameSource;
   ocr: OcrEngine;
   media: Pick<MediaStore, 'write' | 'remove'>;

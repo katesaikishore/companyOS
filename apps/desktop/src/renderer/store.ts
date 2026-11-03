@@ -1,19 +1,12 @@
-import type { CaptureHitView, HardwareProfile, RunResult, SetupPlan, TwinBridge, TwinConfig, TwinStatus } from '@companyos/twin-core';
+import type { CaptureHitView, HardwareProfile, SetupPlan, TwinBridge, TwinConfig, TwinStatus } from '@companyos/twin-core';
 import type { RecallKind, RecallRange } from './recall-model.js';
 
 export type Route =
   | { name: 'overview' }
-  | { name: 'suggestions' }
-  | { name: 'automations' }
-  | { name: 'automation'; id: string }
   | { name: 'ledger' }
   /** The app readiness list, or one app's detail when the route names an app. */
   | { name: 'readiness'; app?: string }
-  /** The tasks Recall has assigned, ranked by priority. */
-  | { name: 'tasks' }
-  /** Swarms: several automations started together, and every cursor's current step. */
-  | { name: 'swarm' }
-  /** The local sources the twin reads from. It opens the Connectors section of Settings. */
+  /** Every source the twin reads from: local sources and cloud accounts. */
   | { name: 'connectors' }
   /** Today's tasks, for the end-of-day review. It is opened from the Overview. */
   | { name: 'review' }
@@ -21,12 +14,12 @@ export type Route =
   | { name: 'knows' }
   /** Search of the text the twin read on screen or heard. Its results are cleared when the page is left. */
   | { name: 'recall' }
-  /** The task box: tell the twin what to do in an app, and answer the steps that wait for you. */
+  /** The task box, and the tasks Recall has assigned: tell the twin what to do in an app, and answer the steps that wait for you. */
   | { name: 'tasks' }
   | { name: 'settings' };
 
 /** The Recall page's search. The words and filters stay so a redraw keeps them. The hits are the last search's result. */
-export interface RecallState {
+interface RecallState {
   text: string;
   kind: RecallKind;
   range: RecallRange;
@@ -36,12 +29,12 @@ export interface RecallState {
   open?: string;
 }
 
-export interface Notice {
+interface Notice {
   text: string;
   tone: 'info' | 'error';
 }
 
-export interface SetupData {
+interface SetupData {
   loading: boolean;
   hardware?: HardwareProfile;
   plan?: SetupPlan;
@@ -49,7 +42,6 @@ export interface SetupData {
 }
 
 /** A run result and when it arrived. The time is part of the stored value, so a repeat with the same steps still redraws. */
-export type StoredRun = RunResult & { at: number };
 
 /** Page state shared by the views. It lives in memory only; the twin's data stays in the main process. */
 export const state = {
@@ -65,16 +57,7 @@ export const state = {
   wizardStep: 1,
   altOpen: false,
   setup: { loading: false } as SetupData,
-  selectedSuggestion: undefined as string | undefined,
   selectedLedger: undefined as string | undefined,
-  /** The tab the automation detail shows. It is here, with the other selections, so a tab click redraws the page. */
-  automationTab: 'workflow' as 'workflow' | 'autonomy',
-  runResults: new Map<string, StoredRun>(),
-  /** The automation whose name is being edited, and the text typed so far. Unset when no name is being edited. */
-  renaming: undefined as { automationId: string; draft: string } | undefined,
-  /** The automations picked for the next swarm, and the name typed for it. */
-  swarmPick: new Set<string>(),
-  swarmName: '',
   /** The Recall page's search. Its hits are cleared when the page is left. */
   recall: { text: '', kind: 'all', range: 'today' } as RecallState,
   /** Screen images the Recall page has read, as data URLs, or null when one is not available. Capped, and cleared when the page is left. */
@@ -175,10 +158,6 @@ export function routeFromHash(hash: string): Route {
   const [path = ''] = hash.replace(/^#/, '').split('?');
   const parts = path.split('/').filter(part => part.length > 0);
   switch (parts[0]) {
-    case 'suggestions':
-      return { name: 'suggestions' };
-    case 'automations':
-      return parts[1] ? { name: 'automation', id: safeDecode(parts[1]) } : { name: 'automations' };
     case 'ledger':
       return { name: 'ledger' };
     case 'readiness':
@@ -187,16 +166,12 @@ export function routeFromHash(hash: string): Route {
       return { name: 'review' };
     case 'tasks':
       return { name: 'tasks' };
-    case 'swarm':
-      return { name: 'swarm' };
     case 'connectors':
       return { name: 'connectors' };
     case 'knows':
       return { name: 'knows' };
     case 'recall':
       return { name: 'recall' };
-    case 'tasks':
-      return { name: 'tasks' };
     case 'settings':
       return { name: 'settings' };
     default:
@@ -205,7 +180,6 @@ export function routeFromHash(hash: string): Route {
 }
 
 export function routeKey(route: Route): string {
-  if (route.name === 'automation') return `#/automations/${encodeURIComponent(route.id)}`;
   if (route.name === 'readiness' && route.app !== undefined) return `#/readiness/${encodeURIComponent(route.app)}`;
   return `#/${route.name}`;
 }

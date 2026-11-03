@@ -46,22 +46,22 @@ const SOURCE_KIND: Readonly<Record<CloudProviderId, CloudSourceKind>> = {
 
 const DAY_MS = 86_400_000;
 /** The calendar window of a read: events from this many days before it to this many days after it. */
-export const GOOGLE_DAYS_BACK = 30;
-export const GOOGLE_DAYS_AHEAD = 60;
+const GOOGLE_DAYS_BACK = 30;
+const GOOGLE_DAYS_AHEAD = 60;
 /** Items are stored in batches, so a large read does not hold the main process for one long write. */
 const STORE_BATCH = 200;
 
-export const UNKNOWN_ACCOUNT_MESSAGE = 'That account is not known.';
-export const ALREADY_CONNECTED_MESSAGE = 'This account is already connected. Disconnect it first.';
-export const SIGN_IN_OPEN_MESSAGE = 'A sign-in for this account is already open. Finish it first.';
-export const SIGN_IN_ABORTED_MESSAGE = 'The data was deleted while signing in. Nothing was connected.';
-export const TOKEN_SAVE_MESSAGE = 'The sign-in could not be saved on this device. Nothing was connected.';
-export const REFRESH_SAVE_MESSAGE = 'A refreshed sign-in could not be saved on this device. Connect the account again.';
-export const TOKEN_REMOVE_MESSAGE = 'The saved sign-in could not be removed from this device. Choose Disconnect again.';
-export const READ_FAILED_MESSAGE = 'The account could not be read. Its items were not changed.';
-export const STORE_FAILED_MESSAGE = 'The items could not be stored. Read the account again.';
-export const LEDGER_FAILED_MESSAGE = 'A request could not be written to the network ledger.';
-export const CONNECT_FAILED_SUFFIX = 'Nothing was connected.';
+const UNKNOWN_ACCOUNT_MESSAGE = 'That account is not known.';
+const ALREADY_CONNECTED_MESSAGE = 'This account is already connected. Disconnect it first.';
+const SIGN_IN_OPEN_MESSAGE = 'A sign-in for this account is already open. Finish it first.';
+const SIGN_IN_ABORTED_MESSAGE = 'The data was deleted while signing in. Nothing was connected.';
+const TOKEN_SAVE_MESSAGE = 'The sign-in could not be saved on this device. Nothing was connected.';
+const REFRESH_SAVE_MESSAGE = 'A refreshed sign-in could not be saved on this device. Connect the account again.';
+const TOKEN_REMOVE_MESSAGE = 'The saved sign-in could not be removed from this device. Choose Disconnect again.';
+const READ_FAILED_MESSAGE = 'The account could not be read. Its items were not changed.';
+const STORE_FAILED_MESSAGE = 'The items could not be stored. Read the account again.';
+const LEDGER_FAILED_MESSAGE = 'A request could not be written to the network ledger.';
+const CONNECT_FAILED_SUFFIX = 'Nothing was connected.';
 
 /** The sentences this module may show or log. Anything else an error carries is replaced by READ_FAILED_MESSAGE. */
 const KNOWN_MESSAGES: ReadonlySet<string> = new Set([
@@ -81,14 +81,14 @@ const KNOWN_MESSAGES: ReadonlySet<string> = new Set([
 ]);
 
 /** The sentence to show or log for an error. Only a fixed sentence passes through, so no path, token or item text can. */
-export function fixedMessage(error: unknown): string {
+function fixedMessage(error: unknown): string {
   if (error instanceof CloudConnectorError) return error.message;
   if (error instanceof Error && KNOWN_MESSAGES.has(error.message)) return error.message;
   return READ_FAILED_MESSAGE;
 }
 
 /** Checks a value from the page or the menu. Anything but a known account is refused before the runtime sees it. */
-export function cloudProviderArg(value: unknown): CloudProviderId {
+function cloudProviderArg(value: unknown): CloudProviderId {
   if (!isCloudProviderId(value)) throw new Error(UNKNOWN_ACCOUNT_MESSAGE);
   return value;
 }
@@ -102,12 +102,12 @@ function providerOfKind(kind: CloudSourceKind): CloudProviderId {
 }
 
 /** The part of the engine this module uses: the connector store, plus the network ledger. */
-export interface CloudStore extends ConnectorStore {
+interface CloudStore extends ConnectorStore {
   recordNetworkCall(entry: LedgerEntry): void;
 }
 
 /** The capture gates the scheduled reads wait for. The runtime passes the same gate the local sources use. */
-export interface CloudConnectorServiceOptions {
+interface CloudConnectorServiceOptions {
   agent: CloudStore;
   tokens: TokenStore;
   now: () => number;

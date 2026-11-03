@@ -141,7 +141,7 @@ export function keyEventFromHook(press: HookKeyPress, capsLock: boolean): KeyEve
 }
 
 /** Loads uiohook-napi. Called only on macOS, and only by createKeyboardSource, which catches the error when it fails. */
-export function loadHookModule(): HookModule {
+function loadHookModule(): HookModule {
   return require('uiohook-napi') as HookModule;
 }
 

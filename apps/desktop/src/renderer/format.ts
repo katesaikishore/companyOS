@@ -26,15 +26,6 @@ export function formatDecimalBytes(bytes: number): string {
   return `${Math.round(bytes)} B`;
 }
 
-/** Minutes shown as hours with one decimal place. */
-export function formatHours(minutes: number): string {
-  return `${(minutes / 60).toFixed(1)} h`;
-}
-
-export function percent(fraction: number): string {
-  return `${Math.round(fraction * 100)}%`;
-}
-
 export function clamp01(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.min(1, Math.max(0, value));
@@ -68,7 +59,7 @@ export function formatWhen(ts: number, now: number = Date.now()): string {
   return `${d.getDate()} ${MONTHS[d.getMonth()]} ${clock(ts)}`;
 }
 
-export function formatRate(perWeek: number): string {
+function formatRate(perWeek: number): string {
   return perWeek < 1 ? perWeek.toFixed(1) : String(Math.round(perWeek));
 }
 

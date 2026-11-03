@@ -3,9 +3,9 @@ import type { AbstainReason, DecisionAnswer, DecisionModel, DecisionQuestion, De
 import type { LayaRuntime } from './laya';
 
 /** Longest wait for one answer. Past this the caller keeps its rule-based result. */
-export const LAYA_TIMEOUT_MS = 8_000;
+const LAYA_TIMEOUT_MS = 8_000;
 
-export interface LayaDecisionModelOptions {
+interface LayaDecisionModelOptions {
   /** The loaded model, or undefined when it is not installed or cannot load. */
   runtime: () => Promise<LayaRuntime | undefined>;
   timeoutMs?: number;

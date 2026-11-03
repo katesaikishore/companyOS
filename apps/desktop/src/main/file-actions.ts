@@ -113,7 +113,7 @@ async function freePath(into: string, home: string, from: string): Promise<strin
   }
 }
 
-export interface Gathered {
+interface Gathered {
   moved: number;
   bytes: number;
   manifest: string;

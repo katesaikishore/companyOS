@@ -11,9 +11,9 @@ const FIRST_CHECK_MS = 30_000;
 const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
 
 /** Writes one entry to the network ledger. The desktop app passes the runtime's recorder, so no check goes unlisted. */
-export type NetworkRecorder = (entry: NetworkEntry) => void;
+type NetworkRecorder = (entry: NetworkEntry) => void;
 
-export type UpdateDecision =
+type UpdateDecision =
   | { enabled: true; feedUrl: string }
   | { enabled: false; reason: 'not-packaged' | 'no-feed' | 'invalid-feed' };
 
