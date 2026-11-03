@@ -48,6 +48,8 @@ const MIN_WINDOW_HEIGHT = 100;
 const PASTE_SETTLE_MS = 600;
 /** How long the app may take to move the selection after a field is submitted, before text is pasted there. */
 const VIA_SETTLE_MS = 700;
+/** How long a scrolled element may take to settle in view before it is looked for again. */
+const SCROLL_SETTLE_MS = 500;
 
 interface Match {
   ref?: string;
@@ -137,7 +139,7 @@ function boundsOf(value: unknown): Match['bounds'] {
 }
 
 /** The element the locator names: exact name, name prefix or value, inside a dialog when asked, first or last. */
-function pick(matches: readonly Match[], target: Locator): Match | undefined {
+function pick(matches: readonly Match[], target: Locator, inView = true): Match | undefined {
   const named = matches.filter(match => {
     if (target.value !== undefined) {
       if (match.value !== target.value) return false;
@@ -148,14 +150,24 @@ function pick(matches: readonly Match[], target: Locator): Match | undefined {
     if (target.namePrefix !== undefined && !match.name?.startsWith(target.namePrefix)) return false;
     if (target.inDialog && !match.path.some(part => /^(alertdialog|dialog|sheet)\b/.test(part))) return false;
     // A tab scrolled out of view reports a width of one point; it cannot be clicked where it is drawn.
-    return !match.bounds || match.bounds.width > 2;
+    return !inView || !match.bounds || match.bounds.width > 2;
   });
   return target.last ? named[named.length - 1] : named[0];
 }
 
+/**
+ * Finds the element in view. One that matches but is scrolled out of view, such as a sheet tab past the end of the tab
+ * bar, is scrolled into view once and looked for again.
+ */
 async function locate(options: HandsOptions, context: Context, app: string, windowId: string, target: Locator): Promise<Match | HandsResult> {
-  const found = pick(await elements(options, context, app, windowId, target.role), target);
-  return found ?? refused('not_found', MESSAGES.notFound);
+  const matches = await elements(options, context, app, windowId, target.role);
+  const found = pick(matches, target);
+  if (found) return found;
+  const hidden = pick(matches, target, false);
+  if (!hidden?.ref) return refused('not_found', MESSAGES.notFound);
+  await call(options, context, ['scroll-to', hidden.ref]);
+  await new Promise(resolve => setTimeout(resolve, SCROLL_SETTLE_MS));
+  return pick(await elements(options, context, app, windowId, target.role), target) ?? refused('not_found', MESSAGES.notFound);
 }
 
 function isResult(value: unknown): value is HandsResult {

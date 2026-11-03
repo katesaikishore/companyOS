@@ -33,9 +33,11 @@ const FAKE_PROGRAM = [
   "  const role = after('--role');",
   "  const table = JSON.parse(process.env.FAKE_DESK_FIND || '{}');",
   "  let matches = table[role] || [];",
+  "  if (require('node:fs').existsSync(process.env.FAKE_DESK_LOG + '.scrolled')) matches = matches.map(m => m.bounds && m.bounds.width === 1 ? { ...m, bounds: { ...m.bounds, width: 60 } } : m);",
   "  if (role === 'textfield' && process.env.FAKE_DESK_FIELD !== undefined) matches = matches.concat([{ ref_id: '@s1:e9', role, states: ['focused'], value: process.env.FAKE_DESK_FIELD }]);",
   '  out({ ok: true, data: { matches } });',
-  '} else out({ ok: true, data: {} });',
+  "} else if (args[0] === 'scroll-to') { require('node:fs').writeFileSync(process.env.FAKE_DESK_LOG + '.scrolled', ''); out({ ok: true, data: {} }); }",
+  'else out({ ok: true, data: {} });',
   '',
 ].join('\n');
 
@@ -184,6 +186,14 @@ describe.runIf(STARTS_FAKE_PROGRAM)('the desktop steps through agent-desktop', (
     const calls = fake({ windows: [editor, reader] });
     await pressKeyWithAgentDesktop(options(), 'Google Chrome', 'Summary', 'cmd+r');
     expect(calls().at(-1)).toEqual(['press', 'cmd+r', '--window-id', 'w-5', '--headed']);
+  });
+
+  it('scrolls an element that is out of view into view, then clicks it where it now is', async () => {
+    const hiddenTab = { ref_id: '@s1:e8', role: 'statictext', name: 'Scratch', bounds: { x: 887, y: 818, width: 1, height: 18 } };
+    const calls = fake({ find: { statictext: [hiddenTab] } });
+    await expect(clickWithAgentDesktop(options(), 'Google Chrome', 'Benchmark', { role: 'statictext', name: 'Scratch' }, 'right')).resolves.toBe(true);
+    expect(verbs(calls())).toEqual(['list-windows', 'find', 'scroll-to', 'find', 'focus-window', 'mouse-click']);
+    expect(calls().at(-1)).toEqual(['mouse-click', '--xy', '917,827', '--button', 'right', '--headed']);
   });
 
   it('finds a nameless field by its value', async () => {
