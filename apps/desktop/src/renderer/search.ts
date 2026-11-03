@@ -15,6 +15,8 @@ const TASK_POLL_MS = 700;
 /** How long the plan stays in view before the bar steps aside for the operator's app. */
 const PLAN_SHOWN_MS = 1500;
 const SHOWN_TASK_STEPS = 6;
+/** Steps shown under a step that waits, so the question and its buttons keep the room. */
+const SHOWN_WAITING_STEPS = 3;
 const FIND_HINT = 'Find a file or photo: “my passport size photo”, “invoices from Acme last month”…';
 const DO_HINT = 'Tell the agent what to do: “open slides.new in Chrome and title it My Portfolio”…';
 
@@ -28,6 +30,11 @@ const view = {
     plan: undefined as TaskPlanView | undefined,
     operator: undefined as OperatorTaskView | undefined,
     error: undefined as string | undefined,
+    /**
+     * Whether the last task's plan, steps and result show while no task runs. They show when the bar comes back to say how
+     * a task ended, and are cleared when the person opens the bar themselves or starts typing a new task.
+     */
+    past: false,
   },
   query: '',
   searching: false,
@@ -50,7 +57,14 @@ const input = h('input', {
   spellcheck: false,
   oninput: () => {
     view.query = input.value;
-    if (view.mode === 'do') return;
+    if (view.mode === 'do') {
+      // Typing a new task clears the one that ended, so the bar shows only what is happening now.
+      if (view.task.past && !busy(view.task.operator)) {
+        view.task = { ...view.task, plan: undefined, error: undefined, past: false };
+        render();
+      }
+      return;
+    }
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
       // Cleared as it fires, so Enter after the results arrive opens the selection instead of searching again.
@@ -125,7 +139,7 @@ function setMode(mode: 'find' | 'do'): void {
 async function startTask(): Promise<void> {
   const goal = input.value.trim();
   if (goal.length < 3 || view.task.starting || busy(view.task.operator)) return;
-  view.task = { starting: true, plan: undefined, operator: undefined, error: undefined };
+  view.task = { starting: true, plan: undefined, operator: undefined, error: undefined, past: true };
   render();
   try {
     view.task.plan = await bridge().runPrompt(goal);
@@ -267,32 +281,18 @@ function modes(): HTMLElement {
 }
 
 function taskPanel(): HTMLElement {
-  const { starting, plan, operator, error } = view.task;
+  const { starting, plan, operator, error, past } = view.task;
   const running = busy(operator);
   const pending = operator?.pending;
+  // While no task runs, the last one shows only when the bar came back to report it.
+  const shown = running || past;
+  const planLine = plan ? (plan.planned ? `Plan · ${plan.steps.length} steps · starts in ${plan.app}` : `No plan from the model · starts in ${plan.app}`) : '';
   return h(
     'div',
     { class: 'task-panel', 'data-testid': 'bar-task' },
     error ? h('p', { class: 'search-note' }, error) : undefined,
     starting ? h('p', { class: 'search-note' }, 'The local model is planning the task…') : undefined,
-    !starting && !plan && !running && !operator?.result && !error
-      ? h('p', { class: 'search-note' }, 'Enter plans the task and starts it · the agent asks before it sends, pays or deletes · Esc closes')
-      : undefined,
-    plan
-      ? h(
-          'div',
-          { class: 'task-plan' },
-          h('p', { class: 'search-note' }, plan.planned ? `Plan · starts in ${plan.app}` : `No plan from the model · starts in ${plan.app}`),
-          plan.steps.length > 0 ? h('ol', { class: 'task-steps' }, ...plan.steps.map(step => h('li', {}, step))) : undefined,
-        )
-      : undefined,
-    operator && operator.steps.length > 0
-      ? h(
-          'ol',
-          { class: 'task-steps task-done' },
-          ...operator.steps.slice(-SHOWN_TASK_STEPS).map(step => h('li', { value: String(step.n) }, `${step.text} · ${OUTCOME_WORDS[step.outcome]}`)),
-        )
-      : undefined,
+    // A step that waits for the person comes first, with its buttons, so it is never below the fold.
     pending
       ? h(
           'div',
@@ -308,10 +308,27 @@ function taskPanel(): HTMLElement {
           ),
         )
       : undefined,
-    operator?.result && !running
+    shown && operator?.result && !running
       ? h('p', { class: 'task-result', 'data-testid': 'bar-result' }, `${RESULT_WORDS[operator.result.status]}${operator.result.summary ? `: ${operator.result.summary}` : '.'}`)
       : undefined,
-    running ? h('div', { class: 'task-actions' }, h('button', { class: 'task-deny', 'data-testid': 'bar-stop', onclick: () => void bridge().stopTask().then(() => readTask()) }, 'Stop the task')) : undefined,
+    shown && (plan || running)
+      ? h(
+          'div',
+          { class: 'task-head' },
+          plan ? h('p', { class: 'search-note' }, planLine) : h('p', { class: 'search-note' }, `Working in ${operator?.app ?? 'the app'}`),
+          running ? h('button', { class: 'task-deny', 'data-testid': 'bar-stop', onclick: () => void bridge().stopTask().then(() => readTask()) }, 'Stop the task') : undefined,
+        )
+      : undefined,
+    // The plan's steps show while nothing waits; while a step waits, the plan stays one line so the question has the room.
+    shown && plan && plan.steps.length > 0 && !pending ? h('ol', { class: 'task-steps' }, ...plan.steps.map(step => h('li', {}, step))) : undefined,
+    shown && operator && operator.steps.length > 0
+      ? h(
+          'ol',
+          { class: 'task-steps task-done' },
+          ...operator.steps.slice(pending ? -SHOWN_WAITING_STEPS : -SHOWN_TASK_STEPS).map(step => h('li', { value: String(step.n) }, `${step.text} · ${OUTCOME_WORDS[step.outcome]}`)),
+        )
+      : undefined,
+    !starting && !shown && !error ? h('p', { class: 'search-note' }, 'Enter plans the task and starts it · the agent asks before it sends, pays or deletes · Esc closes') : undefined,
   );
 }
 
@@ -345,10 +362,13 @@ function render(): void {
   input.focus();
 }
 
-bridge().onSearchOpened(mode => {
+bridge().onSearchOpened((mode, reason) => {
   // Previews are made again each time the bar opens, so a file that changed since never shows an old picture.
   view.previews = {};
   setMode(mode);
+  // Opened by the person, the bar starts clean; brought back by a task, it shows that task's question or how it ended.
+  view.task.past = reason === 'task';
+  if (reason === 'shortcut' && !busy(view.task.operator)) view.task.plan = undefined;
   if (mode === 'do') void readTask();
   input.select();
   input.focus();

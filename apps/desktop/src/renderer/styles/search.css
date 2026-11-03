@@ -136,6 +136,21 @@ body {
   gap: 8px;
   overflow-y: auto;
   flex: 1;
+  /* Without this a flex child grows past the card instead of scrolling. */
+  min-height: 0;
+}
+
+.task-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.task-pending,
+.task-result,
+.task-head {
+  flex-shrink: 0;
 }
 
 .task-steps {

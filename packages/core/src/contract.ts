@@ -682,8 +682,8 @@ export interface TwinBridge {
   /** Hides the search bar. */
   hideSearch(): Promise<void>;
   /** Calls the listener each time the search bar is opened. Returns a function that stops listening. */
-  /** The bar opened, to find files or to do a task. */
-  onSearchOpened(listener: (mode: 'find' | 'do') => void): () => void;
+  /** The bar opened, to find files or to do a task: by the person with a shortcut, or by a task that waits or ended. */
+  onSearchOpened(listener: (mode: 'find' | 'do', reason: 'shortcut' | 'task') => void): () => void;
   /** Plans a task typed in the bar with the local model, then starts it. */
   runPrompt(prompt: string): Promise<TaskPlanView>;
   /** Starts a task. One task runs at a time. Steps that may send, share, delete or sign in wait for answerTaskStep. */

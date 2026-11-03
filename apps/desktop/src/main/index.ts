@@ -566,6 +566,8 @@ function createTrayWindow(): void {
 
 /** The mode the bar was last opened in. */
 let barMode: 'find' | 'do' = 'find';
+/** Who opened the bar last: the person, with a shortcut, or a task that waits for them or ended. */
+let barReason: 'shortcut' | 'task' = 'shortcut';
 /** True while a task started from the bar runs. A task from the Tasks page shows its steps there instead. */
 let barTask = false;
 let shownTaskStep: string | undefined;
@@ -580,13 +582,13 @@ function noticeTask(task: OperatorTaskView): void {
   const pending = task.pending?.id;
   if (pending && pending !== shownTaskStep) {
     shownTaskStep = pending;
-    showBar('do');
+    showBar('do', 'task');
   }
   if (!pending) shownTaskStep = undefined;
   const running = task.state !== 'idle';
   if (taskWasRunning && !running && task.result) {
     barTask = false;
-    showBar('do');
+    showBar('do', 'task');
   }
   taskWasRunning = running;
 }
@@ -620,7 +622,7 @@ function createSearchWindow(): void {
   searchWindow.webContents.on('will-navigate', event => event.preventDefault());
   // The first time the bar opens, the page is still loading when it is told the mode, so it is told again once it loads.
   searchWindow.webContents.on('did-finish-load', () => {
-    if (searchWindow?.isVisible()) searchWindow.webContents.send(IPC.searchOpened, barMode);
+    if (searchWindow?.isVisible()) searchWindow.webContents.send(IPC.searchOpened, barMode, barReason);
   });
   searchWindow.loadURL(`${APP_ORIGIN}/search.html`).catch(() => undefined);
 }
@@ -632,12 +634,13 @@ function toggleSearch(mode: 'find' | 'do' = 'find'): void {
     window.hide();
     return;
   }
-  showBar(mode);
+  showBar(mode, 'shortcut');
 }
 
 /** Shows the bar near the top of the screen with the pointer. A task from it starts in the app that was in front. */
-function showBar(mode: 'find' | 'do'): void {
+function showBar(mode: 'find' | 'do', reason: 'shortcut' | 'task'): void {
   barMode = mode;
+  barReason = reason;
   if (!searchWindow || searchWindow.isDestroyed()) createSearchWindow();
   const window = searchWindow!;
   if (!window.isVisible()) void runtime?.rememberFrontApp();
@@ -646,7 +649,7 @@ function showBar(mode: 'find' | 'do'): void {
   window.setPosition(Math.round(area.x + (area.width - size.width) / 2), Math.round(area.y + area.height * 0.18));
   window.show();
   window.focus();
-  window.webContents.send(IPC.searchOpened, mode);
+  window.webContents.send(IPC.searchOpened, mode, reason);
 }
 
 function hideTray(): void {

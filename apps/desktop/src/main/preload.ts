@@ -120,7 +120,7 @@ const bridge: TwinBridge = {
   hideSearch: () => ipcRenderer.invoke(CHANNEL.hideSearch),
   runPrompt: prompt => ipcRenderer.invoke(CHANNEL.runPrompt, prompt),
   onSearchOpened: listener => {
-    const wrapped = (_event: unknown, mode: unknown) => listener(mode === 'do' ? 'do' : 'find');
+    const wrapped = (_event: unknown, mode: unknown, reason: unknown) => listener(mode === 'do' ? 'do' : 'find', reason === 'task' ? 'task' : 'shortcut');
     ipcRenderer.on(CHANNEL.searchOpened, wrapped);
     return () => ipcRenderer.removeListener(CHANNEL.searchOpened, wrapped);
   },
