@@ -479,7 +479,10 @@ async function choosePath(
     ['wait', '--menu-closed', '--app', app, '--timeout', String(MENU_CLOSE_MS), ...scope],
     true,
   );
-  const done = closed.result.ok && waitFound(closed.output);
+  let done = closed.result.ok && waitFound(closed.output);
+  // Finder's menu surfaces cannot be read once no menu is open (agent-desktop 2.5), so the wait fails there every time.
+  // Its menu bar item still says whether its menu is open: selected while it is, not once it closes.
+  if (!done && surfaceReadFailed(closed.output)) done = await menuBarItemClosed(options, app, menu[0], scope);
   recordStep(options, 'choose_menu', done ? 0 : 'unverified', started, errorCodeOf(closed.output));
   return done ? { ok: true } : refused('unverified', MESSAGES.unverified);
 }
@@ -514,6 +517,24 @@ function surfaceCount(output: Buffer | undefined): number {
   const surfaces = envelope?.ok === true ? envelope.data?.surfaces : undefined;
   if (!Array.isArray(surfaces)) return 0;
   return surfaces.filter(entry => typeof entry === 'object' && entry !== null && (entry as { type?: unknown }).type === 'menu').length;
+}
+
+/** True when an envelope says the app's menu surfaces could not be read, rather than that a menu is still open. */
+function surfaceReadFailed(output: Buffer | undefined): boolean {
+  const envelope = parseEnvelope(output) as { ok?: unknown; error?: { details?: { kind?: unknown } } };
+  return envelope?.ok === false && envelope.error?.details?.kind === 'surface_read';
+}
+
+/**
+ * True when the menu bar item is found and is not selected, so its menu has closed. Anything else, including a match
+ * with no states, is false.
+ */
+async function menuBarItemClosed(options: HandsOptions, app: string, label: string, scope: readonly string[]): Promise<boolean> {
+  const found = await runCall(options, ['find', '--app', app, '--surface', 'menubar', '--name', label, '--exact', '--first', ...scope], true);
+  if (menuItemRef(found.output, label) === undefined) return false;
+  const envelope = parseEnvelope(found.output) as { data?: { match?: { states?: unknown } } };
+  const states = envelope?.data?.match?.states;
+  return Array.isArray(states) && !states.includes('selected');
 }
 
 /** True when a wait envelope says the condition was met. */

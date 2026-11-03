@@ -25,7 +25,9 @@ const STARTS_FAKE_PROGRAM = process.platform !== 'win32';
  * open after it. By default every click is verified and the nth click leaves n menus open. FAKE_MENU_CLICK_FAIL names a
  * click, by number, that exits 1 with the code in FAKE_MENU_CLICK_CODE. FAKE_MENU_FIND_CODE is the code a missing label
  * fails with. FAKE_MENU_SESSION_ENDED makes every find in a session fail as agent-desktop 1.0.2 reports an ended session:
- * INVALID_ARGS with details.kind "session_ended". FAKE_MENU_WAIT "open" makes the menu stay open.
+ * INVALID_ARGS with details.kind "session_ended". FAKE_MENU_WAIT "open" makes the menu stay open, and "unreadable" makes the
+ * wait fail as it does in Finder: the menu surfaces cannot be read. FAKE_MENU_BAR_STATE is the state a menu bar match
+ * reports, such as "selected"; by default it reports none.
  */
 const FAKE_PROGRAM = [
   `#!${process.execPath}`,
@@ -42,7 +44,10 @@ const FAKE_PROGRAM = [
   "  const name = after('--name');",
   "  if (process.env.FAKE_MENU_SESSION_ENDED && args.includes('--session')) { out({ ok: false, error: { code: 'INVALID_ARGS', details: { kind: 'session_ended' } } }); process.exitCode = 1; }",
   "  else if (name === process.env.FAKE_MENU_MISSING) { out({ ok: false, error: { code: process.env.FAKE_MENU_FIND_CODE || 'ELEMENT_NOT_FOUND' } }); process.exitCode = 1; }",
-  "  else out({ ok: true, data: { match: { name, role: process.env.FAKE_MENU_ROLE || 'menuitem', ref_id: '@s1:e' + name.length } } });",
+  "  else {",
+  "    const states = after('--surface') === 'menubar' && process.env.FAKE_MENU_BAR_STATE ? [process.env.FAKE_MENU_BAR_STATE] : [];",
+  "    out({ ok: true, data: { match: { name, role: process.env.FAKE_MENU_ROLE || 'menuitem', ref_id: '@s1:e' + name.length, states } } });",
+  "  }",
   "} else if (args[0] === 'click') {",
   "  const counter = process.env.FAKE_MENU_LOG + '.clicks';",
   "  const n = (require('node:fs').existsSync(counter) ? Number(require('node:fs').readFileSync(counter, 'utf8')) : 0) + 1;",
@@ -52,7 +57,10 @@ const FAKE_PROGRAM = [
   "  const menus = Number(pick(process.env.FAKE_MENU_SURFACES, String(n)));",
   "  if (String(n) === process.env.FAKE_MENU_CLICK_FAIL) { out({ ok: false, error: { code: process.env.FAKE_MENU_CLICK_CODE || 'TIMEOUT' } }); process.exitCode = 1; return; }",
   "  out({ ok: true, data: { disposition: { delivery: verified ? 'delivered_verified' : 'delivered_unverified' }, surfaces: Array.from({ length: menus }, () => ({ type: 'menu' })) } });",
-  "} else if (args[0] === 'wait') out({ ok: true, data: { found: process.env.FAKE_MENU_WAIT !== 'open' } });",
+  "} else if (args[0] === 'wait') {",
+  "  if (process.env.FAKE_MENU_WAIT === 'unreadable') { out({ ok: false, error: { code: 'ELEMENT_NOT_FOUND', details: { kind: 'surface_read' } } }); process.exitCode = 1; }",
+  "  else out({ ok: true, data: { found: process.env.FAKE_MENU_WAIT !== 'open' } });",
+  "}",
   'else out({ ok: true, data: {} });',
   '})();',
   '',
@@ -71,6 +79,7 @@ const KEYS = [
   'FAKE_MENU_CLICK_CODE',
   'FAKE_MENU_FIND_CODE',
   'FAKE_MENU_SESSION_ENDED',
+  'FAKE_MENU_BAR_STATE',
 ];
 /** A menu bar item and one item in its menu: the only path the program can choose for now. */
 const CLEAN_UP = ['View', 'Clean Up'];
@@ -162,6 +171,21 @@ describe.runIf(STARTS_FAKE_PROGRAM)('chooseMenuWithAgentDesktop', () => {
       ['click', '@s1:e8', ...scope, ...actor],
       ['wait', '--menu-closed', '--app', 'Finder', '--timeout', '2000', ...scope],
     ]);
+  });
+
+  it('asks the menu bar item when the menu surfaces cannot be read, as in Finder, and counts a closed menu as chosen', async () => {
+    const calls = fake({ FAKE_MENU_WAIT: 'unreadable' });
+    const result = await chooseMenuWithAgentDesktop(options(), 'Finder', CLEAN_UP);
+    expect(result).toEqual({ ok: true });
+    expect(calls().at(-1)).toEqual(['find', '--app', 'Finder', '--surface', 'menubar', '--name', 'View', '--exact', '--first']);
+  });
+
+  it('stays unconfirmed when the surfaces cannot be read and the menu bar item is still selected', async () => {
+    const calls = fake({ FAKE_MENU_WAIT: 'unreadable', FAKE_MENU_BAR_STATE: 'selected' });
+    const result = await chooseMenuWithAgentDesktop(options(), 'Finder', CLEAN_UP);
+    expect(result).toMatchObject({ ok: false, failure: 'unverified' });
+    // The item may have run, so no Escape is sent.
+    expect(calls().some(args => args[0] === 'press')).toBe(false);
   });
 
   it('starts the session and styles the cursor once across runs', async () => {
