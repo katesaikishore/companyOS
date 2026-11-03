@@ -56,13 +56,14 @@ import {
   type RoutineNamingJob,
   type WindowClass,
   normalizeAppName,
+  type Identity,
 } from '@companyos/twin-core';
 import { SPEAKER_MIN_SAMPLES, SPEAKER_MODEL_ID, WHISPER_MODEL_ID } from '@companyos/twin-core';
 import { discoverFromScreen, proposeTasks, recapBlocks, writeRecap, type DayRecap, type ProposedTask, type ScreenDiscovery } from '@companyos/twin-core';
 import { answerFromItems, closestItems, discordLine, selfCheck, type DiscordStatusView, type MemoryAnswer, type MemoryItem } from '@companyos/twin-core';
 import { DiscordReader } from './discord-reader';
 import { FileSearchIndex, parseQuery, type FileHitView, type FileSearchView } from '@companyos/twin-core';
-import { indexFiles, QueryVectors, type FileIndexProgress } from './file-index';
+import { accountIdentity, indexFiles, QueryVectors, type FileIndexProgress } from './file-index';
 import { readSurface } from './app-surface';
 import { createOllamaChat, createOllamaEmbedder, createOllamaVision, visionModelReady } from './vision-ollama';
 import type { OperatorModel, OperatorTaskRequest } from '@companyos/twin-core';
@@ -271,6 +272,8 @@ export class TwinRuntime {
   private discordCounts = { messages: 0, conversations: 0 };
   /** The file search index in memory, with its knowledge graph, rebuilt after each pass. */
   private files: FileSearchIndex | undefined;
+  /** Who uses this computer, read from the account once, for questions that say "my". */
+  private identity: Identity | undefined;
   /** Query embeddings by their words, so a repeated query does not wait for the model. */
   private readonly queryVectors = new QueryVectors(createOllamaEmbedder({ record: entry => this.agent.recordNetworkCall(entry) }));
   /** Result previews by path, newest last. */
@@ -747,7 +750,8 @@ export class TwinRuntime {
 
   private loadFileIndex(): void {
     const records = this.agent.fileIndex();
-    this.files = new FileSearchIndex(records);
+    this.identity ??= accountIdentity();
+    this.files = new FileSearchIndex(records, this.identity);
     // The previews of files that changed may be stale, so they are made again.
     this.previews.clear();
     // The embedding model is loaded now, so the first search does not wait for it.
@@ -832,7 +836,7 @@ export class TwinRuntime {
       why: hit.why,
     }));
     return {
-      plan: { kind: plan.kind, about: plan.about, names: plan.names, shape: plan.shape },
+      plan: { kind: plan.kind, about: plan.about, names: plan.names, shape: plan.shape, ...(plan.mine ? { mine: true, ...(index.me ? { me: index.me } : {}) } : {}) },
       hits,
       indexed: index.records.length,
       ms: Math.round(performance.now() - started),

@@ -471,3 +471,65 @@ export function periodRange(fact: string): { after: number; before: number } | u
   if (!year || !month) return undefined;
   return { after: new Date(year, month - 1, 1).getTime(), before: new Date(year, month, 1).getTime() - 1 };
 }
+
+/**
+ * Who uses this computer, for questions that say "my": their names written without spaces or punctuation, so "Kate Sai
+ * Kishore" in a statement and the account "Kate Saikishore" are the same person, and the name to show.
+ */
+export interface Identity {
+  names: string[];
+  shown?: string;
+}
+
+/** Account names that say nothing about who the person is. */
+const GENERIC_ACCOUNTS = new Set(['admin', 'administrator', 'owner', 'macbook', 'student', 'office', 'default', 'ubuntu']);
+/** A name this short would match too many other people. */
+const MIN_NAME_CHARS = 6;
+/** Kinds of document that only their owner keeps, which say whose files these are when the account's names do not. */
+const OWN_TYPES = new Set(['salary slip', 'bank statement', 'credit card statement', 'offer letter', 'resume', 'tax form', 'aadhaar card', 'pan card', 'driving licence', 'credit report']);
+/** "my", "mine" or "me", but not the "me" of "find me" or "show me", which asks for something without making it theirs. */
+const SELF = /\b(?:my|mine|myself|our|ours)\b|(?<!\b(?:find|show|get|give|send|tell|help) )\bme\b/;
+
+const joined = (text: string): string => text.toLowerCase().normalize('NFKD').replace(/[^a-z]/g, '');
+
+/** The identity in an account's full name and user name, such as "Kate Saikishore" and "katesaikishore". */
+export function identityOf(account: { fullName?: string; username?: string }): Identity {
+  const names = [account.fullName, account.username].map(name => joined(name ?? '')).filter(name => name.length >= MIN_NAME_CHARS && !GENERIC_ACCOUNTS.has(name));
+  const shown = account.fullName?.trim();
+  return { names: [...new Set(names)], ...(shown ? { shown } : {}) };
+}
+
+/**
+ * True for a person or email fact that is the person's own: their name in full or shortened, "Sai Kishore" for Kate Sai
+ * Kishore, or an email that starts with it.
+ */
+export function isOwnFact(fact: string, identity: Identity): boolean {
+  const kind = factKind(fact);
+  if (kind !== 'person' && kind !== 'email') return false;
+  const value = factValue(fact);
+  const name = joined(kind === 'email' ? value.slice(0, value.indexOf('@')) : value);
+  if (name.length < MIN_NAME_CHARS) return false;
+  return identity.names.some(own => own === name || name.includes(own) || (own.includes(name) && (kind === 'email' || value.includes(' '))));
+}
+
+/**
+ * The identity, with the files' help when the account's names say nothing: then the person named in the most documents
+ * that only their owner keeps, such as payslips and a resume, when they are named in three or more.
+ */
+export function identityWithFiles(identity: Identity, files: readonly (readonly string[])[]): Identity {
+  if (identity.names.length > 0) return identity;
+  const counts = new Map<string, number>();
+  for (const facts of files) {
+    const type = facts.find(fact => factKind(fact) === 'type');
+    if (!type || !OWN_TYPES.has(factValue(type))) continue;
+    for (const fact of facts) if (factKind(fact) === 'person') counts.set(factValue(fact), (counts.get(factValue(fact)) ?? 0) + 1);
+  }
+  const [best] = [...counts].sort((a, b) => b[1] - a[1]);
+  if (!best || best[1] < 3 || joined(best[0]).length < MIN_NAME_CHARS) return identity;
+  return { names: [joined(best[0])], shown: best[0].replace(/\b\w/g, letter => letter.toUpperCase()) };
+}
+
+/** True when a question asks for the person's own files, with "my", "mine" or "me". */
+export function asksForOwn(query: string): boolean {
+  return SELF.test(query.toLowerCase());
+}

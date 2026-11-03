@@ -1,9 +1,9 @@
-import { execFile, spawn } from 'node:child_process';
-import { createReadStream, existsSync } from 'node:fs';
+import { execFile, execFileSync, spawn } from 'node:child_process';
+import { createReadStream, existsSync, readFileSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { homedir, userInfo } from 'node:os';
 import { basename, extname, join, relative } from 'node:path';
-import { FACTS_VERSION, clipText, compress, embeddingText, extractFacts, type FileKind, type FileRecord, type TextEmbedder } from '@companyos/twin-core';
+import { FACTS_VERSION, clipText, compress, embeddingText, extractFacts, identityOf, type FileKind, type FileRecord, type Identity, type TextEmbedder } from '@companyos/twin-core';
 
 /**
  * The file search index, built inside the app: it walks Desktop, Documents, Downloads and Pictures, describes each file
@@ -244,6 +244,28 @@ export async function indexFiles(options: FileIndexOptions): Promise<FileIndexPr
     done: fresh.length,
     indexedAt: Date.now(),
   };
+}
+
+/**
+ * Who uses this computer, from the account: its full name and user name, read on this computer only. A question that says
+ * "my" ranks the files that name them first.
+ */
+export function accountIdentity(platform: NodeJS.Platform = process.platform): Identity {
+  let username: string | undefined;
+  try {
+    username = userInfo().username;
+  } catch {
+    return identityOf({});
+  }
+  let fullName: string | undefined;
+  try {
+    if (platform === 'darwin') fullName = execFileSync('/usr/bin/id', ['-F'], { encoding: 'utf8', timeout: 2000 }).trim();
+    // On Linux the full name is the first part of the comment field of the account's line in /etc/passwd.
+    else if (platform === 'linux') fullName = readFileSync('/etc/passwd', 'utf8').split('\n').find(line => line.startsWith(`${username}:`))?.split(':')[4]?.split(',')[0];
+  } catch {
+    fullName = undefined;
+  }
+  return identityOf({ fullName: fullName || undefined, username });
 }
 
 /** How long one query embedding may take, which covers loading the model again after Ollama unloaded it. */

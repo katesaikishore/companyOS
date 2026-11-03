@@ -58,4 +58,4 @@ export * from './recap';
 export * from './discord';
 export * from './ask';
 export * from './files';
-export { FACTS_VERSION, extractFacts, factCard, documentType } from './file-knowledge';
+export { FACTS_VERSION, extractFacts, factCard, documentType, identityOf, type Identity } from './file-knowledge';

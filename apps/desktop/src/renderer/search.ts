@@ -120,6 +120,7 @@ function planLine(result: FileSearchView): string {
     plan.shape !== 'any' ? `${plan.shape} shape` : '',
     plan.about ? `about “${plan.about}”` : '',
     plan.names.length ? `naming ${plan.names.join(', ')}` : '',
+    plan.mine ? `yours${plan.me ? ` (${plan.me})` : ''}` : '',
   ].filter(Boolean);
   return `${parts.join(' · ')} — ${result.hits.length} of ${result.indexed} files in ${result.ms} ms${result.meaning ? '' : ', by name and text only'}`;
 }

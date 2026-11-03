@@ -245,7 +245,8 @@ export interface FileHitView {
 
 /** A file search: the plan the local model made from the words, and the best matches. */
 export interface FileSearchView {
-  plan: { kind: string; about: string; names: string[]; shape: string };
+  /** What the question was read as. mine is set when it asked for the person's own files; me is who that is, when known. */
+  plan: { kind: string; about: string; names: string[]; shape: string; mine?: boolean; me?: string };
   hits: FileHitView[];
   /** Files in the index when the search ran. */
   indexed: number;

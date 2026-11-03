@@ -1,4 +1,4 @@
-import { factCard, factKind, factValue, factWords, periodRange, typesAskedFor } from './file-knowledge';
+import { asksForOwn, factCard, factKind, factValue, factWords, identityWithFiles, isOwnFact, periodRange, typesAskedFor, type Identity } from './file-knowledge';
 
 /**
  * File and photo search on this device: an index of the person's files with a compressed embedding of each, a knowledge
@@ -55,6 +55,8 @@ export interface FilePlan {
   before?: number;
   /** A named month or year: files from then rank higher, and the others are still found. */
   prefer?: { after: number; before: number };
+  /** The question asks for the person's own files, with "my", "mine" or "me": files that name them rank higher. */
+  mine?: boolean;
 }
 
 export interface FileHit {
@@ -66,7 +68,7 @@ export interface FileHit {
 
 const TEXT_CHARS = 1500;
 /** How much each signal adds to a file's score. Shape and a preferred period add 0.1 each. */
-const GRAPH_WEIGHTS = { meaning: 0.4, graph: 0.35, type: 0.1, name: 0.1, text: 0.05 };
+const GRAPH_WEIGHTS = { meaning: 0.4, graph: 0.35, type: 0.1, name: 0.1, text: 0.05, own: 0.15 };
 
 /**
  * The text an embedding is made from: name, folder, the card of the file's facts, labels and the start of the text. The
@@ -328,10 +330,11 @@ export function parseQuery(query: string, now = Date.now()): FilePlan {
   const shape: FilePlan['shape'] = passport ? 'passport' : screenshot ? 'screenshot' : photo && /\blandscape\b/.test(text) ? 'landscape' : photo && /\bportrait\b/.test(text) ? 'portrait' : 'any';
   const time = timeOf(text, now);
   const relative = time.after !== undefined || time.before !== undefined;
+  const mine = asksForOwn(text);
   const words = (text.match(/[a-z0-9@.]+/g) ?? [])
     .map(word => word.replace(/^\.+|\.+$/g, ''))
     .filter(word => word.length >= 2 && !FILLER.has(word) && !KIND_WORDS.has(word) && !(relative && TIME_WORDS.has(word)) && !(relative && /^\d{1,3}$/.test(word)));
-  return { kind: photo ? 'image' : document ? 'document' : 'any', about: words.join(' ') || text, names: words, shape, ...time };
+  return { kind: photo ? 'image' : document ? 'document' : 'any', about: words.join(' ') || text, names: words, shape, ...time, ...(mine ? { mine: true } : {}) };
 }
 
 /** A query word and its singular, so "invoices" also finds "Invoice_2024.pdf". */
@@ -355,10 +358,17 @@ export class FileSearchIndex {
   /** Each file's document type, from its facts, and the months its text covers. */
   private readonly types: Array<string | undefined>;
   private readonly periods: Array<Array<{ after: number; before: number }>>;
+  /** Whether each file names the person who uses this computer, so a question that says "my" finds theirs first. */
+  private readonly own: Uint8Array;
+  /** Who "my" means, as the search bar shows it, when it is known. */
+  readonly me: string | undefined;
 
-  constructor(records: readonly FileRecord[]) {
+  constructor(records: readonly FileRecord[], identity: Identity = { names: [] }) {
     this.records = records;
     this.graph = buildGraph(records);
+    const self = identityWithFiles(identity, this.graph.rowFacts);
+    this.me = self.names.length > 0 ? self.shown : undefined;
+    this.own = Uint8Array.from(this.graph.rowFacts, facts => (self.names.length > 0 && facts.some(fact => isOwnFact(fact, self)) ? 1 : 0));
     const first = records.find(record => record.vector && record.scale);
     this.dim = first?.vector ? Buffer.from(first.vector, 'base64').length : 0;
     this.matrix = new Float32Array(records.length * this.dim);
@@ -414,7 +424,7 @@ export class FileSearchIndex {
     const words = plan.names.map(variants);
     const tied = graphTies(this.graph, words);
     const wanted = typesAskedFor(plan.about);
-    const scored: Array<{ row: number; score: number; shape: string; nameHits: number; textHits: number; typeFit: boolean; inPeriod: boolean }> = [];
+    const scored: Array<{ row: number; score: number; shape: string; nameHits: number; textHits: number; typeFit: boolean; inPeriod: boolean; yours: boolean }> = [];
     for (let row = 0; row < this.records.length; row++) {
       const record = this.records[row];
       if (plan.kind !== 'any' && record.kind !== plan.kind) continue;
@@ -439,7 +449,9 @@ export class FileSearchIndex {
       const inPeriod =
         prefer !== undefined &&
         ((record.mtime >= prefer.after && record.mtime <= prefer.before) || this.periods[row].some(range => range.after <= prefer.before && range.before >= prefer.after));
+      const yours = plan.mine === true && this.own[row] === 1;
       const score =
+        (yours ? GRAPH_WEIGHTS.own : 0) +
         meaning * GRAPH_WEIGHTS.meaning +
         graphTie * GRAPH_WEIGHTS.graph +
         (typeFit ? GRAPH_WEIGHTS.type : 0) +
@@ -450,15 +462,16 @@ export class FileSearchIndex {
       // A query of words keeps only files that match them somehow. A query that is only a kind, a shape or a time keeps
       // every file that fits, newest first.
       if (words.length > 0 && score <= 0) continue;
-      scored.push({ row, score, shape, nameHits, textHits, typeFit, inPeriod });
+      scored.push({ row, score, shape, nameHits, textHits, typeFit, inPeriod, yours });
     }
     scored.sort((a, b) => b.score - a.score || this.records[b.row].mtime - this.records[a.row].mtime);
     // Why each one matched is put into words only for the results shown, not for every file that scored.
-    return scored.slice(0, limit).map(({ row, score, shape, nameHits, textHits, typeFit, inPeriod }) => {
+    return scored.slice(0, limit).map(({ row, score, shape, nameHits, textHits, typeFit, inPeriod, yours }) => {
       const record = this.records[row];
       const reached = tied[row] > 0 ? reachedFacts(this.graph, row, words) : [];
       const type = this.types[row];
       const why: string[] = shape ? [shape] : [];
+      if (yours) why.push('yours');
       if (reached.length > 0) why.push(factCard(reached));
       else if (tied[row] > 0) why.push('linked to it');
       if (typeFit && type && !reached.includes(`type:${type}`)) why.push(type);

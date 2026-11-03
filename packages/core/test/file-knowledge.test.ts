@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { documentType, extractFacts, factCard, factWords, typesAskedFor } from '../src/file-knowledge';
+import { asksForOwn, documentType, extractFacts, factCard, factWords, identityOf, identityWithFiles, isOwnFact, typesAskedFor } from '../src/file-knowledge';
 
 describe('reading a file’s facts', () => {
   it('reads an ICICI statement whose name says nothing, as one bank under all its spellings, keeping four digits of the account', () => {
@@ -108,5 +108,38 @@ describe('what the review found', () => {
       extractFacts({ name: 'a.pdf', folder: 'Downloads', text });
       expect(performance.now() - started).toBeLessThan(200);
     }
+  });
+});
+
+describe('who “my” means', () => {
+  const kate = identityOf({ fullName: 'Kate Saikishore', username: 'katesaikishore' });
+
+  it('reads the account’s names with spaces and case set aside, and leaves out names that say nothing', () => {
+    expect(kate).toEqual({ names: ['katesaikishore'], shown: 'Kate Saikishore' });
+    expect(identityOf({ fullName: 'Admin', username: 'admin' }).names).toEqual([]);
+  });
+
+  it('knows the person under the ways documents write them, and nobody else', () => {
+    for (const fact of ['person:kate sai kishore', 'person:sai kishore', 'email:katesaikishore@gmail.com', 'email:katesaikishore.work@qbrin.com']) {
+      expect(isOwnFact(fact, kate)).toBe(true);
+    }
+    for (const fact of ['person:kishore kumar', 'person:aditya rao', 'email:kate@acme.com', 'org:katesaikishore', 'person:kate']) {
+      expect(isOwnFact(fact, kate)).toBe(false);
+    }
+  });
+
+  it('finds the person from documents only they keep when the account says nothing', () => {
+    const payslip = (month: string) => ['type:salary slip', 'person:priya shah', `period:2026-${month}`];
+    const found = identityWithFiles({ names: [] }, [payslip('01'), payslip('02'), payslip('03'), ['type:invoice', 'person:ravi kumar']]);
+    expect(found).toEqual({ names: ['priyashah'], shown: 'Priya Shah' });
+    expect(identityWithFiles({ names: [] }, [payslip('01')])).toEqual({ names: [] });
+  });
+
+  it('reads "my", "mine" and "me" as the person’s own, but not the "me" of "find me"', () => {
+    expect(asksForOwn('my icici bank statement')).toBe(true);
+    expect(asksForOwn('passport photo of mine')).toBe(true);
+    expect(asksForOwn('the offer letter sent to me')).toBe(true);
+    expect(asksForOwn('find me the acme invoice')).toBe(false);
+    expect(asksForOwn('show me invoices')).toBe(false);
   });
 });

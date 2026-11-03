@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractFacts } from '../src/file-knowledge';
+import { extractFacts, identityOf } from '../src/file-knowledge';
 import { FileSearchIndex, buildGraph, clipText, compress, embeddingText, expand, graphScores, parseQuery, shapeFit, type FileRecord } from '../src/files';
 
 function record(path: string, extra: Partial<FileRecord> = {}): FileRecord {
@@ -89,7 +89,7 @@ describe('reading a query', () => {
   const NOW = new Date(2026, 10, 3, 22, 0).getTime();
 
   it('reads a passport photo request as a photo of passport shape', () => {
-    expect(parseQuery('find me the passport size photo of mine', NOW)).toEqual({ kind: 'image', about: 'passport', names: ['passport'], shape: 'passport' });
+    expect(parseQuery('find me the passport size photo of mine', NOW)).toEqual({ kind: 'image', about: 'passport', names: ['passport'], shape: 'passport', mine: true });
     expect(parseQuery('my headshot', NOW)).toMatchObject({ kind: 'image', shape: 'passport' });
   });
 
@@ -196,6 +196,20 @@ describe('the search index', () => {
     expect(clipText('Aadhaar 1234 5678 9012, A/c 000401234321, card 4375-1234-5678-9012, phone 9876543210, total 12,000.00')).toBe(
       'Aadhaar XXXX9012, A/c XXXX4321, card XXXX9012, phone XXXX3210, total 12,000.00',
     );
+  });
+
+  it('puts the person’s own files first when the question says "my", and says so', () => {
+    const kate = { fullName: 'Kate Saikishore', username: 'katesaikishore' };
+    const records = [
+      record('/Downloads/Resume_Aditya.pdf', { kind: 'document', facts: ['type:resume', 'person:aditya rao'], mtime: Date.UTC(2026, 7, 18) }),
+      record('/Downloads/Kate_Sai_Kishore_Resume.pdf', { kind: 'document', facts: ['type:resume', 'person:kate sai kishore'], mtime: Date.UTC(2026, 6, 1) }),
+    ];
+    const index = new FileSearchIndex(records, identityOf(kate));
+    expect(index.me).toBe('Kate Saikishore');
+    expect(index.search(parseQuery('resume'), undefined)[0].record.name).toBe('Resume_Aditya.pdf');
+    const mine = index.search(parseQuery('my resume'), undefined);
+    expect(mine[0].record.name).toBe('Kate_Sai_Kishore_Resume.pdf');
+    expect(mine[0].why[0]).toBe('yours');
   });
 
   it('ranks 8,000 files in milliseconds', () => {
