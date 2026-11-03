@@ -22,7 +22,8 @@ export type OperatorModelChoice = 'local' | 'chutes';
 
 interface OperatorServiceDeps {
   config: () => { excludedApps: readonly string[]; agentDesktopPath: string; operatorModel: OperatorModelChoice };
-  hands: (binary: string) => OperatorHands;
+  /** The hands for one task. The goal names the task's cursor on screen. */
+  hands: (binary: string, goal: string) => OperatorHands;
   /** The chosen model, or undefined when it cannot be used, such as Chutes with no saved key. */
   model: (choice: OperatorModelChoice, options: { sharesScreenText: boolean }) => Promise<OperatorModel | undefined>;
   /** Short notes from captured screen text that bear on the goal. */
@@ -143,7 +144,7 @@ export class OperatorService {
     let hands: OperatorHands;
     try {
       model = await this.deps.model(choice, { sharesScreenText: choice === 'chutes' && shares });
-      hands = this.deps.hands(binary);
+      hands = this.deps.hands(binary, goal);
     } catch (error) {
       this.finish(goal, app, undefined);
       throw error instanceof Error ? error : new Error('The task could not start.');

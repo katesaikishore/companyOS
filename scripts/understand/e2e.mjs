@@ -30,6 +30,7 @@ const { TwinAgent, proposeTasks, runTask } = await load('../../packages/core/dis
 const { readAccessibleText } = await load('../../apps/desktop/dist/main/accessibility.js');
 const { createOllamaChat, createOllamaEmbedder } = await load('../../apps/desktop/dist/main/vision-ollama.js');
 const { agentDesktopHands } = await load('../../apps/desktop/dist/main/operator-hands.js');
+const { AgentDesktopSession, cursorFor, cursorLabel } = await load('../../apps/desktop/dist/main/agent-desktop.js');
 
 const DOCUMENTS = {
   'Vendor review - Acme.txt': [
@@ -113,7 +114,9 @@ try {
   if (document) execFileSync('open', ['-a', 'TextEdit', path.join(work, document)]);
   await new Promise(resolve => setTimeout(resolve, 1500));
   report.before = await readAccessibleText();
-  const hands = agentDesktopHands(binary);
+  // The task's named cursor is drawn on screen, as in the app.
+  const session = new AgentDesktopSession(() => ({ binary }));
+  const hands = agentDesktopHands(binary, undefined, { session, cursor: cursorFor('operator-task', cursorLabel('companyOS', task.goal)) });
   const runStarted = Date.now();
   const result = await runTask({ goal: task.goal, app: 'TextEdit' }, createOllamaChat({ record }), hands, {
     excludedApps: agent.configuration.excludedApps,
@@ -128,6 +131,8 @@ try {
       log(`  ${step.n}. ${action?.type ?? 'invalid'}${detail} -> ${step.error ?? step.delivery ?? step.verdict ?? ''}`);
     },
   });
+  // Ending the session takes the cursor off the screen.
+  await session.end();
   report.run = { goal: task.goal, status: result.status, summary: result.summary, steps: result.steps.length, detail: result.steps.map(step => ({ n: step.n, action: step.action?.type, delivery: step.delivery, error: step.error, reply: step.reply })), seconds: Math.round((Date.now() - runStarted) / 1000) };
   log(`run: ${result.status} in ${report.run.seconds} s, ${result.steps.length} steps. ${result.summary ?? ''}`);
 

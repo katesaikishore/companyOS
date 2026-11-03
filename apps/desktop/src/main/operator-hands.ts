@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { isAbsolute } from 'node:path';
 import type { ActResult, Observation, OperatorAction, OperatorHands } from '@companyos/twin-core';
+import { AGENT_ID, sessionEnded, type AgentDesktopSession, type HandsCursor } from './agent-desktop';
 import { APP_NAME } from './app-surface';
 
 /**
@@ -34,7 +35,16 @@ const defaultExec: Exec = (binary, args, signal) =>
 interface Envelope {
   ok?: boolean;
   data?: unknown;
-  error?: { code?: string; disposition?: { delivery?: string } };
+  error?: { code?: string; details?: { kind?: string }; disposition?: { delivery?: string } };
+}
+
+/**
+ * True when agent-desktop typed through accessibility but the field did not take the text. Fields in Electron and Chromium
+ * apps (Slack, Discord, VS Code, Notion) accept the typed text this way without applying it; in a check across an input, a
+ * textarea and a rich-text editor, none took it.
+ */
+function textNotApplied(result: Envelope | undefined): boolean {
+  return result?.ok === false && result.error?.code === 'ACTION_FAILED' && result.error.details?.kind === 'post_action_verification';
 }
 
 function envelope(stdout: string): Envelope | undefined {
@@ -129,16 +139,44 @@ function windowToRead(list: Envelope | undefined): string | undefined {
   return typeof chosen?.id === 'string' && WINDOW_ID.test(chosen.id) ? chosen.id : undefined;
 }
 
-export function agentDesktopHands(binary: string, exec: Exec = defaultExec): OperatorHands {
+/** The shared cursor session and this task's own cursor, so every call the operator makes is drawn on screen. */
+export interface OperatorCursor {
+  session: Pick<AgentDesktopSession, 'id' | 'style' | 'forget'>;
+  cursor: HandsCursor;
+}
+
+/** The arguments with the session and agent id added, before any "--", so they are read as options. */
+function inSession(args: readonly string[], sessionId: string, agentId: string): string[] {
+  const at = args.indexOf('--');
+  const scope = ['--session', sessionId, '--agent-id', agentId];
+  return at < 0 ? [...args, ...scope] : [...args.slice(0, at), ...scope, ...args.slice(at)];
+}
+
+/**
+ * The operator's hands. With a cursor, every call runs in the shared multi-agent session under the task's agent id, so the
+ * program draws the task's named cursor where it reads and acts, as automations and swarms do. A session that cannot start
+ * or has ended leaves the call to run without one, so a task never fails for want of a cursor.
+ */
+export function agentDesktopHands(binary: string, exec: Exec = defaultExec, cursor?: OperatorCursor): OperatorHands {
   if (!isAbsolute(binary)) throw new Error('The agent-desktop program path must be absolute.');
+  const agentId = cursor && AGENT_ID.test(cursor.cursor.agentId) ? cursor.cursor.agentId : undefined;
+  const run = async (args: string[], signal?: AbortSignal): Promise<string> => {
+    const sessionId = cursor && agentId ? await cursor.session.id() : undefined;
+    if (!cursor || !agentId || sessionId === undefined) return exec(binary, args, signal);
+    await cursor.session.style(sessionId, cursor.cursor);
+    const output = await exec(binary, inSession(args, sessionId, agentId), signal);
+    if (!sessionEnded(Buffer.from(output))) return output;
+    cursor.session.forget(sessionId);
+    return exec(binary, args, signal);
+  };
   return {
     async observe(app, signal) {
       if (!APP_NAME.test(app)) throw new Error('That application name is not allowed.');
-      let result = envelope(await exec(binary, ['snapshot', '--app', app, '-i', '--compact'], signal));
+      let result = envelope(await run(['snapshot', '--app', app, '-i', '--compact'], signal));
       // Several windows make the app ambiguous. Read the focused window instead.
       if (result?.error?.code === 'AMBIGUOUS_TARGET') {
-        const id = windowToRead(envelope(await exec(binary, ['list-windows', '--app', app], signal)));
-        if (id) result = envelope(await exec(binary, ['snapshot', '--window-id', id, '-i', '--compact'], signal));
+        const id = windowToRead(envelope(await run(['list-windows', '--app', app], signal)));
+        if (id) result = envelope(await run(['snapshot', '--window-id', id, '-i', '--compact'], signal));
       }
       // A running app with no window is a state the model can act on, for example with cmd+n. agent-desktop sees only the
       // windows on the screen in use, so a window on another desktop counts as none.
@@ -154,20 +192,40 @@ export function agentDesktopHands(binary: string, exec: Exec = defaultExec): Ope
       if ((action.type === 'launch' || action.type === 'focus_app') && !APP_NAME.test(action.app)) {
         return { delivery: 'not_delivered', code: 'app_name_refused' };
       }
+      if (action.type !== 'type') return deliveryOf(envelope(await run(argsFor(action, observation), signal)));
       // Text typed into a field that already holds text goes after it. The model cannot place the cursor, and agent-desktop
       // types where the cursor is, which is often the start, so the hands move to the end first.
-      const target = action.type === 'type' ? observation.controls.find(control => control.ref === action.ref) : undefined;
-      if (action.type === 'type' && target?.value && TEXT_ROLES.has(target.role)) {
-        const focused = deliveryOf(envelope(await exec(binary, ['focus', '--', action.ref], signal)));
-        if (focused.delivery !== 'delivered') return focused;
-        const moved = deliveryOf(envelope(await exec(binary, ['press', '--app', observation.app, '--', 'cmd+down'], signal)));
+      const target = observation.controls.find(control => control.ref === action.ref);
+      let text = action.text;
+      if (target?.value && TEXT_ROLES.has(target.role)) {
+        // The move to the end is a key press, and key presses go to the window in front, so the app is brought forward.
+        const front = deliveryOf(envelope(await run(['focus-window', '--app', observation.app], signal)));
+        if (front.delivery === 'not_delivered') return front;
+        // Electron apps report a focus as landed but unverified, which is enough to type into. Only a refusal stops here.
+        const focused = deliveryOf(envelope(await run(['focus', '--', action.ref], signal)));
+        if (focused.delivery === 'not_delivered') return focused;
+        const moved = deliveryOf(envelope(await run(['press', '--app', observation.app, '--', 'cmd+down'], signal)));
         if (moved.delivery === 'not_delivered') return moved;
         // Added to a document, the text starts its own line, so it never runs onto the end of the last one.
-        if (target.multiline && !/^[\r\n]/.test(action.text)) {
-          return deliveryOf(envelope(await exec(binary, argsFor({ ...action, text: `\n${action.text}` }, observation), signal)));
-        }
+        if (target.multiline && !/^[\r\n]/.test(text)) text = `\n${text}`;
       }
-      return deliveryOf(envelope(await exec(binary, argsFor(action, observation), signal)));
+      const typed = envelope(await run(argsFor({ ...action, text }, observation), signal));
+      if (!textNotApplied(typed)) return deliveryOf(typed);
+      // The field did not take the text. Real key presses work in every field and the app sees them as typing. A line break
+      // as a key press is Return, which sends a message in a chat app, so text with one is set as the field's whole value
+      // instead: its current value with the text added, and no key pressed.
+      if (!/[\r\n]/.test(text)) {
+        // Key presses go to the window in front, so the app is brought forward and the field focused first.
+        const front = deliveryOf(envelope(await run(['focus-window', '--app', observation.app], signal)));
+        if (front.delivery === 'not_delivered') return front;
+        const focused = deliveryOf(envelope(await run(['focus', '--', action.ref], signal)));
+        if (focused.delivery === 'not_delivered') return focused;
+        return deliveryOf(envelope(await run(['type', '--headed', '--', action.ref, text], signal)));
+      }
+      const current = envelope(await run(['get', '--property', 'value', '--', action.ref], signal));
+      const value = (current?.data as { value?: unknown } | undefined)?.value;
+      if (current?.ok !== true || typeof value !== 'string') return deliveryOf(typed);
+      return deliveryOf(envelope(await run(['set-value', '--', action.ref, `${value}${text}`], signal)));
     },
   };
 }
