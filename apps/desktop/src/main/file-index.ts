@@ -236,3 +236,69 @@ export async function indexFiles(options: FileIndexOptions): Promise<FileIndexPr
     indexedAt: Date.now(),
   };
 }
+
+/** How long one query embedding may take, which covers loading the model again after Ollama unloaded it. */
+const QUERY_EMBED_CALL_MS = 15_000;
+const QUERY_CACHE = 64;
+/** At most this many query embeddings wait on the model at once, so a stuck Ollama cannot gather calls while someone types. */
+const QUERY_PENDING = 4;
+
+/**
+ * Query embeddings by their words, newest last, so typing a query again, or backing up while typing, costs nothing. A
+ * search waits only a short time for a new one and then ranks without meaning, but the call is left to finish and its
+ * answer is kept. Ollama stops loading a model when its caller hangs up, so cancelling the call would keep a model it
+ * unloaded, after Ollama restarts or half an hour idle, from ever loading again.
+ */
+export class QueryVectors {
+  private readonly vectors = new Map<string, number[]>();
+  private readonly pending = new Map<string, Promise<number[] | undefined>>();
+  /** Raised by clear, so a call that answers afterwards keeps nothing. */
+  private generation = 0;
+
+  constructor(private readonly embedder: TextEmbedder) {}
+
+  /** The vector of these words, or nothing when the model has not answered within the wait. */
+  async get(words: string, waitMs: number): Promise<number[] | undefined> {
+    const known = this.vectors.get(words);
+    if (known) return known;
+    const call = this.pending.get(words) ?? this.start(words);
+    if (!call) return undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const waited = new Promise<undefined>(resolve => {
+      timer = setTimeout(() => resolve(undefined), waitMs);
+    });
+    try {
+      return await Promise.race([call, waited]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** Forgets every vector, and the answers of calls still running. */
+  clear(): void {
+    this.vectors.clear();
+    this.pending.clear();
+    this.generation += 1;
+  }
+
+  private start(words: string): Promise<number[] | undefined> | undefined {
+    if (this.pending.size >= QUERY_PENDING) return undefined;
+    const generation = this.generation;
+    const call: Promise<number[] | undefined> = this.embedder
+      .embed([words], AbortSignal.timeout(QUERY_EMBED_CALL_MS))
+      .then(
+        ([vector]) => {
+          if (generation !== this.generation || !vector) return undefined;
+          this.vectors.set(words, vector);
+          if (this.vectors.size > QUERY_CACHE) this.vectors.delete(this.vectors.keys().next().value as string);
+          return vector;
+        },
+        () => undefined,
+      )
+      .finally(() => {
+        if (this.pending.get(words) === call) this.pending.delete(words);
+      });
+    this.pending.set(words, call);
+    return call;
+  }
+}

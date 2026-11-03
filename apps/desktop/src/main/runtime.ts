@@ -62,7 +62,7 @@ import { discoverFromScreen, proposeTasks, recapBlocks, writeRecap, type DayReca
 import { answerFromItems, closestItems, discordLine, selfCheck, type DiscordStatusView, type MemoryAnswer, type MemoryItem } from '@companyos/twin-core';
 import { DiscordReader } from './discord-reader';
 import { FileSearchIndex, parseQuery, type FileHitView, type FileSearchView } from '@companyos/twin-core';
-import { indexFiles, type FileIndexProgress } from './file-index';
+import { indexFiles, QueryVectors, type FileIndexProgress } from './file-index';
 import { readSurface } from './app-surface';
 import { createOllamaChat, createOllamaEmbedder, createOllamaVision, visionModelReady } from './vision-ollama';
 import type { OperatorModel, OperatorTaskRequest } from '@companyos/twin-core';
@@ -204,8 +204,6 @@ const FILE_INDEX_EVERY_MS = 6 * 3_600_000;
 const FILE_RESULTS = 12;
 /** The longest a search waits for its query embedding before ranking without meaning. */
 const QUERY_EMBED_TIMEOUT_MS = 400;
-const WARM_UP_TIMEOUT_MS = 15_000;
-const QUERY_CACHE = 64;
 /** Files that would run when opened: apps, scripts, installers and shortcuts. */
 const RUNNABLE = /\.(app|command|sh|bash|zsh|tool|terminal|workflow|scpt|applescript|pkg|mpkg|dmg|jar|py|rb|pl|js|exe|bat|cmd|ps1|webloc|inetloc|url|fileloc)$/i;
 const PREVIEW_CACHE = 300;
@@ -273,8 +271,8 @@ export class TwinRuntime {
   private discordCounts = { messages: 0, conversations: 0 };
   /** The file search index in memory, with its knowledge graph, rebuilt after each pass. */
   private files: FileSearchIndex | undefined;
-  /** Query embeddings by their words, newest last, so a repeated query does not wait for the model. */
-  private readonly queryVectors = new Map<string, number[]>();
+  /** Query embeddings by their words, so a repeated query does not wait for the model. */
+  private readonly queryVectors = new QueryVectors(createOllamaEmbedder({ record: entry => this.agent.recordNetworkCall(entry) }));
   /** Result previews by path, newest last. */
   private readonly previews = new Map<string, string>();
   private fileProgress: FileIndexProgress = { running: false, files: 0, images: 0, documents: 0, done: 0, total: 0 };
@@ -753,8 +751,7 @@ export class TwinRuntime {
     // The previews of files that changed may be stale, so they are made again.
     this.previews.clear();
     // The embedding model is loaded now, so the first search does not wait for it.
-    // It may need a few seconds to load, so the warm-up waits longer than a search does.
-    if (this.agent.configuration.fileSearchEnabled && records.length > 0) void this.queryVector('warm up', WARM_UP_TIMEOUT_MS);
+    if (this.agent.configuration.fileSearchEnabled && records.length > 0) void this.queryVectors.get('warm up', 0);
     this.fileProgress = {
       ...this.fileProgress,
       files: records.length,
@@ -825,7 +822,7 @@ export class TwinRuntime {
     if (text.length < 2 || text.length > 300) throw new Error('Search with 2 to 300 characters.');
     const index = this.requireFileSearch();
     const plan = parseQuery(text);
-    const vector = await this.queryVector(plan.about);
+    const vector = await this.queryVectors.get(plan.about, QUERY_EMBED_TIMEOUT_MS);
     const hits: FileHitView[] = index.search(plan, vector, FILE_RESULTS).map(hit => ({
       path: hit.record.path,
       name: hit.record.name,
@@ -841,25 +838,6 @@ export class TwinRuntime {
       ms: Math.round(performance.now() - started),
       meaning: vector !== undefined,
     };
-  }
-
-  /**
-   * The embedding of a query's words. Recent ones are remembered, so typing a query again, or backing up while typing, costs
-   * nothing. When the model does not answer within a short wait, the search goes on without meaning rather than waiting.
-   */
-  private async queryVector(words: string, timeoutMs = QUERY_EMBED_TIMEOUT_MS): Promise<number[] | undefined> {
-    const cached = this.queryVectors.get(words);
-    if (cached) return cached;
-    const record = (entry: NetworkEntry): void => this.agent.recordNetworkCall(entry);
-    try {
-      const embedding = createOllamaEmbedder({ record }).embed([words], AbortSignal.timeout(timeoutMs));
-      const [vector] = await embedding;
-      this.queryVectors.set(words, vector);
-      if (this.queryVectors.size > QUERY_CACHE) this.queryVectors.delete(this.queryVectors.keys().next().value as string);
-      return vector;
-    } catch {
-      return undefined;
-    }
   }
 
   /** Small previews for search results, from the system's own thumbnailer, made after the results show and remembered. */
