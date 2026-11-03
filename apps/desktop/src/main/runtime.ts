@@ -27,6 +27,7 @@ import {
   type CapturePermission,
   type CaptureSearchRequest,
   type Decision,
+  type Approval,
   type DraftStep,
   type Executor,
   type HardwareProfile,
@@ -34,6 +35,9 @@ import {
   type LocalModelClient,
   type PlanCandidate,
   type PlanRunView,
+  type SwarmRunView,
+  type LiveRunView,
+  stepSummary,
   type PlanView,
   type RunPlan,
   type LocalApiState,
@@ -54,7 +58,7 @@ import {
   normalizeAppName,
 } from '@companyos/twin-core';
 import { SPEAKER_MIN_SAMPLES, SPEAKER_MODEL_ID, WHISPER_MODEL_ID } from '@companyos/twin-core';
-import { app, desktopCapturer, systemPreferences } from 'electron';
+import { app, clipboard, desktopCapturer, systemPreferences } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { rmSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -78,7 +82,8 @@ import { LayaDecisionModel } from './decision-laya';
 import { ModelManager, SharedModelClients, createRoutineNamer } from './models';
 import { InputLock } from './input-lock';
 import { browserCapturePaths, installNativeHost, isBrowserCaptureSupported, removeNativeHost } from './native-host-install';
-import { AgentDesktopSession, cursorFor, handsExecutor } from './agent-desktop';
+import { AgentDesktopSession, CURSOR_COLOURS, cursorFor, cursorLabel, handsExecutor, type HandsCursor } from './agent-desktop';
+import { gatherDuplicates } from './file-actions';
 import { choosePlatform, executorFor, type Platform } from './platform';
 import { PipeScheduler, removeLegacyPipeFiles } from './pipes';
 import { LocalConnectorService } from './connectors-scheduler';
@@ -87,12 +92,17 @@ import type { LocalConnectorKind } from './connectors-validate';
 export interface RuntimeOptions {
   userData: string;
   /** Asks a person to approve one step. The main process shows a native dialog. */
-  approve: (automation: Automation, step: Step, decision: Decision) => Promise<boolean>;
+  approve: (automation: Automation, step: Step, decision: Decision) => Promise<Approval>;
   /**
    * Asks the person once whether to start a plan's runs, naming each automation. The main process shows a native dialog.
    * Saying yes starts the runs; each one still asks before any step that acts on an app.
    */
   confirmPlan: (names: string[]) => Promise<boolean>;
+  /**
+   * Asks the person once whether to start a swarm, naming each automation: run them allowing all their steps, run them and
+   * ask for each run, or not now. The main process shows a native dialog.
+   */
+  confirmSwarm?: (names: string[]) => Promise<'all' | 'each' | false>;
   /** Seconds since the last keyboard or mouse input. */
   idleSeconds: () => number;
   /** True when the device runs on battery. Model work waits for AC power or idleness (plan §5.5). */
@@ -122,6 +132,10 @@ const NO_CONTROL: Executor = {
 };
 
 const DAY_MS = 86_400_000;
+/** How long a finished run stays in the live view. */
+const LIVE_KEEP_MS = 2 * 60_000;
+/** The most automations one swarm starts together. Each draws its own cursor, and they share the input step by step. */
+export const SWARM_MAX = 9;
 /** How often the kind labeller looks for routines to label. A look reads the routines, so it is not more often. */
 const KIND_PASS_MS = 60_000;
 /** How long the Laya model stays loaded after labelling, before it is freed. */
@@ -171,6 +185,10 @@ export class TwinRuntime {
   private pending: PendingRunView[] = [];
   /** Runs in progress. No offers are made while one runs, so the run's own app switches cannot trigger one. */
   private activeRuns = 0;
+  /** Runs happening now and those that ended lately, by run id, for the live view. */
+  private readonly live = new Map<string, LiveRunView>();
+  private runCount = 0;
+  private swarmCount = 0;
   /**
    * True from the start of a plan until its runs start or it is declined. No offers are made meanwhile, so an offer cannot
    * start a run beside the plan the person is being asked about.
@@ -499,6 +517,7 @@ export class TwinRuntime {
       taskRuns: this.agent.taskRuns(),
       ...(this.lastPlan ? { lastPlan: this.lastPlan } : {}),
       activeRuns: this.activeRuns,
+      liveRuns: this.liveRuns(),
       stats: {
         routinesLearned: suggestions.length + automations.length,
         waiting: suggestions.length + drafts,
@@ -586,6 +605,10 @@ export class TwinRuntime {
     return this.agent.createMenuAutomation(input);
   }
 
+  createPlaybook(input: unknown): AutomationView {
+    return this.agent.createPlaybook(input);
+  }
+
   /** Confirms, renames, merges or splits one of a day's tasks. The engine checks the decision before it is stored. */
   decideTask(input: unknown): void {
     this.agent.decideTask(input);
@@ -609,25 +632,117 @@ export class TwinRuntime {
   }
 
   async supervisedRun(automationId: string): Promise<RunResult> {
+    return this.runSupervised(automationId, false);
+  }
+
+  /**
+   * Starts two to nine automations together as a swarm, each under its own named cursor, after one question naming them
+   * all. When the person allows all their steps, each run starts approved for itself; every step still passes the policy,
+   * so a denied step stops its run. They take the desktop's input in turns, one step at a time, so actions never overlap.
+   */
+  async runSwarm(automationIds: string[], name?: string): Promise<SwarmRunView> {
+    if (!this.agent.configuration.automationsEnabled) throw new Error('Automations are stopped. Resume them in settings first.');
+    if (!this.platform) throw new Error('App control is not available on this system yet.');
+    const ids = [...new Set(automationIds)];
+    if (ids.length !== automationIds.length) throw new Error('Each automation can be in a swarm once.');
+    if (ids.length < 2 || ids.length > SWARM_MAX) throw new Error(`A swarm runs 2 to ${SWARM_MAX} automations.`);
+    if (this.planning) throw new Error('A plan is waiting for your answer. Answer it, then start the swarm.');
+    const views = ids.map(id => this.agent.automations().find(view => view.automation.id === id));
+    if (views.some(view => !view)) throw new Error('Unknown automation.');
+    if (views.some(view => view!.state.level < 3)) throw new Error('Raise every automation in the swarm to level 3 first.');
+    const label = name?.trim() || `Swarm ${++this.swarmCount}`;
+    const answer = this.options.confirmSwarm ? await this.options.confirmSwarm(views.map(view => view!.automation.name)) : false;
+    console.info(`[swarm] size=${ids.length} answer=${answer || 'no'}`);
+    if (!answer) return { name: label, confirmed: false, allowed: 'none', runs: [] };
+    const settled = await Promise.allSettled(
+      ids.map((id, index) => this.runSupervised(id, answer === 'all', label, CURSOR_COLOURS[index % CURSOR_COLOURS.length])),
+    );
+    return {
+      name: label,
+      confirmed: true,
+      allowed: answer,
+      runs: settled.map((outcome, index) => ({
+        automationId: ids[index],
+        ...(outcome.status === 'fulfilled'
+          ? { result: outcome.value }
+          : { error: outcome.reason instanceof Error ? outcome.reason.message : 'The run could not start.' }),
+      })),
+    };
+  }
+
+  /** One supervised run. `allowed` is set only by a swarm the person allowed in full: the run then asks nothing more. */
+  private async runSupervised(automationId: string, allowed: boolean, swarm?: string, colour?: string): Promise<RunResult> {
     return this.withRun(async () => {
       const platform = this.platform;
       if (!platform) throw new Error('App control is not available on this system yet.');
       const automation = this.agent.automations().find(view => view.automation.id === automationId)?.automation;
       if (!automation) throw new Error('Unknown automation.');
-      const owner = cursorFor(automation.id, automation.name).agentId;
-      return this.logged(automation, 'supervised', () =>
-        this.agent.run(
-          automationId,
-          {
-            mode: 'supervised',
+      // The run's own cursor. Its label changes at every step to say what the step does, so each cursor on screen, and
+      // each row of the live view, says what it is doing.
+      const cursor = cursorFor(automation.id, automation.name);
+      // In a swarm each member gets its own colour, so no two of its cursors look alike on screen.
+      if (colour) cursor.colour = colour;
+      const owner = cursor.agentId;
+      const base = cursor.label;
+      const runId = `run-${++this.runCount}`;
+      const entry: LiveRunView = {
+        runId,
+        automationId,
+        name: automation.name,
+        colour: cursor.colour,
+        ...(swarm ? { swarm } : {}),
+        step: 0,
+        steps: automation.steps.length,
+        doing: 'Starting',
+        state: 'running',
+        startedAt: Date.now(),
+      };
+      this.live.set(runId, entry);
+      this.options.onChange();
+      const finish = (state: LiveRunView['state']): void => {
+        entry.state = state;
+        entry.endedAt = Date.now();
+        entry.doing = state === 'completed' ? 'Done' : state === 'blocked' ? 'Stopped before acting' : 'Stopped: a step failed';
+        this.options.onChange();
+      };
+      try {
+        const result = await this.logged(automation, 'supervised', () =>
+          this.agent.run(
+            automationId,
+            {
+              mode: 'supervised',
+              onStep: (index, total, step) => {
+                entry.step = index + 1;
+                entry.steps = total;
+                entry.doing = stepSummary(step);
+                cursor.label = cursorLabel(base, entry.doing);
+                this.options.onChange();
+              },
             // The dialog takes focus, so it has its own turn of the input: it never opens while another run's step acts,
             // and no step acts while it is open. The runner asks before the step's own turn, so the two never nest.
-            approve: (step, decision) => this.inputLock.run(owner, () => this.options.approve(automation, step, decision)),
+            approve: allowed
+              ? async () => 'run' as const
+              : (step, decision) => this.inputLock.run(owner, () => this.options.approve(automation, step, decision)),
           },
-          this.runExecutor(platform, automation),
+          this.runExecutor(platform, automation, cursor),
         ),
       );
+        finish(result.status === 'completed' ? 'completed' : result.status === 'blocked' ? 'blocked' : 'failed');
+        return result;
+      } catch (error) {
+        finish('blocked');
+        throw error;
+      }
     });
+  }
+
+  /** The live view: runs now, then runs that ended in the last two minutes, newest first. Older ones are dropped. */
+  private liveRuns(): LiveRunView[] {
+    const now = Date.now();
+    for (const [id, run] of this.live) if (run.endedAt !== undefined && now - run.endedAt > LIVE_KEEP_MS) this.live.delete(id);
+    return [...this.live.values()]
+      .map(run => ({ ...run }))
+      .sort((a, b) => Number(a.state !== 'running') - Number(b.state !== 'running') || b.startedAt - a.startedAt);
   }
 
   /**
@@ -636,12 +751,13 @@ export class TwinRuntime {
    * program's exit status, the CLI's error code when it gave one, and the duration are logged. Nothing it was given, and
    * no error message, is.
    */
-  private runExecutor(platform: Platform, automation?: { id: string; name: string }): Executor {
-    const cursor = automation ? cursorFor(automation.id, automation.name) : undefined;
+  private runExecutor(platform: Platform, automation?: { id: string; name: string }, runCursor?: HandsCursor): Executor {
+    const cursor = runCursor ?? (automation ? cursorFor(automation.id, automation.name) : undefined);
     // Each step's action and its check take the desktop's input in turn, so overlapping runs cannot move focus under
     // each other. A step's turn starts after its approval, whose dialog had a turn of its own.
     const exclusive = <T>(work: () => Promise<T>): Promise<T> => this.inputLock.run(cursor?.agentId ?? 'run', work);
-    const native = executorFor(platform);
+    // Gathering duplicate files works on the person's folders, not the screen, so it needs no agent-desktop program.
+    const native = { ...executorFor(platform), gatherDuplicates: (folders: readonly string[], into: string) => gatherDuplicates(homedir(), folders, into) };
     const binary = this.agent.configuration.agentDesktopPath.trim();
     if (binary === '') return { ...native, exclusive };
     return {
@@ -650,6 +766,8 @@ export class TwinRuntime {
         // The automation's own cursor, named after it and coloured, so several runs can be told apart on screen.
         ...(cursor ? { cursor } : {}),
         session: this.handsSession,
+        // Read through functions, so the clipboard is touched only when a step pastes or reads it.
+        clipboard: { readText: () => clipboard.readText(), writeText: text => clipboard.writeText(text) },
         record: entry => {
           const code = entry.code === undefined ? '' : ` code=${entry.code}`;
           console.info(`[agent-desktop] ${entry.step} agent=${entry.agent ?? '-'} exit=${entry.exit}${code} duration=${entry.durationMs}ms`);

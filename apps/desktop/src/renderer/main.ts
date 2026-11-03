@@ -13,6 +13,7 @@ import { reviewView } from './views/review.js';
 import { openConnectorsSection, settingsView } from './views/settings.js';
 import { setupView } from './views/setup.js';
 import { suggestionsView } from './views/suggestions.js';
+import { swarmView } from './views/swarm.js';
 import { tasksView } from './views/tasks.js';
 import {
   bridge,
@@ -95,7 +96,7 @@ function signature(status: TwinStatus | undefined): string {
     pending: [...state.pending].sort(),
     wizard: [state.wizardForced, state.wizardStep, state.altOpen],
     setup: state.setup,
-    selection: [state.selectedSuggestion, state.selectedLedger, state.automationTab, state.renaming?.automationId],
+    selection: [state.selectedSuggestion, state.selectedLedger, state.automationTab, state.renaming?.automationId, [...state.swarmPick].sort()],
     runs: [...state.runResults.entries()],
     // The Recall search is compared only on its own page. Its images are listed by id, not by their data.
     recall: state.route.name === 'recall' ? { ...state.recall, frames: [...state.frames.keys()] } : undefined,
@@ -150,6 +151,8 @@ function viewFor(status: TwinStatus, route: Route): HTMLElement {
       return reviewView(status);
     case 'tasks':
       return tasksView(status);
+    case 'swarm':
+      return swarmView(status);
     case 'connectors':
       return settingsView(status);
     case 'settings':

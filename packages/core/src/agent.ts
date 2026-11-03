@@ -1,5 +1,15 @@
 import { z } from 'zod';
-import { AutomationSchema, compileMenuAutomation, compileRoutine, effectsOf, fitName, MenuAutomationInputSchema, type Automation } from './automation';
+import {
+  AutomationSchema,
+  compileMenuAutomation,
+  compilePlaybook,
+  compileRoutine,
+  effectsOf,
+  fitName,
+  MenuAutomationInputSchema,
+  PlaybookInputSchema,
+  type Automation,
+} from './automation';
 import { isBrowserApp, isExcludedApp, normalizeAppName } from './classify';
 import { newId, normaliseOcr, normaliseTranscript, searchTerms } from './capture-text';
 import { TriggerGate, openingApps } from './triggers';
@@ -932,6 +942,21 @@ export class TwinAgent {
   }
 
   /**
+   * Makes an automation from a playbook of desktop steps. It starts as a draft at level 2, as a menu automation does, so
+   * nothing runs until the person raises its level, and every step that acts on an app asks before it runs.
+   */
+  createPlaybook(input: unknown): AutomationView {
+    const parsed = PlaybookInputSchema.safeParse(input);
+    if (!parsed.success) throw new Error('That playbook is not valid. Check each step against the step rules.');
+    const automation = compilePlaybook(parsed.data, `playbook-${newId()}`);
+    // The name was written by a person, so the plain-text export leaves it out, as it does a renamed automation's name.
+    this.markRenamed(automation.id);
+    this.writeAutomation(automation);
+    this.writeState(initialState(automation.id, effectsOf(automation)));
+    return this.view(automation);
+  }
+
+  /**
    * Changes an automation's name. A longer name is cut to fit, as an accepted routine's name is. Only the name changes:
    * the level, the steps, the runs and the ids stay as they are. The name is typed, so the export leaves it out.
    */
@@ -974,7 +999,7 @@ export class TwinAgent {
    */
   async run(
     automationId: string,
-    request: { mode: RunMode; values?: Record<string, string>; approve?: RunRequest['approve'] },
+    request: { mode: RunMode; values?: Record<string, string>; approve?: RunRequest['approve']; onStep?: RunRequest['onStep'] },
     executor: Executor,
   ): Promise<RunResult> {
     if (request.mode !== 'dry_run' && !this.config.automationsEnabled) {
@@ -1000,6 +1025,7 @@ export class TwinAgent {
           mode: request.mode,
           values: request.values,
           approve: request.approve,
+          onStep: request.onStep,
           policy: {
             level: state.level,
             maxLevel: this.config.maxAutonomyLevel,

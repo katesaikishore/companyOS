@@ -1,4 +1,4 @@
-import type { AutomationView, CaptureChannelState, EffectClass, Fit, LayaBundleView, Param, RunRecord, Step, TwinStatus } from '@companyos/twin-core';
+import type { AutomationView, CaptureChannelState, EffectClass, Fit, LayaBundleView, Locator, Param, RunRecord, Step, TwinStatus } from '@companyos/twin-core';
 import { formatBytes, formatDecimalBytes, clamp01 } from './format.js';
 
 export const LEVEL_NAMES = ['Observe', 'Suggest', 'Draft', 'Run with you', 'On its own', 'External'];
@@ -96,7 +96,33 @@ export function stepTitle(step: Step, params: readonly Param[]): string {
       return `Press ${step.shortcut}`;
     case 'choose_menu':
       return `Choose ${step.menu.join(' → ')}`;
+    case 'click':
+      return `${step.button === 'right' ? 'Right-click' : step.count === 2 ? 'Double-click' : 'Click'} ${targetLabel(step.target)}`;
+    case 'paste_text':
+      return `Paste ${textLabel(step.text)}`;
+    case 'press_key':
+      return `Press ${step.key}`;
+    case 'fill_field':
+      return `Enter ${textLabel(step.text)} in ${targetLabel(step.target)}`;
+    case 'set_field':
+      return `Type ${textLabel(step.text)} in ${targetLabel(step.target)}`;
+    case 'check_text':
+      return `Check ${step.source === 'clipboard' ? 'the clipboard' : 'the window'} shows ${step.expect.length === 1 ? textLabel(step.expect[0]) : `${step.expect.length} values`}`;
+    case 'wait':
+      return `Wait ${step.ms} ms`;
+    case 'gather_duplicates':
+      return `Gather duplicate files into ${step.into}`;
   }
+}
+
+function targetLabel(target: Locator): string {
+  return `"${target.name ?? (target.namePrefix !== undefined ? `${target.namePrefix}…` : target.value)}"`;
+}
+
+/** Text as a workflow row shows it: short text whole, longer text cut with its length. */
+function textLabel(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length <= 40 ? `"${flat}"` : `"${flat.slice(0, 37)}…" (${text.length} characters)`;
 }
 
 /** The second line of a workflow row, or undefined when the first line says all there is to say. */
@@ -104,6 +130,7 @@ export function stepDetail(step: Step, params: readonly Param[]): string | undef
   const appParam = paramFor(step, params);
   if (step.op === 'focus_app') return appParam ? variesLabel(appParam) : undefined;
   const app = appParam ? variesLabel(appParam) : step.app;
+  if ('window' in step && step.window) return `${app} · ${step.window}`;
   if (step.op !== 'open_url') return app;
   const urlParam = paramRef(step.url, params);
   return urlParam ? `${app} · ${variesLabel(urlParam, hostOf)}` : app;
@@ -111,8 +138,10 @@ export function stepDetail(step: Step, params: readonly Param[]): string | undef
 
 export function appsSummary(view: AutomationView): string {
   const labels: string[] = [];
+  // A playbook may have no focus steps, so its apps come from every step instead.
+  const focusOnly = view.automation.steps.some(step => step.op === 'focus_app');
   for (const step of view.automation.steps) {
-    if (step.op !== 'focus_app') continue;
+    if (focusOnly && step.op !== 'focus_app') continue;
     const label = stepAppLabel(step, view.automation.params);
     if (labels[labels.length - 1] !== label) labels.push(label);
   }

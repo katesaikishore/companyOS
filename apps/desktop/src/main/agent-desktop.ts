@@ -2,6 +2,14 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { statSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { StepRefusedError, isAllowedMenuPath, parseKeyChord, type Executor } from '@companyos/twin-core';
+import {
+  clickWithAgentDesktop,
+  fillWithAgentDesktop,
+  pasteWithAgentDesktop,
+  pressKeyWithAgentDesktop,
+  readTextWithAgentDesktop,
+  setFieldWithAgentDesktop,
+} from './desktop-actions';
 
 /**
  * The optional "hands" executor. An external agent-desktop program takes over the key-press step, and it counts an app's
@@ -32,6 +40,8 @@ import { StepRefusedError, isAllowedMenuPath, parseKeyChord, type Executor } fro
 export const AGENT_DESKTOP_TIMEOUT_MS = 10_000;
 /** The most output, across stdout and stderr, that one call may produce. Output is counted and discarded, never kept. */
 const MAX_OUTPUT_BYTES = 16 * 1024;
+/** The most output a find or list-windows call made by a desktop step may produce. A busy web page has a large tree. */
+export const FIND_OUTPUT_BYTES = 4 * 1024 * 1024;
 /** How long output is still read after the program exits. A child that inherited the pipes can hold them open. */
 const EXIT_DRAIN_MS = 500;
 const MAX_PATH_LENGTH = 512;
@@ -47,7 +57,7 @@ const AMBIGUOUS_CODE = Buffer.from('"AMBIGUOUS_TARGET"');
 /** A CLI error code: a letter, then upper-case letters, digits and underscores. Anything else is not recorded. */
 const ERROR_CODE = /^[A-Z][A-Z0-9_]{1,39}$/;
 
-export type HandsStep = 'focus_app' | 'press_shortcut' | 'choose_menu';
+export type HandsStep = 'focus_app' | 'press_shortcut' | 'choose_menu' | 'click' | 'paste_text' | 'press_key' | 'fill_field' | 'set_field' | 'check_text';
 export type HandsFailure =
   | 'blocked'
   | 'invalid_input'
@@ -90,6 +100,8 @@ export interface HandsOptions {
   cursor?: HandsCursor;
   /** The shared multi-agent session. Without it, or when it cannot start, menu clicks run with no session and no cursor. */
   session?: AgentDesktopSession;
+  /** The system clipboard, for pasting text and for checks that read it. The app passes Electron's; tests pass a fake. */
+  clipboard?: { readText(): string | Promise<string>; writeText(text: string): void | Promise<void> };
 }
 
 /** One automation's cursor in the shared session: its agent id, the name drawn beside it, and its colour. */
@@ -216,11 +228,11 @@ export async function pressWithAgentDesktop(
 }
 
 /** A qualified ref as find prints it, such as "@s1bn72231t061l:e1". No leading dash, so it cannot read as a flag. */
-const REF = /^@[A-Za-z0-9]{1,64}:e\d{1,6}$/;
+export const REF = /^@[A-Za-z0-9]{1,64}:e\d{1,6}$/;
 /** A session id as session start prints it. */
 const SESSION_ID = /^[A-Za-z0-9._-]{1,128}$/;
 /** An agent id the program accepts: 1 to 64 letters, digits, "-" or "_". */
-const AGENT_ID = /^[A-Za-z0-9_-]{1,64}$/;
+export const AGENT_ID = /^[A-Za-z0-9_-]{1,64}$/;
 /** The longest cursor label. The program also cuts the label to a few words. */
 const CURSOR_LABEL_MAX = 60;
 /** How long the menu may take to close after the last click. */
@@ -229,7 +241,7 @@ const MENU_CLOSE_MS = 2_000;
 export const SUPPORTED_MENU_DEPTH = 2;
 
 /** Cursor colours, far enough apart to tell runs apart at a glance. A design choice. */
-export const CURSOR_COLOURS = ['#E5484D', '#30A46C', '#0090FF', '#F76B15', '#8E4EC6', '#12A594'] as const;
+export const CURSOR_COLOURS = ['#E5484D', '#30A46C', '#0090FF', '#F76B15', '#8E4EC6', '#12A594', '#D6409F', '#AD7F58', '#FFB224'] as const;
 
 /** One colour for an agent id, the same on every run: a 32-bit FNV-1a hash of the id picks it. */
 function cursorColour(agentId: string): string {
@@ -239,6 +251,16 @@ function cursorColour(agentId: string): string {
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }
   return CURSOR_COLOURS[hash % CURSOR_COLOURS.length];
+}
+
+/**
+ * A cursor label that says what the run is doing: the start of the automation's name, then the step, such as
+ * "Finance · Paste into Swarm Board!C3". The program draws a few words of it, so the step comes early.
+ */
+export function cursorLabel(name: string, doing: string): string {
+  // A leading dash is dropped, so the label can never read as a flag after --label.
+  const head = name.replace(/[\u0000-\u001f\u007f]/g, ' ').split(/[:\s]/).map(word => word.replace(/^-+/, '')).find(word => word.length > 0) ?? 'companyOS';
+  return `${head} · ${doing}`.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, CURSOR_LABEL_MAX);
 }
 
 /**
@@ -333,7 +355,7 @@ export class AgentDesktopSession {
    * default cursor.
    */
   async style(sessionId: string, cursor: HandsCursor): Promise<void> {
-    const key = `${cursor.agentId}\u0000${cursor.label}`;
+    const key = `${cursor.agentId}\u0000${cursor.label}\u0000${cursor.colour}`;
     if (this.styled.has(key) || !AGENT_ID.test(cursor.agentId) || !CURSOR_COLOUR.test(cursor.colour)) return;
     const generation = this.generation;
     const call = await runCall(
@@ -371,7 +393,7 @@ const CURSOR_COLOUR = /^#[0-9A-Fa-f]{6}$/;
  * reports this as INVALID_ARGS with details.kind "session_ended" (seen on agent-desktop 1.0.2). An unknown session id is
  * not reported as a session error.
  */
-function sessionEnded(output: Buffer | undefined): boolean {
+export function sessionEnded(output: Buffer | undefined): boolean {
   const envelope = parseEnvelope(output) as { ok?: unknown; error?: { details?: { kind?: unknown } } };
   return envelope?.ok === false && envelope.error?.details?.kind === 'session_ended';
 }
@@ -551,7 +573,7 @@ function sessionIdOf(output: Buffer | undefined): string | undefined {
 }
 
 /** The program's JSON envelope, or undefined when the output is missing or is not JSON. */
-function parseEnvelope(output: Buffer | undefined): unknown {
+export function parseEnvelope(output: Buffer | undefined): unknown {
   if (output === undefined) return undefined;
   try {
     return JSON.parse(output.toString('utf8'));
@@ -599,6 +621,13 @@ export function handsExecutor(base: Executor, options: HandsOptions, platform: N
       menu.length > SUPPORTED_MENU_DEPTH && base.chooseMenu
         ? base.chooseMenu(app, menu)
         : outcomeOf(await chooseMenuWithAgentDesktop(options, app, menu)),
+    // The desktop steps act in one named window through the program, under the automation's cursor.
+    click: (app, window, target, button, count) => clickWithAgentDesktop(options, app, window, target, button, count),
+    pasteText: (app, window, text, via) => pasteWithAgentDesktop(options, app, window, text, via),
+    pressKey: (app, window, key) => pressKeyWithAgentDesktop(options, app, window, key),
+    fillField: (app, window, target, text, submit) => fillWithAgentDesktop(options, app, window, target, text, submit),
+    setField: (app, window, target, text) => setFieldWithAgentDesktop(options, app, window, target, text),
+    readText: (app, window, source) => readTextWithAgentDesktop(options, app, window, source),
     blockedReason: op => (op === 'press_shortcut' && !pressThroughProgram ? undefined : agentDesktopProblem(options.binary)),
   };
 }
@@ -617,19 +646,19 @@ function outcomeOf(result: HandsResult): boolean {
   return false;
 }
 
-function refused(failure: HandsFailure, reason: string): HandsResult {
+export function refused(failure: HandsFailure, reason: string): HandsResult {
   return { ok: false, failure, reason };
 }
 
 /** What one call ended with. The output is set only when the caller asked for it, and it is not kept past the caller. */
-interface CallResult {
+export interface CallResult {
   result: HandsResult;
   exit: number | HandsFailure;
   output?: Buffer;
 }
 
 /** Writes one call that ended to the log, if there is one. The log is best effort, so a failing log cannot stall a call. */
-function recordStep(options: HandsOptions, step: HandsStep, exit: number | HandsFailure, started: number, code?: string): void {
+export function recordStep(options: HandsOptions, step: HandsStep, exit: number | HandsFailure, started: number, code?: string): void {
   try {
     options.record?.({
       step,
@@ -678,7 +707,7 @@ function windowCount(output: Buffer | undefined): number {
  * The CLI's error code from its JSON envelope, or undefined when the output has none. The message is read past and never
  * returned, because it can name an app or a window.
  */
-function errorCodeOf(output: Buffer | undefined): string | undefined {
+export function errorCodeOf(output: Buffer | undefined): string | undefined {
   if (output === undefined) return undefined;
   try {
     const envelope = JSON.parse(output.toString('utf8')) as { ok?: unknown; error?: { code?: unknown } } | null;
@@ -715,7 +744,7 @@ async function runProgram(options: HandsOptions, step: HandsStep, args: readonly
  * and stop the program if it is still running. The pipes are destroyed when the call settles, so a child that inherited
  * them cannot hold the call open. The output is returned only when keepOutput is set, and the caller then drops it.
  */
-function runCall(options: HandsOptions, args: readonly string[], keepOutput: boolean): Promise<CallResult> {
+export function runCall(options: HandsOptions, args: readonly string[], keepOutput: boolean, maxBytes = MAX_OUTPUT_BYTES): Promise<CallResult> {
   const program = options.binary.trim();
   return new Promise<CallResult>(resolve => {
     const child = start(program, args);
@@ -748,7 +777,7 @@ function runCall(options: HandsOptions, args: readonly string[], keepOutput: boo
     let bytes = 0;
     const count = (chunk: Buffer): void => {
       bytes += chunk.length;
-      if (bytes > MAX_OUTPUT_BYTES) {
+      if (bytes > maxBytes) {
         child.kill('SIGKILL');
         failed('output_limit', MESSAGES.output);
       }

@@ -518,7 +518,7 @@ async function main(userDataDir, fixtureDir) {
 
     // 11. The window has one fixed size. Every main route holds the checks in responsiveProblems at 900x600, and the
     // window still reports that it cannot be resized, maximised or made full screen.
-    const ROUTES = ['overview', 'tasks', 'recall', 'suggestions', 'automations', 'readiness', 'knows', 'review', 'connectors', 'ledger', 'settings'];
+    const ROUTES = ['overview', 'tasks', 'swarm', 'recall', 'suggestions', 'automations', 'readiness', 'knows', 'review', 'connectors', 'ledger', 'settings'];
     // These pages have no sidebar link. They open from the Overview or the command palette, and still have to lay out.
     const UNLINKED = new Set(['suggestions', 'readiness', 'knows', 'review']);
     for (const route of ROUTES) {

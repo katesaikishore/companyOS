@@ -27,6 +27,7 @@ import { pathToFileURL } from 'node:url';
 import {
   AutonomyLevelSchema,
   describeStep,
+  type Approval,
   type Automation,
   type CapturePermission,
   type CaptureSearchRequest,
@@ -82,9 +83,9 @@ function text(value: unknown, pattern: RegExp, message: string): string {
   return value;
 }
 
-/** An accepted routine's id (auto_ and 12 hex) or a hand-made menu automation's id (menu- and 32 hex). */
+/** An accepted routine's id (auto_ and 12 hex), or a hand-made menu automation's or playbook's id (menu- or playbook- and 32 hex). */
 const automationId = (value: unknown) =>
-  text(value, /^(?:auto_[a-f0-9]{12}|menu-[a-f0-9]{32})$/, 'Invalid automation id.');
+  text(value, /^(?:auto_[a-f0-9]{12}|(?:menu|playbook)-[a-f0-9]{32})$/, 'Invalid automation id.');
 const routineId = (value: unknown) => text(value, /^[a-f0-9]{12}$/, 'Invalid routine id.');
 const modelId = (value: unknown) => text(value, /^[a-z0-9.-]{1,80}$/, 'Invalid model id.');
 const mediaId = (value: unknown) => text(value, /^[0-9a-f]{32}$/, 'Invalid image id.');
@@ -219,8 +220,14 @@ function registerIpc(): void {
   });
   // The agent checks the input against a strict schema, so the page cannot add a field or a step of its own.
   handle(IPC.createMenuAutomation, input => requireRuntime().createMenuAutomation(input));
+  handle(IPC.createPlaybook, input => requireRuntime().createPlaybook(input));
   // Takes no input: the plan is made from the automations at level 3 or above, and the person confirms it.
   handle(IPC.planAndRun, () => requireRuntime().planAndRun());
+  handle(IPC.runSwarm, (ids, name) => {
+    if (!Array.isArray(ids) || ids.length > 9) throw new Error('Invalid swarm.');
+    if (name !== undefined && (typeof name !== 'string' || name.length > 60 || /[\u0000-\u001f\u007f]/.test(name))) throw new Error('Invalid swarm name.');
+    return requireRuntime().runSwarm(ids.map(automationId), name);
+  });
   handle(IPC.setLevel, (id, level) => requireRuntime().setLevel(automationId(id), AutonomyLevelSchema.parse(level)));
   handle(IPC.promote, id => requireRuntime().promote(automationId(id)));
   handle(IPC.dryRun, id => requireRuntime().dryRun(automationId(id)));
@@ -350,20 +357,41 @@ function registerIpc(): void {
 }
 
 /** Asks the person before each step the policy marks as needing confirmation. */
-async function approveStep(automation: Automation, step: Step, decision: Decision): Promise<boolean> {
+async function approveStep(automation: Automation, step: Step, decision: Decision): Promise<Approval> {
   const message = describeStep(step);
+  // "Allow for this run" spares a question per step for this run only. Each step still passes the policy first.
   const options: MessageBoxOptions = {
     type: 'question',
-    buttons: ['Allow this step', 'Stop the run'],
-    defaultId: 1,
-    cancelId: 1,
+    buttons: ['Allow this step', 'Allow for this run', 'Stop the run'],
+    defaultId: 2,
+    cancelId: 2,
     title: automation.name,
     message,
     detail: decision.reason,
   };
   const parent = parentWindow();
   const result = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
-  return result.response === 0;
+  return result.response === 0 ? true : result.response === 1 ? 'run' : false;
+}
+
+/**
+ * Asks the person once before a swarm starts, naming each automation. "Run them, allowing their steps" starts every run
+ * approved for itself, so no question interrupts the swarm; each step still passes the policy. "Ask for each run" keeps
+ * one question per run. The default and cancel answer is Not now.
+ */
+async function confirmSwarm(names: string[]): Promise<'all' | 'each' | false> {
+  const options: MessageBoxOptions = {
+    type: 'question',
+    buttons: ['Run them, allowing their steps', 'Run them, asking for each run', 'Not now'],
+    defaultId: 2,
+    cancelId: 2,
+    title: 'companyOS swarm',
+    message: `Start these ${names.length} automations together?`,
+    detail: `${names.map(name => `• ${name}`).join('\n')}\n\nEach one moves its own cursor. They take turns at the keyboard and mouse, one step at a time.`,
+  };
+  const parent = parentWindow();
+  const result = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
+  return result.response === 0 ? 'all' : result.response === 1 ? 'each' : false;
 }
 
 /**
@@ -584,6 +612,7 @@ async function boot(): Promise<void> {
       laya: !app.isPackaged && process.env.COMPANYOS_TEST_LAYA_FIXTURE ? readLayaFixture(process.env.COMPANYOS_TEST_LAYA_FIXTURE) : undefined,
       approve: approveStep,
       confirmPlan,
+      confirmSwarm,
       // The test platform has no real input device, so idle time is pinned to zero for it.
       idleSeconds: () => (!app.isPackaged && process.env.COMPANYOS_TEST_FAKE_PLATFORM ? 0 : powerMonitor.getSystemIdleTime()),
       onBattery: () => powerMonitor.onBatteryPower,

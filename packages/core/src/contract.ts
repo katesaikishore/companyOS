@@ -1,6 +1,6 @@
 import type { KindLabel } from './labels';
 import type { AutomationView } from './agent';
-import type { MenuAutomationInput } from './automation';
+import type { MenuAutomationInput, PlaybookInput } from './automation';
 import type { PlanFallbackReason } from './llm/planner';
 import type { GateRequirement } from './autonomy';
 import type { EffectClass, TwinConfig, AutonomyLevel, CaptureKind, WindowClass } from './types';
@@ -356,6 +356,8 @@ export interface TwinStatus {
   laya: LayaBundleView;
   /** Offers waiting for an answer. Expired offers are removed. */
   pendingRuns: PendingRunView[];
+  /** Runs happening now, and those that ended in the last two minutes, each with what its cursor is doing. */
+  liveRuns?: LiveRunView[];
   /** How much of each app's repeated work could run on its own, over the last seven days. */
   readiness: AppReadinessView;
   /** How the person usually works, over the last four weeks. Rebuilt from the stored events on each read. */
@@ -401,6 +403,40 @@ export interface PlanView {
 export interface PlanRunView {
   plan: PlanView;
   runs: Array<{ automationId: string; result?: RunResult; error?: string }>;
+}
+
+/**
+ * A swarm: several automations started together, each under its own cursor. `allowed` says whether the person allowed
+ * every step of these runs when they started the swarm, or chose to be asked for each run.
+ */
+export interface SwarmRunView {
+  /** The swarm's name, such as "Finance swarm", or "Swarm 2" when none was given. */
+  name: string;
+  confirmed: boolean;
+  allowed: 'all' | 'each' | 'none';
+  runs: Array<{ automationId: string; result?: RunResult; error?: string }>;
+}
+
+/**
+ * One run as it happens, for the live view: whose cursor it is, which swarm it belongs to, the step it is on and what that
+ * step does. Finished runs stay for two minutes with their outcome. Holds no entered text and nothing read on screen.
+ */
+export interface LiveRunView {
+  /** One id per run, so the same automation run twice shows twice. */
+  runId: string;
+  automationId: string;
+  name: string;
+  /** The cursor's colour, as drawn on screen. */
+  colour: string;
+  swarm?: string;
+  /** The step being run, counted from 1, and how many the run has. */
+  step: number;
+  steps: number;
+  /** What the step does, as drawn beside the cursor, such as "Paste into Swarm Board!C3". */
+  doing: string;
+  state: 'running' | 'completed' | 'blocked' | 'failed';
+  startedAt: number;
+  endedAt?: number;
 }
 
 /** One automation ranked by what Recall saw of its apps. Holds no text: only counts, a time and the routine's name. */
@@ -471,11 +507,18 @@ export interface TwinBridge {
   renameAutomation(automationId: string, name: string): Promise<AutomationView>;
   /** Makes a draft automation by hand that brings an app forward, then chooses one menu path in it. */
   createMenuAutomation(input: MenuAutomationInput): Promise<AutomationView>;
+  /** Makes a draft automation from a playbook of desktop steps: clicks, pasted text, keys, fields and checks. */
+  createPlaybook(input: PlaybookInput): Promise<AutomationView>;
   /**
    * Plans which automations at level 3 or above to run now, with the local model when it is ready, asks the person once,
    * then starts the chosen runs together. Each run still asks before any step that acts on an app.
    */
   planAndRun(): Promise<PlanRunView>;
+  /**
+   * Starts two to nine automations at level 3 or above together, as a swarm, each under its own cursor, after asking the
+   * person once. They share the desktop's input step by step, so no two actions ever overlap.
+   */
+  runSwarm(automationIds: string[], name?: string): Promise<SwarmRunView>;
   setLevel(automationId: string, level: AutonomyLevel): Promise<AutomationView>;
   promote(automationId: string): Promise<AutomationView>;
   dryRun(automationId: string): Promise<RunResult>;

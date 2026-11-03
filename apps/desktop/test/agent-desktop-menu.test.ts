@@ -8,6 +8,7 @@ import {
   CURSOR_COLOURS,
   chooseMenuWithAgentDesktop,
   cursorFor,
+  cursorLabel,
   handsExecutor,
   type HandsOptions,
   type HandsRecord,
@@ -136,6 +137,15 @@ describe('cursorFor', () => {
     expect(cursorFor('menu-abc', 'Renamed').colour).toBe(colour);
     const spread = new Set(Array.from({ length: 24 }, (_, index) => cursorFor(`menu-${index}`, 'x').colour));
     expect(spread.size).toBeGreaterThan(3);
+  });
+});
+
+describe('cursorLabel', () => {
+  it('puts the start of the automation’s name before what the step does, so the drawn words say what is happening', () => {
+    expect(cursorLabel('Finance: Hyderabad', 'Paste into C3')).toBe('Finance · Paste into C3');
+    expect(cursorLabel('---', 'Click OK')).toBe('companyOS · Click OK');
+    expect(cursorLabel('Ops\u0007 run', 'Fill x').includes('\u0007')).toBe(false);
+    expect(cursorLabel('Analyst', 'x'.repeat(200)).length).toBeLessThanOrEqual(60);
   });
 });
 
