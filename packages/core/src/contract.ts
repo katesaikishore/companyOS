@@ -1,6 +1,6 @@
 import type { KindLabel } from './labels';
 import type { AutomationView } from './agent';
-import type { MenuAutomationInput } from './automation';
+import type { MenuAutomationInput, PlaybookInput } from './automation';
 import type { PlanFallbackReason } from './llm/planner';
 import type { GateRequirement } from './autonomy';
 import type { EffectClass, TwinConfig, AutonomyLevel, CaptureKind, WindowClass } from './types';
@@ -471,6 +471,8 @@ export interface TwinBridge {
   renameAutomation(automationId: string, name: string): Promise<AutomationView>;
   /** Makes a draft automation by hand that brings an app forward, then chooses one menu path in it. */
   createMenuAutomation(input: MenuAutomationInput): Promise<AutomationView>;
+  /** Makes a draft automation from a playbook of desktop steps: clicks, pasted text, keys, fields and checks. */
+  createPlaybook(input: PlaybookInput): Promise<AutomationView>;
   /**
    * Plans which automations at level 3 or above to run now, with the local model when it is ready, asks the person once,
    * then starts the chosen runs together. Each run still asks before any step that acts on an app.

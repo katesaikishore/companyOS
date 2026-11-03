@@ -71,9 +71,64 @@ export function isAllowedMenuPath(menu: readonly string[]): boolean {
 }
 
 /**
+ * A name or window title a desktop step matches, as the app shows it: a letter, digit or mark first, then printable text.
+ * No control characters, and no leading dash, so it cannot read as a flag.
+ */
+export const UI_LABEL = /^[^\u0000-\u001f\u007f-][^\u0000-\u001f\u007f]{0,119}$/u;
+const UiLabel = z.string().min(1).max(120).regex(UI_LABEL, 'Use the name as the app shows it.');
+
+/** The accessibility roles a desktop step can aim at. Anything else is refused, so a step names what it touches. */
+export const UI_ROLES = [
+  'group',
+  'button',
+  'menuitem',
+  'textfield',
+  'statictext',
+  'radiobutton',
+  'checkbox',
+  'cell',
+  'link',
+  'image',
+  'combobox',
+] as const;
+
+/**
+ * One element in a window: its role, and its name exactly or by the start of it. `last` picks the last match instead of
+ * the first, and `inDialog` keeps only elements inside an open dialog, so a dialog's OK never resolves to a button behind it.
+ */
+export const LocatorSchema = z
+  .object({
+    role: z.enum(UI_ROLES),
+    name: UiLabel.optional(),
+    namePrefix: UiLabel.optional(),
+    last: z.boolean().optional(),
+    inDialog: z.boolean().optional(),
+  })
+  .strict()
+  .refine(locator => (locator.name === undefined) !== (locator.namePrefix === undefined), 'Give a name or a name prefix.');
+export type Locator = z.infer<typeof LocatorSchema>;
+
+/** Text a step enters: printable characters, tabs and line breaks only, so it cannot carry other control keys. */
+export const ENTERED_TEXT = /^[^\u0000-\u0008\u000b-\u001f\u007f]*$/u;
+export const ENTERED_TEXT_MAX = 4000;
+const EnteredText = z.string().min(1).max(ENTERED_TEXT_MAX).regex(ENTERED_TEXT, 'Use printable text, tabs and line breaks.');
+
+/** A key a step presses, alone or with modifiers, such as "return", "escape" or "cmd+shift+n". */
+const KeyName = z
+  .string()
+  .min(1)
+  .max(40)
+  .refine(value => parseKeyName(value) === value, 'Use one key, with or without modifiers, such as return or cmd+v.');
+
+/** What a check reads: the clipboard, or every piece of text shown in the window. */
+const CheckSource = z.enum(['clipboard', 'window']);
+
+/**
  * The steps an automation may contain. Focus and check are the original vocabulary. Open URL, open file and press
  * shortcut each name what they act on, are classified in classify.ts, and have a postcondition the runner checks.
- * Every step is strict, so a stored step with an unknown field fails to load instead of being guessed at.
+ * The desktop steps act in one window of an app, chosen by its title, through the agent-desktop program: click an
+ * element, paste text, press a key, fill a field (checked before it is submitted), set a field by typing, and check
+ * that text is shown. Every step is strict, so a stored step with an unknown field fails to load instead of being guessed at.
  */
 export const StepSchema = z.discriminatedUnion('op', [
   z.object({ op: z.literal('focus_app'), app: z.string().min(1).max(200) }).strict(),
@@ -82,7 +137,43 @@ export const StepSchema = z.discriminatedUnion('op', [
   z.object({ op: z.literal('open_file'), app: TargetAppRef, path: FilePath }).strict(),
   z.object({ op: z.literal('press_shortcut'), app: TargetAppRef, shortcut: KeyChord }).strict(),
   z.object({ op: z.literal('choose_menu'), app: TargetAppRef, menu: z.array(MenuLabel).min(MENU_PATH_MIN).max(MENU_PATH_MAX) }).strict(),
+  z
+    .object({
+      op: z.literal('click'),
+      app: TargetAppRef,
+      window: UiLabel.optional(),
+      target: LocatorSchema,
+      button: z.enum(['left', 'right']).optional(),
+    })
+    .strict(),
+  z.object({ op: z.literal('paste_text'), app: TargetAppRef, window: UiLabel.optional(), text: EnteredText }).strict(),
+  z.object({ op: z.literal('press_key'), app: TargetAppRef, window: UiLabel.optional(), key: KeyName }).strict(),
+  z
+    .object({
+      op: z.literal('fill_field'),
+      app: TargetAppRef,
+      window: UiLabel.optional(),
+      target: LocatorSchema,
+      text: EnteredText.max(400),
+      submit: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({ op: z.literal('set_field'), app: TargetAppRef, window: UiLabel.optional(), target: LocatorSchema, text: EnteredText.max(400) })
+    .strict(),
+  z
+    .object({
+      op: z.literal('check_text'),
+      app: TargetAppRef,
+      window: UiLabel.optional(),
+      source: CheckSource,
+      expect: z.array(z.string().min(1).max(400).regex(ENTERED_TEXT)).min(1).max(40),
+    })
+    .strict(),
 ]);
+
+/** The most steps one automation may hold. A desktop playbook strings many small steps together. */
+export const STEPS_MAX = 120;
 
 export const AutomationSchema = z
   .object({
@@ -92,7 +183,7 @@ export const AutomationSchema = z
     version: z.number().int().positive(),
     routineId: z.string().min(1),
     params: z.array(ParamSchema).max(6),
-    steps: z.array(StepSchema).min(1).max(12),
+    steps: z.array(StepSchema).min(1).max(STEPS_MAX),
     /** Estimated time the routine takes by hand. Shown as "time back"; never measured from the person. */
     estimate: z.object({ minutesPerWeek: z.number().nonnegative(), occurrencesPerWeek: z.number().nonnegative() }).strict().optional(),
   })
@@ -131,6 +222,31 @@ export function compileMenuAutomation(input: MenuAutomationInput, id: string): A
       { op: 'focus_app', app: input.app },
       { op: 'choose_menu', app: input.app, menu: input.menu },
     ],
+  });
+}
+
+/**
+ * A playbook: a hand-written automation of desktop steps, such as one exported by a benchmark. It names its steps
+ * exactly, with no parameters, and every step passes the step schema. It starts as a draft, like a menu automation.
+ */
+export const PlaybookInputSchema = z
+  .object({
+    name: z.string().trim().min(1).max(NAME_MAX),
+    steps: z.array(StepSchema).min(1).max(STEPS_MAX),
+  })
+  .strict()
+  .refine(input => input.steps.every(step => !PARAM_REF.test(step.app)), 'A playbook names each app; it takes no parameters.');
+export type PlaybookInput = z.infer<typeof PlaybookInputSchema>;
+
+/** A playbook as an automation. Its routine id says it was made by hand, so no learned routine is ever matched to it. */
+export function compilePlaybook(input: PlaybookInput, id: string): Automation {
+  return AutomationSchema.parse({
+    id,
+    name: fitName(input.name),
+    version: 3,
+    routineId: `manual:${id}`,
+    params: [],
+    steps: input.steps,
   });
 }
 
@@ -220,6 +336,14 @@ export function parseKeyChord(value: string): string | undefined {
 }
 
 /**
+ * The canonical form of a key a desktop step presses, with or without modifiers, such as "return" or "cmd+v", or
+ * undefined. The keys are the same fixed list a chord uses.
+ */
+export function parseKeyName(value: string): string | undefined {
+  return CHORD_KEY.test(value) ? value : parseKeyChord(value);
+}
+
+/**
  * Compiles a mined routine into an automation. Each routine position becomes a focus step and a
  * postcondition check. A position where the observed app varies becomes a parameter whose options
  * are the apps actually seen there.
@@ -300,6 +424,16 @@ export function resolveStep(step: Step, params: readonly Param[], values: Readon
     case 'choose_menu':
       if (!isAllowedMenuPath(step.menu)) throw new Error('That menu path is not allowed.');
       return { op: 'choose_menu', app: targetAppName(app), menu: [...step.menu] };
+    case 'press_key':
+      if (parseKeyName(step.key) !== step.key) throw new Error('That key is not allowed.');
+      return { ...step, app: targetAppName(app) };
+    case 'click':
+    case 'paste_text':
+    case 'fill_field':
+    case 'set_field':
+    case 'check_text':
+      // Desktop steps take no parameters. The schema checked their text, names and keys when the automation loaded.
+      return { ...step, app: targetAppName(app) };
   }
 }
 
@@ -333,7 +467,33 @@ export function describeStep(step: Step): string {
       return `Press ${step.shortcut} in "${step.app}"?`;
     case 'choose_menu':
       return `Choose ${step.menu.join(' → ')} in "${step.app}"?`;
+    case 'click':
+      return `${step.button === 'right' ? 'Right-click' : 'Click'} ${describeTarget(step.target)} in ${describeWindow(step)}?`;
+    case 'paste_text':
+      return `Paste ${describeText(step.text)} into ${describeWindow(step)}?`;
+    case 'press_key':
+      return `Press ${step.key} in ${describeWindow(step)}?`;
+    case 'fill_field':
+      return `Enter ${describeText(step.text)} in ${describeTarget(step.target)}${step.submit ? ' and press Return' : ''} in ${describeWindow(step)}?`;
+    case 'set_field':
+      return `Type ${describeText(step.text)} into ${describeTarget(step.target)} in ${describeWindow(step)}?`;
+    case 'check_text':
+      return `Check that ${step.source === 'clipboard' ? 'the clipboard' : describeWindow(step)} shows ${step.expect.length === 1 ? describeText(step.expect[0]) : `${step.expect.length} expected values`}?`;
   }
+}
+
+function describeWindow(step: { app: string; window?: string }): string {
+  return step.window ? `the "${step.window}" window of "${step.app}"` : `"${step.app}"`;
+}
+
+function describeTarget(target: Locator): string {
+  return `the ${target.role} "${target.name ?? `${target.namePrefix}…`}"`;
+}
+
+/** Text as an approval shows it: in full when short, otherwise its start and its length. */
+function describeText(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length <= 80 ? `"${flat}"` : `"${flat.slice(0, 77)}…" (${text.length} characters)`;
 }
 
 /** Every effect the automation can produce across all parameter options. */

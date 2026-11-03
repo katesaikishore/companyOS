@@ -27,6 +27,7 @@ import { pathToFileURL } from 'node:url';
 import {
   AutonomyLevelSchema,
   describeStep,
+  type Approval,
   type Automation,
   type CapturePermission,
   type CaptureSearchRequest,
@@ -219,6 +220,7 @@ function registerIpc(): void {
   });
   // The agent checks the input against a strict schema, so the page cannot add a field or a step of its own.
   handle(IPC.createMenuAutomation, input => requireRuntime().createMenuAutomation(input));
+  handle(IPC.createPlaybook, input => requireRuntime().createPlaybook(input));
   // Takes no input: the plan is made from the automations at level 3 or above, and the person confirms it.
   handle(IPC.planAndRun, () => requireRuntime().planAndRun());
   handle(IPC.setLevel, (id, level) => requireRuntime().setLevel(automationId(id), AutonomyLevelSchema.parse(level)));
@@ -350,20 +352,21 @@ function registerIpc(): void {
 }
 
 /** Asks the person before each step the policy marks as needing confirmation. */
-async function approveStep(automation: Automation, step: Step, decision: Decision): Promise<boolean> {
+async function approveStep(automation: Automation, step: Step, decision: Decision): Promise<Approval> {
   const message = describeStep(step);
+  // "Allow for this run" spares a question per step for this run only. Each step still passes the policy first.
   const options: MessageBoxOptions = {
     type: 'question',
-    buttons: ['Allow this step', 'Stop the run'],
-    defaultId: 1,
-    cancelId: 1,
+    buttons: ['Allow this step', 'Allow for this run', 'Stop the run'],
+    defaultId: 2,
+    cancelId: 2,
     title: automation.name,
     message,
     detail: decision.reason,
   };
   const parent = parentWindow();
   const result = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
-  return result.response === 0;
+  return result.response === 0 ? true : result.response === 1 ? 'run' : false;
 }
 
 /**

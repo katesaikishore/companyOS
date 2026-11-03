@@ -27,6 +27,7 @@ import {
   type CapturePermission,
   type CaptureSearchRequest,
   type Decision,
+  type Approval,
   type DraftStep,
   type Executor,
   type HardwareProfile,
@@ -54,7 +55,7 @@ import {
   normalizeAppName,
 } from '@companyos/twin-core';
 import { SPEAKER_MIN_SAMPLES, SPEAKER_MODEL_ID, WHISPER_MODEL_ID } from '@companyos/twin-core';
-import { app, desktopCapturer, systemPreferences } from 'electron';
+import { app, clipboard, desktopCapturer, systemPreferences } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { rmSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -87,7 +88,7 @@ import type { LocalConnectorKind } from './connectors-validate';
 export interface RuntimeOptions {
   userData: string;
   /** Asks a person to approve one step. The main process shows a native dialog. */
-  approve: (automation: Automation, step: Step, decision: Decision) => Promise<boolean>;
+  approve: (automation: Automation, step: Step, decision: Decision) => Promise<Approval>;
   /**
    * Asks the person once whether to start a plan's runs, naming each automation. The main process shows a native dialog.
    * Saying yes starts the runs; each one still asks before any step that acts on an app.
@@ -586,6 +587,10 @@ export class TwinRuntime {
     return this.agent.createMenuAutomation(input);
   }
 
+  createPlaybook(input: unknown): AutomationView {
+    return this.agent.createPlaybook(input);
+  }
+
   /** Confirms, renames, merges or splits one of a day's tasks. The engine checks the decision before it is stored. */
   decideTask(input: unknown): void {
     this.agent.decideTask(input);
@@ -650,6 +655,8 @@ export class TwinRuntime {
         // The automation's own cursor, named after it and coloured, so several runs can be told apart on screen.
         ...(cursor ? { cursor } : {}),
         session: this.handsSession,
+        // Read through functions, so the clipboard is touched only when a step pastes or reads it.
+        clipboard: { readText: () => clipboard.readText(), writeText: text => clipboard.writeText(text) },
         record: entry => {
           const code = entry.code === undefined ? '' : ` code=${entry.code}`;
           console.info(`[agent-desktop] ${entry.step} agent=${entry.agent ?? '-'} exit=${entry.exit}${code} duration=${entry.durationMs}ms`);

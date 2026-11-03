@@ -1,5 +1,5 @@
 import { normalizeAppName } from './classify';
-import { parseWebAddress, resolveStep, type Automation, type Step } from './automation';
+import { parseWebAddress, resolveStep, type Automation, type Locator, type Step } from './automation';
 import { evaluateStep, type Decision, type PolicyContext } from './policy';
 import type { AutonomyLevel } from './types';
 
@@ -47,7 +47,20 @@ export interface Executor {
    * those two steps, before anyone is asked, and a reason blocks the step. The desktop app uses it when its optional
    * agent-desktop program is set but unusable.
    */
-  blockedReason?(op: 'focus_app' | 'press_shortcut' | 'choose_menu'): string | undefined;
+  blockedReason?(op: DesktopOp | 'focus_app' | 'press_shortcut' | 'choose_menu'): string | undefined;
+  /**
+   * The desktop steps, each in one window of the app (the first whose title starts with `window`, or the app's only
+   * window). Each returns true only when the program confirmed the action: a click delivered, text pasted, a key sent,
+   * a field showing exactly the entered text before it is submitted, a field typed into. Each may throw a
+   * StepRefusedError when nothing was done, such as when the element or window was not found.
+   */
+  click?(app: string, window: string | undefined, target: Locator, button: 'left' | 'right'): Promise<boolean>;
+  pasteText?(app: string, window: string | undefined, text: string): Promise<boolean>;
+  pressKey?(app: string, window: string | undefined, key: string): Promise<boolean>;
+  fillField?(app: string, window: string | undefined, target: Locator, text: string, submit: boolean): Promise<boolean>;
+  setField?(app: string, window: string | undefined, target: Locator, text: string): Promise<boolean>;
+  /** The text a check reads: the clipboard, or every piece of text shown in the window. Never kept by the runner. */
+  readText?(app: string, window: string | undefined, source: 'clipboard' | 'window'): Promise<string>;
   /**
    * Runs one step's action and its postcondition with sole use of the desktop's input, so two runs never interleave focus
    * changes, key presses and menu clicks, and one run cannot move focus between another's action and its check. The
@@ -55,6 +68,16 @@ export interface Executor {
    */
   exclusive?<T>(work: () => Promise<T>): Promise<T>;
 }
+
+/** The steps that act in one window through the agent-desktop program. */
+export type DesktopOp = 'click' | 'paste_text' | 'press_key' | 'fill_field' | 'set_field' | 'check_text';
+const DESKTOP_OPS: readonly Step['op'][] = ['click', 'paste_text', 'press_key', 'fill_field', 'set_field', 'check_text'];
+
+/**
+ * A person's answer to one step's approval: no, yes for this step, or yes for every step of this run. The last still
+ * runs each step through the policy, so a denied step stops the run; it only spares the person a question per step.
+ */
+export type Approval = boolean | 'run';
 
 export type RunMode = 'dry_run' | 'supervised' | 'unattended';
 
@@ -87,8 +110,8 @@ export interface RunRequest {
   currentPolicy?: () => PolicyContext;
   /** A global stop request cancels steps that have not started, even if automations are turned back on. */
   shouldStop?: () => boolean;
-  /** Called only for steps the policy marks 'ask', and only in supervised mode. */
-  approve?: (step: Step, decision: Decision) => Promise<boolean>;
+  /** Called only for steps the policy marks 'ask', and only in supervised mode. 'run' approves the rest of this run. */
+  approve?: (step: Step, decision: Decision) => Promise<Approval>;
   /**
    * How long the postcondition of an open or key step waits for the OS to bring the expected app forward. Focus
    * can take a moment to move. Defaults to 1.5 seconds. Tests set it to 0.
@@ -104,7 +127,45 @@ const FAILED_REASON = {
   open_file: 'The file could not be opened.',
   press_shortcut: 'The shortcut could not be pressed.',
   choose_menu: 'The menu item could not be chosen.',
+  click: 'The element could not be clicked.',
+  paste_text: 'The text could not be pasted.',
+  press_key: 'The key could not be pressed.',
+  fill_field: 'The field could not be filled.',
+  set_field: 'The field could not be typed into.',
 } as const;
+
+const DONE_REASON = {
+  click: 'Done. The click was delivered.',
+  paste_text: 'Done. The text was pasted.',
+  press_key: 'Done. The key was pressed.',
+  fill_field: 'Done. The field showed the text before it was submitted.',
+  set_field: 'Done. The text was typed into the field.',
+} as const;
+
+const MISSING_REASON = {
+  click: 'This system cannot click elements yet. Set the agent-desktop program in Settings.',
+  paste_text: 'This system cannot paste text yet. Set the agent-desktop program in Settings.',
+  press_key: 'This system cannot press keys yet. Set the agent-desktop program in Settings.',
+  fill_field: 'This system cannot fill fields yet. Set the agent-desktop program in Settings.',
+  set_field: 'This system cannot type into fields yet. Set the agent-desktop program in Settings.',
+  check_text: 'This system cannot read text yet. Set the agent-desktop program in Settings.',
+} as const;
+
+const EXECUTOR_METHOD = {
+  click: 'click',
+  paste_text: 'pasteText',
+  press_key: 'pressKey',
+  fill_field: 'fillField',
+  set_field: 'setField',
+  check_text: 'readText',
+} as const;
+
+/** The expected values a check could not find in the text it read. Matching ignores runs of spaces and line breaks. */
+export function missingText(text: string, expect: readonly string[]): string[] {
+  const flat = (value: string): string => value.replace(/\s+/g, ' ').trim();
+  const haystack = flat(text);
+  return expect.filter(value => !haystack.includes(flat(value)));
+}
 
 function sameApp(observed: string | undefined, expected: string): boolean {
   return observed !== undefined && normalizeAppName(observed) === normalizeAppName(expected);
@@ -112,9 +173,13 @@ function sameApp(observed: string | undefined, expected: string): boolean {
 
 /** Why this system cannot carry out a step at all, or undefined when it can. */
 function unsupportedReason(step: Step, executor: Executor): string | undefined {
-  if (step.op === 'focus_app' || step.op === 'press_shortcut' || step.op === 'choose_menu') {
-    const blocked = executor.blockedReason?.(step.op);
+  if (step.op === 'focus_app' || step.op === 'press_shortcut' || step.op === 'choose_menu' || DESKTOP_OPS.includes(step.op)) {
+    const blocked = executor.blockedReason?.(step.op as DesktopOp | 'focus_app' | 'press_shortcut' | 'choose_menu');
     if (blocked) return blocked;
+  }
+  if (DESKTOP_OPS.includes(step.op)) {
+    const op = step.op as DesktopOp;
+    if (!executor[EXECUTOR_METHOD[op]]) return MISSING_REASON[op];
   }
   if (step.op === 'open_url' && !executor.openUrl) return 'This system cannot open web addresses yet.';
   if (step.op === 'open_file' && !executor.openFile) return 'This system cannot open files yet.';
@@ -150,6 +215,16 @@ async function perform(step: Step, executor: Executor): Promise<Performed> {
         return { ok: (await executor.pressShortcut?.(step.app, step.shortcut)) === true };
       case 'choose_menu':
         return { ok: (await executor.chooseMenu?.(step.app, step.menu)) === true };
+      case 'click':
+        return { ok: (await executor.click?.(step.app, step.window, step.target, step.button ?? 'left')) === true };
+      case 'paste_text':
+        return { ok: (await executor.pasteText?.(step.app, step.window, step.text)) === true };
+      case 'press_key':
+        return { ok: (await executor.pressKey?.(step.app, step.window, step.key)) === true };
+      case 'fill_field':
+        return { ok: (await executor.fillField?.(step.app, step.window, step.target, step.text, step.submit)) === true };
+      case 'set_field':
+        return { ok: (await executor.setField?.(step.app, step.window, step.target, step.text)) === true };
       default:
         return { ok: false };
     }
@@ -230,6 +305,8 @@ export async function runAutomation(automation: Automation, request: RunRequest,
 
   /** Set when a focus step ran the check that follows it in the same turn, so the loop does not run that check again. */
   let checkedWithFocus = -1;
+  /** Set when the person approved every step of this run. Each step is still checked against the policy. */
+  let approvedForRun = false;
 
   for (const [index, step] of resolved.entries()) {
     if (index === checkedWithFocus) continue;
@@ -250,7 +327,7 @@ export async function runAutomation(automation: Automation, request: RunRequest,
       return finish('blocked');
     }
 
-    let approved = false;
+    let approved = approvedForRun;
     let decision: Decision;
     for (;;) {
       if (request.shouldStop?.()) {
@@ -265,7 +342,10 @@ export async function runAutomation(automation: Automation, request: RunRequest,
       }
       if (decision.decision !== 'ask' || approved) break;
 
-      approved = request.approve ? await request.approve(step, decision) : false;
+      const answer = request.approve ? await request.approve(step, decision) : false;
+      // A yes for the run counts only while a person is there to give it: never for an unattended run.
+      if (answer === 'run' && request.mode === 'supervised') approvedForRun = true;
+      approved = answer !== false;
       if (!approved) {
         record('blocked', 'Not approved.');
         return finish('blocked');
@@ -346,6 +426,51 @@ export async function runAutomation(automation: Automation, request: RunRequest,
         if (performed.ok) {
           passed++;
           record('passed', 'Done. The menu item was chosen and the menu closed.');
+          return undefined;
+        }
+        if (performed.failureReason !== undefined) {
+          record('blocked', FAILED_REASON[step.op], performed.failureReason);
+          return 'blocked';
+        }
+        record('failed', FAILED_REASON[step.op]);
+        return 'failed';
+      }
+
+      if (step.op === 'check_text') {
+        // Reads the clipboard or the window's text, and passes only when every expected value is there. The text read is
+        // compared and dropped; only which values were missing is counted.
+        let text: string | undefined;
+        try {
+          text = await executor.readText?.(step.app, step.window, step.source);
+        } catch (error) {
+          const refusal = refusalMessage(error);
+          if (refusal !== undefined) {
+            record('blocked', 'The text could not be read.', refusal);
+            return 'blocked';
+          }
+        }
+        if (text === undefined) {
+          record('failed', 'The text could not be read.');
+          return 'failed';
+        }
+        const missing = missingText(text, step.expect);
+        if (missing.length === 0) {
+          passed++;
+          record('passed', `Shown: all ${step.expect.length} expected value${step.expect.length === 1 ? '' : 's'}.`);
+          return undefined;
+        }
+        failed++;
+        record('check_failed', `${missing.length} of ${step.expect.length} expected values were not shown.`);
+        return 'failed';
+      }
+
+      if (step.op === 'click' || step.op === 'paste_text' || step.op === 'press_key' || step.op === 'fill_field' || step.op === 'set_field') {
+        // The adapter acts in the named window and confirms the action itself, so true is the postcondition. A refusal
+        // means nothing was done, so the run is blocked; any other failure fails it.
+        const performed = await perform(step, executor);
+        if (performed.ok) {
+          passed++;
+          record('passed', DONE_REASON[step.op]);
           return undefined;
         }
         if (performed.failureReason !== undefined) {

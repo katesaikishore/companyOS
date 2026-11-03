@@ -276,8 +276,10 @@ export function isSiteLikeName(name: string): boolean {
  * into are external, so they need a person.
  */
 export function effectOfOp(op: StepOp, app: string): EffectClass {
-  // Checking focus changes nothing.
-  if (op === 'check_focus') return 'read_only';
+  // Checking focus or reading shown text changes nothing.
+  if (op === 'check_focus' || op === 'check_text') return 'read_only';
+  // A click, pasted text, a key or a filled field does whatever the app does with it, and the twin cannot see into that.
+  if (op === 'click' || op === 'paste_text' || op === 'press_key' || op === 'fill_field' || op === 'set_field') return 'external_effect';
   // A link or a file can trigger an action in the app, and a shortcut or a menu item does whatever the app binds it to.
   // None of it is visible to the twin.
   if (op === 'open_url' || op === 'open_file' || op === 'press_shortcut' || op === 'choose_menu') return 'external_effect';
