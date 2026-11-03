@@ -54,7 +54,7 @@ export interface Executor {
    * a field showing exactly the entered text before it is submitted, a field typed into. Each may throw a
    * StepRefusedError when nothing was done, such as when the element or window was not found.
    */
-  click?(app: string, window: string | undefined, target: Locator, button: 'left' | 'right'): Promise<boolean>;
+  click?(app: string, window: string | undefined, target: Locator, button: 'left' | 'right', count?: 1 | 2): Promise<boolean>;
   /** Pastes text; with `via`, first enters where to paste in a field, checked, all in one turn of the input. */
   pasteText?(app: string, window: string | undefined, text: string, via?: { target: Locator; text: string }): Promise<boolean>;
   pressKey?(app: string, window: string | undefined, key: string): Promise<boolean>;
@@ -226,7 +226,7 @@ async function perform(step: Step, executor: Executor): Promise<Performed> {
       case 'choose_menu':
         return { ok: (await executor.chooseMenu?.(step.app, step.menu)) === true };
       case 'click':
-        return { ok: (await executor.click?.(step.app, step.window, step.target, step.button ?? 'left')) === true };
+        return { ok: (await executor.click?.(step.app, step.window, step.target, step.button ?? 'left', step.count ?? 1)) === true };
       case 'paste_text':
         return { ok: (await executor.pasteText?.(step.app, step.window, step.text, step.via)) === true };
       case 'press_key':

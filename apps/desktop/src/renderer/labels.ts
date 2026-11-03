@@ -97,7 +97,7 @@ export function stepTitle(step: Step, params: readonly Param[]): string {
     case 'choose_menu':
       return `Choose ${step.menu.join(' → ')}`;
     case 'click':
-      return `${step.button === 'right' ? 'Right-click' : 'Click'} ${targetLabel(step.target)}`;
+      return `${step.button === 'right' ? 'Right-click' : step.count === 2 ? 'Double-click' : 'Click'} ${targetLabel(step.target)}`;
     case 'paste_text':
       return `Paste ${textLabel(step.text)}`;
     case 'press_key':

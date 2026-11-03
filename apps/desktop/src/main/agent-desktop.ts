@@ -612,7 +612,7 @@ export function handsExecutor(base: Executor, options: HandsOptions, platform: N
         ? base.chooseMenu(app, menu)
         : outcomeOf(await chooseMenuWithAgentDesktop(options, app, menu)),
     // The desktop steps act in one named window through the program, under the automation's cursor.
-    click: (app, window, target, button) => clickWithAgentDesktop(options, app, window, target, button),
+    click: (app, window, target, button, count) => clickWithAgentDesktop(options, app, window, target, button, count),
     pasteText: (app, window, text, via) => pasteWithAgentDesktop(options, app, window, text, via),
     pressKey: (app, window, key) => pressKeyWithAgentDesktop(options, app, window, key),
     fillField: (app, window, target, text, submit) => fillWithAgentDesktop(options, app, window, target, text, submit),

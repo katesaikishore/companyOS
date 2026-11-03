@@ -50,6 +50,8 @@ const PASTE_SETTLE_MS = 600;
 const VIA_SETTLE_MS = 700;
 /** How long a scrolled element may take to settle in view before it is looked for again. */
 const SCROLL_SETTLE_MS = 500;
+/** How long a field that did not show the text is left before it is filled again. */
+const FILL_RETRY_MS = 600;
 
 interface Match {
   ref?: string;
@@ -175,15 +177,24 @@ function isResult(value: unknown): value is HandsResult {
 }
 
 /** Brings the window forward, then clicks the element: at its centre when it has bounds, otherwise through its ref. */
-async function clickMatch(options: HandsOptions, context: Context, windowId: string, match: Match, button: 'left' | 'right'): Promise<HandsResult> {
+async function clickMatch(
+  options: HandsOptions,
+  context: Context,
+  windowId: string,
+  match: Match,
+  button: 'left' | 'right',
+  count: 1 | 2 = 1,
+): Promise<HandsResult> {
   const focused = await call(options, context, ['focus-window', '--window-id', windowId]);
   if (!focused.result.ok) return focused.result;
   if (match.bounds) {
     const x = Math.round(match.bounds.x + match.bounds.width / 2);
     const y = Math.round(match.bounds.y + match.bounds.height / 2);
-    return (await call(options, context, ['mouse-click', '--xy', `${x},${y}`, '--button', button, '--headed'])).result;
+    const repeat = count === 2 ? ['--count', '2'] : [];
+    return (await call(options, context, ['mouse-click', '--xy', `${x},${y}`, '--button', button, ...repeat, '--headed'])).result;
   }
   if (!match.ref) return refused('not_found', MESSAGES.notFound);
+  if (count === 2) return (await call(options, context, ['double-click', match.ref, '--headed'])).result;
   return (await call(options, context, [button === 'right' ? 'right-click' : 'click', match.ref, '--headed'])).result;
 }
 
@@ -225,7 +236,14 @@ function outcome(result: HandsResult): boolean {
   return false;
 }
 
-export async function clickWithAgentDesktop(options: HandsOptions, app: string, window: string | undefined, target: Locator, button: 'left' | 'right'): Promise<boolean> {
+export async function clickWithAgentDesktop(
+  options: HandsOptions,
+  app: string,
+  window: string | undefined,
+  target: Locator,
+  button: 'left' | 'right',
+  count: 1 | 2 = 1,
+): Promise<boolean> {
   return outcome(
     await recorded(options, 'click', async () => {
       const problem = inputProblem(options, app, window);
@@ -235,7 +253,7 @@ export async function clickWithAgentDesktop(options: HandsOptions, app: string, 
       if (isResult(windowId)) return windowId;
       const match = await locate(options, context, app, windowId, target);
       if (isResult(match)) return match;
-      return clickMatch(options, context, windowId, match, button);
+      return clickMatch(options, context, windowId, match, button, count);
     }),
   );
 }
@@ -309,8 +327,26 @@ export async function fillWithAgentDesktop(
   );
 }
 
-/** Fills one field in a window already chosen: the body of a fill step, and the first half of a paste with `via`. */
+/**
+ * Fills one field in a window already chosen: the body of a fill step, and the first half of a paste with `via`. A field
+ * that does not show the text is cleared with Escape and filled once more, since a busy page can lag behind the paste.
+ */
 async function fill(
+  options: HandsOptions,
+  context: Context,
+  app: string,
+  windowId: string,
+  target: Locator,
+  text: string,
+  submit: boolean,
+): Promise<HandsResult> {
+  const first = await fillOnce(options, context, app, windowId, target, text, submit);
+  if (first.ok || (first.failure !== 'unverified' && first.reason !== MESSAGES.notFocused)) return first;
+  await new Promise(resolve => setTimeout(resolve, FILL_RETRY_MS));
+  return fillOnce(options, context, app, windowId, target, text, submit);
+}
+
+async function fillOnce(
   options: HandsOptions,
   context: Context,
   app: string,

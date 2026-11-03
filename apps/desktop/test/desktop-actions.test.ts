@@ -148,9 +148,10 @@ describe.runIf(STARTS_FAKE_PROGRAM)('the desktop steps through agent-desktop', (
       fillWithAgentDesktop(options({ clipboard: clipboard() }), 'Google Chrome', 'Benchmark', { role: 'group', namePrefix: 'Name box' }, 'Finance!A1:D4', true),
     ).resolves.toBe(false);
     const presses = bad().filter(args => args[0] === 'press').map(args => args[1]);
-    expect(presses).toContain('escape');
+    // Filled twice, each time cleared with Escape, and never submitted.
+    expect(presses.filter(key => key === 'escape')).toHaveLength(2);
     expect(presses).not.toContain('return');
-  });
+  }, 15_000);
 
   it('types into a native field through its ref, and refuses text that would read as an option', async () => {
     const field = { ref_id: '@s1:e5', role: 'textfield', name: 'Name', value: 'untitled folder' };
@@ -196,6 +197,13 @@ describe.runIf(STARTS_FAKE_PROGRAM)('the desktop steps through agent-desktop', (
     expect(calls().at(-1)).toEqual(['mouse-click', '--xy', '917,827', '--button', 'right', '--headed']);
   });
 
+  it('double-clicks at the element’s centre, such as a sheet tab to rename it', async () => {
+    const tab = { ref_id: '@s1:e8', role: 'statictext', name: 'Sheet7', bounds: { x: 100, y: 818, width: 60, height: 18 } };
+    const calls = fake({ find: { statictext: [tab] } });
+    await clickWithAgentDesktop(options(), 'Google Chrome', 'Benchmark', { role: 'statictext', namePrefix: 'Sheet' }, 'left', 2);
+    expect(calls().at(-1)).toEqual(['mouse-click', '--xy', '130,827', '--button', 'left', '--count', '2', '--headed']);
+  });
+
   it('finds a nameless field by its value', async () => {
     const field = { ref_id: '@s1:e7', role: 'textfield', value: 'untitled folder' };
     const calls = fake({ windows: [{ ...WINDOW, title: 'untitled folder Info' }], find: { textfield: [field] } });
@@ -216,7 +224,7 @@ describe.runIf(STARTS_FAKE_PROGRAM)('the desktop steps through agent-desktop', (
     await expect(pasteWithAgentDesktop(options({ clipboard: untouched }), 'Google Chrome', 'Benchmark', '=COUNTIF(A:A,"x")', via)).resolves.toBe(false);
     expect(untouched.writes).not.toContain('=COUNTIF(A:A,"x")');
     expect(bad().filter(args => args[0] === 'press').map(args => args[1])).not.toContain('return');
-  });
+  }, 15_000);
 
   it('runs every call in the session under the automation’s cursor', async () => {
     const session = { id: async () => 'sess-1', style: async () => undefined, forget: () => undefined } as unknown as HandsOptions['session'];

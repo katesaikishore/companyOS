@@ -151,6 +151,8 @@ export const StepSchema = z.discriminatedUnion('op', [
       window: UiLabel.optional(),
       target: LocatorSchema,
       button: z.enum(['left', 'right']).optional(),
+      /** Two for a double-click, such as on a sheet tab to rename it. */
+      count: z.union([z.literal(1), z.literal(2)]).optional(),
     })
     .strict(),
   z
@@ -494,7 +496,7 @@ export function describeStep(step: Step): string {
     case 'choose_menu':
       return `Choose ${step.menu.join(' → ')} in "${step.app}"?`;
     case 'click':
-      return `${step.button === 'right' ? 'Right-click' : 'Click'} ${describeTarget(step.target)} in ${describeWindow(step)}?`;
+      return `${step.button === 'right' ? 'Right-click' : step.count === 2 ? 'Double-click' : 'Click'} ${describeTarget(step.target)} in ${describeWindow(step)}?`;
     case 'paste_text':
       return step.via
         ? `Go to ${describeText(step.via.text)} and paste ${describeText(step.text)} in ${describeWindow(step)}?`

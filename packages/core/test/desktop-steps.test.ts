@@ -91,6 +91,9 @@ describe('the desktop steps', () => {
     expect(describeStep({ op: 'click', app: 'Finder', target: { role: 'button', name: 'OK' }, button: 'right' })).toBe(
       'Right-click the button "OK" in "Finder"?',
     );
+    expect(describeStep({ op: 'click', app: 'Google Chrome', target: { role: 'statictext', namePrefix: 'Sheet' }, count: 2 })).toBe(
+      'Double-click the statictext "Sheet…" in "Google Chrome"?',
+    );
   });
 
   it('matches expected text across runs of spaces and line breaks, and names what is missing', () => {
