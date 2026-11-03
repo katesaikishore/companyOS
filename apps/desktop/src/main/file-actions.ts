@@ -72,7 +72,10 @@ async function walk(folder: string, skip: string, depth: number, out: Found[]): 
       const info = await lstat(path);
       // An empty file is no space to free. A file with no blocks on disk is only in iCloud: reading it would download it.
       if (info.size === 0 || info.blocks === 0) continue;
-      out.push({ path, size: info.size, born: info.birthtimeMs || info.mtimeMs });
+      // The earlier of creation and last change: Linux does not always keep a creation time, and a copy keeps the
+      // original's change time on some systems, so either alone can name the wrong copy as the oldest.
+      const born = Math.min(info.birthtimeMs > 0 ? info.birthtimeMs : Number.POSITIVE_INFINITY, info.mtimeMs);
+      out.push({ path, size: info.size, born });
     } catch {
       // A file that went away while the scan ran is skipped.
     }
