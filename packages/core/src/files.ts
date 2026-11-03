@@ -100,10 +100,17 @@ const NEAR_TIE = 0.4;
 /** The tie a file gets from an organisation it only mentions, such as another bank in a statement's transactions. */
 const MENTION_TIE = 0.5;
 
-/** The knowledge graph: facts and the files they are facts of, the words that reach them, and neighbours between names. */
+/**
+ * The knowledge graph: facts and the files they are facts of, the words that reach them, and neighbours between names.
+ * Files are their rows in the records the graph was built from, so a search adds up ties in one array.
+ */
 export interface FileGraph {
-  /** For each fact, the files it is a fact of. */
-  files: Map<string, string[]>;
+  /** The path of each row. */
+  paths: string[];
+  /** Each row's facts. */
+  rowFacts: string[][];
+  /** For each fact, the rows of the files it is a fact of. */
+  files: Map<string, number[]>;
   /** For each word, the facts it reaches (see factWords), so "icici" finds "org:icici bank" without a scan of every fact. */
   words: Map<string, string[]>;
   /**
@@ -121,44 +128,44 @@ export interface FileGraph {
 }
 
 export function buildGraph(records: readonly FileRecord[]): FileGraph {
-  const files = new Map<string, string[]>();
+  const files = new Map<string, number[]>();
   const together = new Map<string, Map<string, number>>();
-  for (const record of records) {
-    const facts = record.facts ?? [];
+  const rowFacts = records.map(record => record.facts ?? []);
+  rowFacts.forEach((facts, row) => {
     for (const fact of facts) {
-      const paths = files.get(fact);
-      if (paths) paths.push(record.path);
-      else files.set(fact, [record.path]);
+      const rows = files.get(fact);
+      if (rows) rows.push(row);
+      else files.set(fact, [row]);
     }
     const names = facts.filter(fact => NAME_KINDS.has(factKind(fact)));
     for (const fact of names) {
       for (const other of names) {
         if (other === fact) continue;
-        const row = together.get(fact) ?? new Map<string, number>();
-        row.set(other, (row.get(other) ?? 0) + 1);
-        together.set(fact, row);
+        const counts = together.get(fact) ?? new Map<string, number>();
+        counts.set(other, (counts.get(other) ?? 0) + 1);
+        together.set(fact, counts);
       }
     }
-  }
+  });
   const words = new Map<string, string[]>();
-  const reach = new Map<string, Set<string>>();
-  for (const [fact, paths] of files) {
+  const reach = new Map<string, Set<number>>();
+  for (const [fact, rows] of files) {
     for (const word of factWords(fact)) {
       const facts = words.get(word);
       if (facts) facts.push(fact);
       else words.set(word, [fact]);
-      const seen = reach.get(word) ?? new Set<string>();
-      for (const path of paths) seen.add(path);
+      const seen = reach.get(word) ?? new Set<number>();
+      for (const row of rows) seen.add(row);
       reach.set(word, seen);
     }
   }
   const total = Math.max(1, records.length);
   const rarity = new Map<string, number>();
-  for (const [word, paths] of reach) rarity.set(word, Math.log(1 + total / paths.size));
+  for (const [word, rows] of reach) rarity.set(word, Math.log(1 + total / rows.size));
   const near = new Map<string, string[]>();
-  for (const [fact, row] of together) {
+  for (const [fact, counts] of together) {
     const own = files.get(fact)?.length ?? 1;
-    const closest = [...row]
+    const closest = [...counts]
       .filter(([, count]) => count >= 2)
       .map(([other, count]) => [other, count / Math.sqrt(own * (files.get(other)?.length ?? 1))] as const)
       .filter(([, closeness]) => closeness >= NEAR_THRESHOLD)
@@ -167,7 +174,7 @@ export function buildGraph(records: readonly FileRecord[]): FileGraph {
       .map(([other]) => other);
     if (closest.length > 0) near.set(fact, closest);
   }
-  return { files, words, rarity, unknownRarity: Math.log(1 + total), near };
+  return { paths: records.map(record => record.path), rowFacts, files, words, rarity, unknownRarity: Math.log(1 + total), near };
 }
 
 export interface GraphTie {
@@ -177,41 +184,60 @@ export interface GraphTie {
   facts: string[];
 }
 
+const tieOf = (fact: string): number => (factKind(fact) === 'mention' ? MENTION_TIE : 1);
+
 /**
- * How strongly the graph ties each file to a question's words, each given with its other forms, such as a singular. A
- * word ties a file fully when it reaches one of the file's facts, and less when it reaches a neighbour of one of them.
- * The ties add up across the words, each weighed by its rarity, and are divided by the weight of all the words, so a file
- * that is an ICICI bank statement covers "icici bank statement" and a receipt from another bank covers only "bank".
- * Looked up in the word map, so it costs the same however many facts there are.
+ * How strongly the graph ties each row to a question's words, each given with its other forms, such as a singular. A
+ * word ties a file fully when it reaches one of the file's facts, by half when the file only mentions what it reaches,
+ * and less when it reaches a neighbour of one of its facts. The ties add up across the words, each weighed by its rarity,
+ * and are divided by the weight of all the words, so a file that is an ICICI bank statement covers "icici bank
+ * statement" and a receipt from another bank covers only "bank". Looked up in the word map, so it costs the same however
+ * many facts there are.
  */
-export function graphScores(graph: FileGraph, words: readonly (readonly string[])[]): Map<string, GraphTie> {
-  const ties = new Map<string, GraphTie>();
+export function graphTies(graph: FileGraph, words: readonly (readonly string[])[]): Float64Array {
+  const scores = new Float64Array(graph.paths.length);
+  // The best tie of each row for one word, so a word that reaches two of a file's facts counts once.
+  const best = new Float32Array(graph.paths.length);
   let weight = 0;
   for (const forms of words) {
     if (forms.length === 0) continue;
     const rarity = Math.max(...forms.map(form => graph.rarity.get(form) ?? 0)) || graph.unknownRarity;
     weight += rarity;
-    // The best tie of each file for this word, so a word that reaches two of a file's facts counts once.
-    const best = new Map<string, { tie: number; fact?: string }>();
-    const raise = (path: string, tie: number, fact?: string) => {
-      const current = best.get(path);
-      if (!current || tie > current.tie) best.set(path, { tie, fact });
-    };
+    best.fill(0);
     for (const form of forms) {
       for (const fact of graph.words.get(form) ?? []) {
-        const tie = factKind(fact) === 'mention' ? MENTION_TIE : 1;
-        for (const path of graph.files.get(fact) ?? []) raise(path, tie, fact);
-        for (const other of graph.near.get(fact) ?? []) for (const path of graph.files.get(other) ?? []) raise(path, NEAR_TIE);
+        const tie = tieOf(fact);
+        for (const row of graph.files.get(fact) ?? []) if (best[row] < tie) best[row] = tie;
+        for (const other of graph.near.get(fact) ?? []) for (const row of graph.files.get(other) ?? []) if (best[row] < NEAR_TIE) best[row] = NEAR_TIE;
       }
     }
-    for (const [path, { tie, fact }] of best) {
-      const entry = ties.get(path) ?? { score: 0, facts: [] };
-      entry.score += rarity * tie;
-      if (fact && !entry.facts.includes(fact)) entry.facts.push(fact);
-      ties.set(path, entry);
-    }
+    for (let row = 0; row < best.length; row++) if (best[row] > 0) scores[row] += rarity * best[row];
   }
-  for (const entry of ties.values()) entry.score = weight > 0 ? entry.score / weight : 0;
+  if (weight > 0) for (let row = 0; row < scores.length; row++) scores[row] /= weight;
+  return scores;
+}
+
+/** The facts of one row that a question's words reach, the strongest for each word, in the order of the words. */
+export function reachedFacts(graph: FileGraph, row: number, words: readonly (readonly string[])[]): string[] {
+  const reached: string[] = [];
+  for (const forms of words) {
+    let chosen: string | undefined;
+    for (const fact of graph.rowFacts[row] ?? []) {
+      if (!factWords(fact).some(word => forms.includes(word))) continue;
+      if (!chosen || tieOf(fact) > tieOf(chosen)) chosen = fact;
+    }
+    if (chosen && !reached.includes(chosen)) reached.push(chosen);
+  }
+  return reached;
+}
+
+/** The graph's ties of every file the question's words reach, by path, with the facts they reached. */
+export function graphScores(graph: FileGraph, words: readonly (readonly string[])[]): Map<string, GraphTie> {
+  const scores = graphTies(graph, words);
+  const ties = new Map<string, GraphTie>();
+  scores.forEach((score, row) => {
+    if (score > 0) ties.set(graph.paths[row], { score, facts: reachedFacts(graph, row, words) });
+  });
   return ties;
 }
 
@@ -386,7 +412,7 @@ export class FileSearchIndex {
       for (let i = 0; i < this.dim; i++) query[i] /= norm;
     }
     const words = plan.names.map(variants);
-    const tied = graphScores(this.graph, words);
+    const tied = graphTies(this.graph, words);
     const wanted = typesAskedFor(plan.about);
     const scored: Array<{ row: number; score: number; shape: string; nameHits: number; textHits: number; typeFit: boolean; inPeriod: boolean }> = [];
     for (let row = 0; row < this.records.length; row++) {
@@ -401,8 +427,7 @@ export class FileSearchIndex {
         const offset = row * this.dim;
         for (let i = 0; i < this.dim; i++) meaning += query[i] * this.matrix[offset + i];
       }
-      const tie = tied.get(record.path);
-      const graphTie = tie?.score ?? 0;
+      const graphTie = tied[row];
       const type = this.types[row];
       const typeFit = type !== undefined && wanted.includes(type);
       const nameHits = words.filter(forms => forms.some(form => this.lowerNames[row].includes(form))).length;
@@ -431,12 +456,12 @@ export class FileSearchIndex {
     // Why each one matched is put into words only for the results shown, not for every file that scored.
     return scored.slice(0, limit).map(({ row, score, shape, nameHits, textHits, typeFit, inPeriod }) => {
       const record = this.records[row];
-      const tie = tied.get(record.path);
+      const reached = tied[row] > 0 ? reachedFacts(this.graph, row, words) : [];
       const type = this.types[row];
       const why: string[] = shape ? [shape] : [];
-      if (tie && tie.facts.length > 0) why.push(factCard(tie.facts));
-      else if (tie && tie.score > 0) why.push('linked to it');
-      if (typeFit && type && !tie?.facts.includes(`type:${type}`)) why.push(type);
+      if (reached.length > 0) why.push(factCard(reached));
+      else if (tied[row] > 0) why.push('linked to it');
+      if (typeFit && type && !reached.includes(`type:${type}`)) why.push(type);
       if (nameHits > 0) why.push('name matches');
       else if (textHits > 0) why.push('text matches');
       if (inPeriod) why.push('from then');
