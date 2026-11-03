@@ -58,7 +58,7 @@ have the details.
 
 | | macOS | Windows | Linux |
 | --- | --- | --- | --- |
-| **Installer** | `.dmg`, Apple silicon only | NSIS `.exe`, 64-bit, unsigned | `.deb` and `.rpm` |
+| **Installer** | `.dmg`, Apple silicon only (not yet in a release) | NSIS `.exe`, 64-bit, unsigned: in [v0.1.0](https://github.com/katesaikishore/companyOS/releases/tag/v0.1.0) | `.deb` and `.rpm` (not yet in a release) |
 | **App capture** | ✓ | ✓ | ✓ on X11, not on Wayland |
 | **Browser capture** (Chrome, Edge) | ✓ | — | ✓ |
 | **Focus an app** | ✓ | ✓ | ✓ |
@@ -162,9 +162,14 @@ name routines. Typing, clicking and sending are not built, and no release has be
 
 ## Install
 
-Release installers will appear on the [Releases page](https://github.com/katesaikishore/companyOS/releases) once a
-release is published. None has been published yet. The [Install guide](https://docs.qbrin.com/install) has the details
-for each platform. Until then, build the app from source.
+**Windows:** download the installer from [v0.1.0](https://github.com/katesaikishore/companyOS/releases/tag/v0.1.0) and
+run it. It is a 64-bit NSIS `.exe`, built by the release workflow on GitHub-hosted Windows. It is not code-signed, so
+Windows may warn that the publisher is unknown. Its first run on a real Windows machine is still to be checked.
+
+**macOS and Linux:** no installer is attached to a release yet. The macOS build needs a Developer ID certificate and
+notarisation, and the Linux build has a packaging error. Until then, build from source.
+
+The [Install guide](https://docs.qbrin.com/install) has the details for each platform.
 
 ## Build from source
 
@@ -238,6 +243,12 @@ sent anywhere. Its speech model is one of the listed downloads.
 A release is a version tag that matches `apps/desktop/package.json`, for example `v0.1.0`. Pushing it starts
 `.github/workflows/release.yml`, which builds the installers on Ubuntu, macOS and Windows and then creates a draft
 GitHub Release from them. Nothing is published automatically: review the draft and publish it by hand.
+
+The draft is created only when all three platforms build. For `v0.1.0` the Windows build succeeded, but macOS
+(signing secrets not set) and Linux (`desktopName` missing from the packaging config, then an `fpm` failure) did not,
+so no draft was made. The Windows installer is attached to the published v0.1.0 release by the `windows-release`
+workflow, which builds the installer for an existing release tag and uploads it. Run it with
+`gh workflow run windows-release.yml -f tag=v0.1.0`.
 
 A macOS release needs these repository secrets, and its job fails without them, so no draft is created: `CSC_LINK`,
 `CSC_KEY_PASSWORD`, `APPLE_API_KEY_P8`, `APPLE_API_KEY_ID` and `APPLE_API_ISSUER`. Windows signing, `WIN_CSC_LINK` and
