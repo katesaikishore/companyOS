@@ -6,7 +6,7 @@
   "homepage": "https://github.com/katesaikishore/companyOS",
   "main": "dist/main/index.js",
   "scripts": {
-    "build": "tsc -p tsconfig.main.json && tsc -p tsconfig.renderer.json && node scripts/copy-assets.mjs",
+    "build": "tsc -p tsconfig.main.json && tsc -p tsconfig.renderer.json && node scripts/copy-assets.mjs && node scripts/build-ocr.mjs",
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
     "start": "electron .",
     "dist": "node scripts/package.mjs --publish never",
@@ -24,10 +24,8 @@
     "@companyos/twin-core": "0.1.0",
     "@huggingface/transformers": "4.3.1",
     "@receptron/laya": "0.2.0",
-    "@tesseract.js-data/eng": "1.0.0",
     "electron-updater": "^6.8.10",
     "node-llama-cpp": "3.22.1",
-    "tesseract.js": "7.0.0",
     "uiohook-napi": "1.5.5"
   }
 }

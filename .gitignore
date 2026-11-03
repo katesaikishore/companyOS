@@ -2,6 +2,8 @@ node_modules/
 dist/
 out/
 release/
+# The screen-text helper is built from apps/desktop/native/macos-ocr by apps/desktop/scripts/build-ocr.mjs.
+native-bin/
 coverage/
 measure-results/
 .DS_Store

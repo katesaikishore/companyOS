@@ -1,14 +1,11 @@
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { EventEmitter } from 'node:events';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { deriveMediaKey, type ScreenRead } from '@companyos/twin-core';
-import { utilityProcess, type UtilityProcess } from 'electron';
 import { MediaStore } from '../src/main/media-store';
 import {
-  forkOcrWorker,
   ScreenCaptureService,
   type Frame,
   type FrameSource,
@@ -26,7 +23,6 @@ vi.mock('electron', () => ({
   },
   desktopCapturer: { getSources: vi.fn() },
   screen: { getPrimaryDisplay: vi.fn() },
-  utilityProcess: { fork: vi.fn() },
 }));
 
 /** Planted in the frame text. It is checked only by the store, and never printed. */
@@ -343,49 +339,5 @@ describe('ScreenCaptureService', () => {
     await w.service.requestFrame('interval');
     await vi.waitFor(() => expect(w.rows).toHaveLength(1));
     expect(fetchSpy).not.toHaveBeenCalled();
-  });
-});
-
-/** A worker stand-in. Tests send its replies with emit, as the utility process would. */
-class FakeWorker extends EventEmitter {
-  posted: unknown[] = [];
-  postMessage = vi.fn((message: unknown) => {
-    this.posted.push(message);
-  });
-  kill = vi.fn(() => {
-    this.emit('exit', 0);
-  });
-}
-
-describe('forkOcrWorker', () => {
-  let worker: FakeWorker;
-
-  beforeEach(() => {
-    worker = new FakeWorker();
-    vi.mocked(utilityProcess.fork).mockReturnValue(worker as unknown as UtilityProcess);
-  });
-
-  it('resolves with the text the worker replies with', async () => {
-    const engine = forkOcrWorker('/unused/ocr-worker.js');
-    const pending = engine.recognise(Buffer.from('frame'));
-    const request = worker.posted[0] as { id: number; type: string };
-    expect(request.type).toBe('recognise');
-    worker.emit('message', { type: 'text', id: request.id, text: 'hello there' });
-    await expect(pending).resolves.toBe('hello there');
-  });
-
-  it('rejects with a fixed message when the worker reports a failure, and never with its details', async () => {
-    const engine = forkOcrWorker('/unused/ocr-worker.js');
-    const pending = engine.recognise(Buffer.from('frame'));
-    const request = worker.posted[0] as { id: number };
-    worker.emit('message', { type: 'failed', id: request.id, stage: 'recognise' });
-    await expect(pending).rejects.toThrow('The frame could not be read.');
-  });
-
-  it('rejects a read still waiting when the worker exits', async () => {
-    const engine = forkOcrWorker('/unused/ocr-worker.js');
-    const pending = engine.recognise(Buffer.from('frame'));
-    worker.emit('exit', 1);
-    await expect(pending).rejects.toThrow('The frame could not be read.');
   });
 });

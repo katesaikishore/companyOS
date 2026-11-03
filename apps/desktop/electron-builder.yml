@@ -58,16 +58,15 @@ asarUnpack:
   # disk, so the whole bin folder is unpacked. electron-builder unpacks a whole package that contains a .node file, so the
   # package's JavaScript is unpacked with it (checked in an unpacked build).
   - "**/node_modules/onnxruntime-node/bin/**"
-  # tesseract.js starts its recognition worker from a file, and it reads the English data from disk. The worker cannot be
-  # started from inside the archive, so the engine, its wasm core and the data package are unpacked (src/main/ocr-worker.ts).
-  - "**/node_modules/tesseract.js/**"
-  - "**/node_modules/tesseract.js-core/**"
-  - "**/node_modules/@tesseract.js-data/**"
   # transformers.js loads sharp for image inputs, and sharp loads a native library from disk, which asar cannot serve.
   - "**/node_modules/@img/**"
   # uiohook-napi loads its keyboard hook from a .node file, which asar cannot serve. Only the macOS hook is used (src/main/keyboard.ts).
   - "**/node_modules/uiohook-napi/**"
 mac:
+  # Screen text: the Vision helper built by scripts/build-ocr.mjs. It sits in Resources, outside the archive, so it can be run.
+  extraResources:
+    - from: native-bin/companyos-ocr
+      to: companyos-ocr
   # onnxruntime-node and sharp hold the bindings of every platform in their packages. Each build keeps only its own.
   files:
     - "!**/node_modules/onnxruntime-node/bin/napi-v6/{linux,win32}/**"

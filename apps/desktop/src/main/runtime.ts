@@ -87,10 +87,11 @@ import {
   rotateApiToken as replaceApiToken,
   saveChutesKey,
 } from './keys';
+import { spawnNativeOcr } from './native-ocr';
 import { LOCAL_API_HOST, LOCAL_API_PORT, createLocalApi, withheldFromLocalApi, type LocalApi } from './local-api';
 import { MediaStore } from './media-store';
 import { readAccessibleText } from './accessibility';
-import { electronFrameSource, forkOcrWorker, ScreenCaptureService, type Frame, type ScreenContext } from './screen-capture';
+import { electronFrameSource, ScreenCaptureService, type Frame, type ScreenContext } from './screen-capture';
 import { secureInputState } from './secure-input';
 import { detectHardware } from './hardware';
 import { LayaBundleManager, type LayaTestOptions } from './laya';
@@ -308,7 +309,8 @@ export class TwinRuntime {
     );
     this.screen = new ScreenCaptureService({
       source: { grab: () => this.grabFrame() },
-      ocr: forkOcrWorker(join(__dirname, 'ocr-worker.js')),
+      // Apple Vision, through the helper shipped in the app's resources. A development run uses the copy the build made.
+      ocr: spawnNativeOcr(app.isPackaged ? join(process.resourcesPath, 'companyos-ocr') : join(app.getAppPath(), 'native-bin', 'companyos-ocr')),
       media: { write: (mediaId, jpeg) => this.writeFrame(mediaId, jpeg), remove: mediaIds => this.media.remove(mediaIds) },
       sink: { ingestScreen: read => this.keepScreenRead(read) },
       now: () => Date.now(),
