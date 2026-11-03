@@ -70,6 +70,16 @@ const LEVELS: Array<{ value: 3 | 4; label: string; note?: string }> = [
 const READING_LINE_PX = 120;
 
 let activeSection: SectionId = 'capture';
+
+/**
+ * Scrolls a mounted Settings page to its Connectors section and marks it in the nav. The Connectors page in the sidebar
+ * calls it once, when the route opens, so a later refresh does not pull the page back there.
+ */
+export function openConnectorsSection(): void {
+  activeSection = 'connectors';
+  markNav();
+  document.getElementById(sectionDomId('connectors'))?.scrollIntoView();
+}
 let followingScroll = false;
 
 export function settingsView(status: TwinStatus): HTMLElement {

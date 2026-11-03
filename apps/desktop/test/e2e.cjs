@@ -400,7 +400,10 @@ async function main(userDataDir, fixtureDir) {
     log('speech model shows as not installed, and the microphone switch is disabled until it is');
 
     // 7. Suggestions: accept one, then dismiss another.
-    await page.click('[data-testid="nav-suggestions"]');
+    // Suggestions left the sidebar, so the test opens it by its route, as the Overview's "Review all" link does.
+    await page.evaluate(() => {
+      location.hash = '#/suggestions';
+    });
     await page.waitForSelector('[data-testid="suggestion-card"]');
     await shot(page, '06-suggestions-light');
     await page.click('[data-testid="suggestion-accept"]');
@@ -515,15 +518,28 @@ async function main(userDataDir, fixtureDir) {
 
     // 11. The window has one fixed size. Every main route holds the checks in responsiveProblems at 900x600, and the
     // window still reports that it cannot be resized, maximised or made full screen.
-    const ROUTES = ['overview', 'recall', 'suggestions', 'automations', 'readiness', 'knows', 'review', 'ledger', 'settings'];
+    const ROUTES = ['overview', 'tasks', 'recall', 'suggestions', 'automations', 'readiness', 'knows', 'review', 'connectors', 'ledger', 'settings'];
+    // These pages have no sidebar link. They open from the Overview or the command palette, and still have to lay out.
+    const UNLINKED = new Set(['suggestions', 'readiness', 'knows', 'review']);
     for (const route of ROUTES) {
-      if (route === 'review') {
-        // The review has no sidebar link. It opens from the Overview, and its route still has to lay out.
+      if (UNLINKED.has(route)) {
         await page.evaluate(name => { location.hash = `#/${name}`; }, route);
       } else {
         await page.click(`[data-testid="nav-${route}"]`);
       }
       await page.waitForTimeout(250);
+      if (route === 'connectors') {
+        // Connectors opens Settings at its own section, and a status refresh does not pull the page back to the top.
+        const connectorsTop = () => page.$eval('#settings-connectors', element => element.getBoundingClientRect().top);
+        assert.ok(Math.abs(await connectorsTop()) < 200, `Connectors opens at its section: top ${await connectorsTop()}px`);
+        // A theme change rebuilds the page column. The mark on the old column shows when the new one is in place.
+        const theme = await page.evaluate(async () => (await window.twin.status()).config.theme);
+        await page.$eval('main.main', column => { column.dataset.before = '1'; });
+        await page.evaluate(next => window.twin.updateConfig({ theme: next }), theme === 'dark' ? 'light' : 'dark');
+        await page.waitForFunction(() => !document.querySelector('main.main')?.dataset.before, null, { timeout: 10_000 });
+        assert.ok(Math.abs(await connectorsTop()) < 200, 'a rebuild keeps the place on the Connectors page');
+        await page.evaluate(previous => window.twin.updateConfig({ theme: previous }), theme);
+      }
       // The Recall page is reached from its sidebar link, and its view must render at this size.
       if (route === 'recall') await page.waitForSelector('[data-testid="view-recall"]', { timeout: 15_000 });
       await noDocumentScroll(page, `${route} route`);

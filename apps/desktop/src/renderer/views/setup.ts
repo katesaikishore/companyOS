@@ -4,7 +4,7 @@ import { h, type Child } from '../dom.js';
 import { twinCompanion } from '../components/companion.js';
 import { button, chip, exclusionEditor, fact, logo, progressBar, toggleRow } from '../components/ui.js';
 import { formatBytes, formatDecimalBytes } from '../format.js';
-import { browserCaptureNote, fitLabel, layaFraction, layaState, layaStateLabel, modelFraction, modelState, modelStateLabel } from '../labels.js';
+import { browserCaptureNote, downloadLeftLabel, fitLabel, layaFraction, layaState, layaStateLabel, modelFraction, modelState, modelStateLabel } from '../labels.js';
 import { act, bridge, call, errorText, go, pending, requestRender, saveConfig, state } from '../store.js';
 
 const TITLES = ['Welcome', 'What companyOS can see', 'Recall', 'Your device and models', 'Decision model (optional)', 'Start observing'];
@@ -328,13 +328,7 @@ function modelCard(spec: ModelSpec, fit: ModelFit, status: TwinStatus): HTMLElem
     h('p', { class: 'mono small muted' }, `${spec.params} · ${spec.quantization} · ${formatBytes(spec.sizeBytes)}`),
     h('p', { class: 'model-fit' }, h('strong', null, 'Fits your device. '), fit.reason),
     h('dl', { class: 'facts' }, fact('Licence', spec.license), fact('Source', 'huggingface.co')),
-    downloading
-      ? progressBar(modelFraction(status, spec.id), {
-          'data-testid': 'download-progress',
-          'data-model-id': spec.id,
-          'data-progress-model': spec.id,
-        })
-      : undefined,
+    downloading ? downloadProgress(status, spec.id, 'download-progress') : undefined,
     h(
       'div',
       { class: 'model-actions' },
@@ -408,6 +402,25 @@ function alternativesBlock(plan: SetupPlan, status: TwinStatus): HTMLElement {
   );
 }
 
+/**
+ * A model's download: a bar, the bytes received of the total, and the bytes still to come. The count is patched in place
+ * on every poll, so the bar and the text stay in step while the download runs.
+ */
+function downloadProgress(status: TwinStatus, modelId: string, testid: string): HTMLElement {
+  // The byte counts are left out of the page signature, so both texts are patched in place every poll, like the bar.
+  return h(
+    'div',
+    { class: 'download-progress-block', 'data-testid': testid, 'data-model-id': modelId },
+    progressBar(modelFraction(status, modelId), { 'data-progress-model': modelId }),
+    h(
+      'p',
+      { class: 'mono small muted download-progress-text' },
+      h('span', { 'data-label-model': modelId }, modelStateLabel(status, modelId)),
+      h('span', { 'data-testid': 'download-left', 'data-left-model': modelId }, downloadLeftLabel(status, modelId)),
+    ),
+  );
+}
+
 function alternativeRow(fit: ModelFit, plan: SetupPlan, status: TwinStatus): HTMLElement {
   const spec = fit.spec;
   const current = modelState(status, spec.id);
@@ -415,7 +428,7 @@ function alternativeRow(fit: ModelFit, plan: SetupPlan, status: TwinStatus): HTM
   let action: Child;
   if (recommended) action = chip('Recommended above', 'teal');
   else if (current === 'installed') action = chip('Installed', 'teal');
-  else if (current === 'downloading') action = chip('Downloading');
+  else if (current === 'downloading') action = downloadProgress(status, spec.id, 'alt-download-progress');
   else {
     action = button('Install', {
       variant: 'secondary',

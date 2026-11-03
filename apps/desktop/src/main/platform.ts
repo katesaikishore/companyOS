@@ -1,6 +1,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import {
+  isAllowedMenuPath,
   isShellApp,
   macKeyStroke,
   openableFilePath,
@@ -34,6 +35,12 @@ export interface Platform {
    * once it is in front. It returns false if the app never comes forward. Absent where the adapter cannot do it.
    */
   pressShortcut?(app: string, shortcut: string): Promise<boolean>;
+  /**
+   * Presses one checked menu path in the named application, submenus included, without opening a menu. It returns false
+   * when the press could not be made, and throws a StepRefusedError when nothing was pressed and it can say why. Absent
+   * where the adapter cannot do it.
+   */
+  chooseMenu?(app: string, menu: readonly string[]): Promise<boolean>;
   /** Milliseconds between polls. Windows is slower because each PowerShell call is expensive. */
   readonly pollMs: number;
 }
@@ -107,6 +114,51 @@ function run(argv) {
   return 'ok';
 }`;
 
+/**
+ * Presses one menu path through the Accessibility interface, the way an AppleScript menu click does. No menu is opened and
+ * the pointer does not move. Each label is matched to its item's exact name. Only the last item is pressed: every item
+ * before it must hold a submenu, so an ordinary item in the middle of a path is never pressed. The last item must hold
+ * none and must be enabled. The request is one JSON argument, and nothing from the step is ever placed in the script text.
+ * The answer is one word: ok, or why nothing was pressed.
+ */
+const MAC_MENU = `
+function run(argv) {
+  const request = JSON.parse(argv[0]);
+  const events = Application('System Events');
+  const wanted = request.app.toLowerCase();
+  const names = events.processes.name();
+  const at = names.findIndex(name => name.toLowerCase() === wanted);
+  if (at < 0) return 'no-app';
+  const process = events.processes[at];
+  const pick = (items, label) => {
+    const found = items.name().indexOf(label);
+    return found < 0 ? null : items[found];
+  };
+  let item = pick(process.menuBars[0].menuBarItems, request.menu[0]);
+  if (!item) return 'missing';
+  for (let index = 1; index < request.menu.length; index++) {
+    if (item.menus.length !== 1) return 'not-submenu';
+    item = pick(item.menus[0].menuItems, request.menu[index]);
+    if (!item) return 'missing';
+  }
+  if (item.menus.length !== 0) return 'not-item';
+  if (!item.enabled()) return 'disabled';
+  item.click();
+  return 'ok';
+}`;
+
+/** How long a macOS menu press may take, including System Events' wait after a click that opens a modal dialog. */
+const MAC_MENU_TIMEOUT_MS = 15_000;
+
+/** Why a macOS menu press did nothing, in words that are safe to show. Each one means no item was pressed. */
+const MAC_MENU_REFUSALS: Record<string, string> = {
+  'no-app': 'The app is not running, so no menu item was chosen.',
+  missing: 'A menu item was not found. Each label must match the app’s menu, letter for letter.',
+  'not-submenu': 'A label in the middle of the path is not a submenu, so nothing was chosen.',
+  'not-item': 'The last label opens a submenu rather than choosing an item, so nothing was chosen.',
+  disabled: 'The menu item is turned off in the app right now, so nothing was chosen.',
+};
+
 const macOS: Platform = {
   name: 'macos',
   pollMs: 3000,
@@ -140,6 +192,23 @@ const macOS: Platform = {
     } catch {
       return false;
     }
+  },
+  // Needs Accessibility permission for System Events, as the shortcut step does. Tested on macOS with TextEdit.
+  async chooseMenu(app, menu) {
+    if (isShellApp(app) || !isAllowedMenuPath(menu)) return false;
+    let answer: string;
+    try {
+      // A click on an item that opens a modal dialog can block in System Events for about five seconds before it returns,
+      // so the default four seconds would stop a press that worked and report it as failed.
+      const request = JSON.stringify({ app, menu: [...menu] });
+      answer = await run('osascript', ['-l', 'JavaScript', '-e', MAC_MENU, request], undefined, MAC_MENU_TIMEOUT_MS);
+    } catch {
+      return false;
+    }
+    if (answer === 'ok') return true;
+    const refusal = MAC_MENU_REFUSALS[answer];
+    if (refusal) throw new StepRefusedError(refusal);
+    return false;
   },
 };
 
@@ -472,8 +541,8 @@ async function hasGioLaunch(): Promise<boolean> {
 /**
  * The runner's executor for one platform. An optional step is offered only where the adapter has it, so the runner
  * blocks the rest before anyone is asked. Pressing a shortcut is offered on macOS, on Windows and on X11 through xdotool.
- * Opening a link or a file is offered on macOS, on Windows and on X11 when gio is installed. Elsewhere, such as Wayland,
- * the runner blocks those steps before anyone is asked.
+ * Opening a link or a file is offered on macOS, on Windows and on X11 when gio is installed. Choosing a menu path is offered
+ * on macOS. Elsewhere, such as Wayland, the runner blocks those steps before anyone is asked.
  */
 export function executorFor(platform: Platform): Executor {
   return {
@@ -483,6 +552,9 @@ export function executorFor(platform: Platform): Executor {
     ...(platform.openFile ? { openFile: (app: string, path: string) => platform.openFile?.(app, path) ?? Promise.resolve(false) } : {}),
     ...(platform.pressShortcut
       ? { pressShortcut: (app: string, shortcut: string) => platform.pressShortcut?.(app, shortcut) ?? Promise.resolve(false) }
+      : {}),
+    ...(platform.chooseMenu
+      ? { chooseMenu: (app: string, menu: readonly string[]) => platform.chooseMenu?.(app, menu) ?? Promise.resolve(false) }
       : {}),
   };
 }

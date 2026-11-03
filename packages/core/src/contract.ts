@@ -1,5 +1,7 @@
 import type { KindLabel } from './labels';
 import type { AutomationView } from './agent';
+import type { MenuAutomationInput } from './automation';
+import type { PlanFallbackReason } from './llm/planner';
 import type { GateRequirement } from './autonomy';
 import type { EffectClass, TwinConfig, AutonomyLevel, CaptureKind, WindowClass } from './types';
 import type { DownloadState, HardwareProfile, InstalledModel, LayaBundleView, NetworkEntry, SetupPlan } from './models/types';
@@ -370,6 +372,48 @@ export interface TwinStatus {
   cloudAccounts?: CloudAccountView[];
   /** The newest kept run of each write pipe, by pipe id. A pipe with no entry has no kept run. Holds no text. */
   pipeOutputs?: Record<string, PipeOutputSummaryView>;
+  /** Automations ranked by the Recall observations of their apps over the last seven days, highest priority first. */
+  assignedTasks?: AssignedTaskView[];
+  /** Completed and failed runs per local day over the last fourteen days, oldest first and today last. */
+  taskRuns?: number[];
+  /** The latest plan, made since the app started. Undefined before the first. */
+  lastPlan?: PlanView;
+  /** How many runs are in progress now, including ones waiting for an approval or for the desktop's input. */
+  activeRuns?: number;
+}
+
+/** One plan: when it was made, where the choice came from, what it chose, and whether the person said yes. Ids only. */
+export interface PlanView {
+  at: number;
+  source: 'model' | 'rules';
+  /** Why the Recall ranking chose instead of the local model. */
+  reason?: PlanFallbackReason;
+  /** How many automations the plan could choose from. */
+  candidates: number;
+  automationIds: string[];
+  /** How long the choice took, model load included. */
+  durationMs: number;
+  /** Whether the person said yes to running it. Undefined while they are being asked. */
+  confirmed?: boolean;
+}
+
+/** A plan and what each run it started did. A run that could not start has an error sentence instead of a result. */
+export interface PlanRunView {
+  plan: PlanView;
+  runs: Array<{ automationId: string; result?: RunResult; error?: string }>;
+}
+
+/** One automation ranked by what Recall saw of its apps. Holds no text: only counts, a time and the routine's name. */
+export interface AssignedTaskView {
+  automationId: string;
+  name: string;
+  /** Stored screen and audio observations of the routine's apps in the window. Audio counts for the app read just before it. */
+  observations: number;
+  /** The newest of those observations, in ms. */
+  latest: number;
+  /** Observations weighted by recency, times the estimated minutes a week the routine saves. Higher runs first. */
+  priority: number;
+  level: AutonomyLevel;
 }
 
 /** When a write pipe's newest kept run was read, and how many matches it kept. Holds no text. */
@@ -425,6 +469,13 @@ export interface TwinBridge {
   resetDecline(routineId: string): Promise<void>;
   /** Changes the name of an automation. Nothing else about it changes. */
   renameAutomation(automationId: string, name: string): Promise<AutomationView>;
+  /** Makes a draft automation by hand that brings an app forward, then chooses one menu path in it. */
+  createMenuAutomation(input: MenuAutomationInput): Promise<AutomationView>;
+  /**
+   * Plans which automations at level 3 or above to run now, with the local model when it is ready, asks the person once,
+   * then starts the chosen runs together. Each run still asks before any step that acts on an app.
+   */
+  planAndRun(): Promise<PlanRunView>;
   setLevel(automationId: string, level: AutonomyLevel): Promise<AutomationView>;
   promote(automationId: string): Promise<AutomationView>;
   dryRun(automationId: string): Promise<RunResult>;

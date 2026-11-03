@@ -82,7 +82,9 @@ function text(value: unknown, pattern: RegExp, message: string): string {
   return value;
 }
 
-const automationId = (value: unknown) => text(value, /^auto_[a-f0-9]{12}$/, 'Invalid automation id.');
+/** An accepted routine's id (auto_ and 12 hex) or a hand-made menu automation's id (menu- and 32 hex). */
+const automationId = (value: unknown) =>
+  text(value, /^(?:auto_[a-f0-9]{12}|menu-[a-f0-9]{32})$/, 'Invalid automation id.');
 const routineId = (value: unknown) => text(value, /^[a-f0-9]{12}$/, 'Invalid routine id.');
 const modelId = (value: unknown) => text(value, /^[a-z0-9.-]{1,80}$/, 'Invalid model id.');
 const mediaId = (value: unknown) => text(value, /^[0-9a-f]{32}$/, 'Invalid image id.');
@@ -215,6 +217,10 @@ function registerIpc(): void {
     if (!value) throw new Error('Give the automation a name.');
     return requireRuntime().renameAutomation(automationId(id), value);
   });
+  // The agent checks the input against a strict schema, so the page cannot add a field or a step of its own.
+  handle(IPC.createMenuAutomation, input => requireRuntime().createMenuAutomation(input));
+  // Takes no input: the plan is made from the automations at level 3 or above, and the person confirms it.
+  handle(IPC.planAndRun, () => requireRuntime().planAndRun());
   handle(IPC.setLevel, (id, level) => requireRuntime().setLevel(automationId(id), AutonomyLevelSchema.parse(level)));
   handle(IPC.promote, id => requireRuntime().promote(automationId(id)));
   handle(IPC.dryRun, id => requireRuntime().dryRun(automationId(id)));
@@ -360,6 +366,25 @@ async function approveStep(automation: Automation, step: Step, decision: Decisio
   return result.response === 0;
 }
 
+/**
+ * Asks the person once before a plan's runs start, naming each automation. Saying yes starts them together; each one
+ * still asks before any step that acts on an app. The default and cancel answer is Not now.
+ */
+async function confirmPlan(names: string[]): Promise<boolean> {
+  const options: MessageBoxOptions = {
+    type: 'question',
+    buttons: ['Run them', 'Not now'],
+    defaultId: 1,
+    cancelId: 1,
+    title: 'companyOS plan',
+    message: names.length === 1 ? 'Run this automation now?' : `Run these ${names.length} automations now?`,
+    detail: `${names.map(name => `• ${name}`).join('\n')}\n\nThey run together. Each one still asks before any step that acts on an app.`,
+  };
+  const parent = parentWindow();
+  const result = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
+  return result.response === 0;
+}
+
 /** Serves files from the renderer folder only. Anything outside it, or any other host, is a 404. */
 async function serveRenderer(request: Request): Promise<Response> {
   const url = new URL(request.url);
@@ -415,7 +440,9 @@ function createMainWindow(): void {
   // Linux window managers can still maximise a window that reports it cannot be, so any maximise is undone.
   mainWindow.on('maximize', () => mainWindow?.unmaximize());
   mainWindow.once('ready-to-show', () => mainWindow?.show());
-  mainWindow.webContents.setVisualZoomLevelLimits(1, 1);
+  // The call returns a promise that rejects if the page's frame goes away before it applies. Visual zoom is off by default,
+  // so a rejection changes nothing, and it must not become an unhandled rejection that shows an error box at startup.
+  mainWindow.webContents.setVisualZoomLevelLimits(1, 1).catch(() => undefined);
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   mainWindow.webContents.on('will-navigate', event => event.preventDefault());
   mainWindow.on('close', event => {
@@ -424,7 +451,8 @@ function createMainWindow(): void {
       mainWindow?.hide();
     }
   });
-  void mainWindow.loadURL(`${APP_ORIGIN}/index.html`);
+  // A first load cut short, for example by a quick quit, is not an error worth an error box.
+  mainWindow.loadURL(`${APP_ORIGIN}/index.html`).catch(() => undefined);
 }
 
 function createTrayWindow(): void {
@@ -449,7 +477,7 @@ function createTrayWindow(): void {
   // The tray page holds the same bridge as the main window, so it gets the same guards: no new windows, no navigation.
   trayWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   trayWindow.webContents.on('will-navigate', event => event.preventDefault());
-  void trayWindow.loadURL(`${APP_ORIGIN}/tray.html`);
+  trayWindow.loadURL(`${APP_ORIGIN}/tray.html`).catch(() => undefined);
 }
 
 function hideTray(): void {
@@ -555,6 +583,7 @@ async function boot(): Promise<void> {
       // Test-only, and ignored in a packaged build: a local server stands in for Hugging Face in the end-to-end test.
       laya: !app.isPackaged && process.env.COMPANYOS_TEST_LAYA_FIXTURE ? readLayaFixture(process.env.COMPANYOS_TEST_LAYA_FIXTURE) : undefined,
       approve: approveStep,
+      confirmPlan,
       // The test platform has no real input device, so idle time is pinned to zero for it.
       idleSeconds: () => (!app.isPackaged && process.env.COMPANYOS_TEST_FAKE_PLATFORM ? 0 : powerMonitor.getSystemIdleTime()),
       onBattery: () => powerMonitor.onBatteryPower,

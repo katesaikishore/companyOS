@@ -2,7 +2,7 @@ import type { TwinStatus } from '@companyos/twin-core';
 import { h, mount } from './dom.js';
 import { shell } from './components/shell.js';
 import { openCommandPalette } from './commands.js';
-import { layaFraction, layaStateLabel, modelFraction, modelStateLabel } from './labels.js';
+import { downloadLeftLabel, layaFraction, layaStateLabel, modelFraction, modelStateLabel } from './labels.js';
 import { automationDetailView, automationsView } from './views/automations.js';
 import { knowsView } from './views/knows.js';
 import { ledgerView } from './views/ledger.js';
@@ -10,9 +10,10 @@ import { readinessView } from './views/readiness.js';
 import { overviewView } from './views/overview.js';
 import { forgetRecall, recallView } from './views/recall.js';
 import { reviewView } from './views/review.js';
-import { settingsView } from './views/settings.js';
+import { openConnectorsSection, settingsView } from './views/settings.js';
 import { setupView } from './views/setup.js';
 import { suggestionsView } from './views/suggestions.js';
+import { tasksView } from './views/tasks.js';
 import {
   bridge,
   go,
@@ -106,6 +107,10 @@ function patchLive(status: TwinStatus): void {
     const id = el.dataset.labelModel;
     if (id) el.textContent = modelStateLabel(status, id);
   });
+  document.querySelectorAll<HTMLElement>('[data-left-model]').forEach(el => {
+    const id = el.dataset.leftModel;
+    if (id) el.textContent = downloadLeftLabel(status, id);
+  });
   document.querySelectorAll<HTMLElement>('[data-progress-model]').forEach(el => {
     const id = el.dataset.progressModel;
     if (!id) return;
@@ -143,6 +148,10 @@ function viewFor(status: TwinStatus, route: Route): HTMLElement {
       return readinessView(status, route.app);
     case 'review':
       return reviewView(status);
+    case 'tasks':
+      return tasksView(status);
+    case 'connectors':
+      return settingsView(status);
     case 'settings':
       return settingsView(status);
     default:
@@ -174,10 +183,16 @@ function render(): void {
     return;
   }
 
+  // A rebuild replaces the page column, which would put it back at the top. On the same route, keep the place.
+  const sameRoute = key === lastRouteKey;
+  const keptScroll = sameRoute ? appRoot.querySelector<HTMLElement>('main.main')?.scrollTop : undefined;
   lastSignature = signed;
   lastRouteKey = key;
   const wizardOpen = !status.config.setupCompleted || state.wizardForced;
   mount(appRoot, wizardOpen ? setupView(status) : shell(status, state.route, viewFor(status, state.route)));
+  const column = appRoot.querySelector<HTMLElement>('main.main');
+  if (column && keptScroll !== undefined) column.scrollTop = keptScroll;
+  else if (!wizardOpen && !sameRoute && state.route.name === 'connectors') openConnectorsSection();
   patchLive(status);
 }
 

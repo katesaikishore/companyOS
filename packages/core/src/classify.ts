@@ -278,8 +278,9 @@ export function isSiteLikeName(name: string): boolean {
 export function effectOfOp(op: StepOp, app: string): EffectClass {
   // Checking focus changes nothing.
   if (op === 'check_focus') return 'read_only';
-  // A link or a file can trigger an action in the app, and a shortcut does whatever the app binds it to. None of it is visible.
-  if (op === 'open_url' || op === 'open_file' || op === 'press_shortcut') return 'external_effect';
+  // A link or a file can trigger an action in the app, and a shortcut or a menu item does whatever the app binds it to.
+  // None of it is visible to the twin.
+  if (op === 'open_url' || op === 'open_file' || op === 'press_shortcut' || op === 'choose_menu') return 'external_effect';
   // Messages are composed and sent by the person in these apps, and the twin cannot see what is sent.
   const windowClass = classifyApp(app);
   return windowClass === 'mail' || windowClass === 'chat' ? 'external_effect' : 'read_only';

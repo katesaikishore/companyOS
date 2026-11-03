@@ -1,6 +1,6 @@
 import type { NetworkEntry, SuggestionView, TwinStatus } from '@companyos/twin-core';
 import { h, type Child } from '../dom.js';
-import { AUTOMATE, CHEVRON, LOCK, outlineIcon, type Shape, SHIELD, SUGGEST } from '../components/shell.js';
+import { AUTOMATE, CHEVRON, LOCK, outlineIcon, type Shape, SHIELD, SUGGEST, TASKS } from '../components/shell.js';
 import { button, emptyState, pageHeader } from '../components/ui.js';
 import { formatBytes, formatWhen, percent, plural } from '../format.js';
 import {
@@ -16,6 +16,7 @@ import {
 import { tasksNote } from '../review-model.js';
 import { call, pending } from '../store.js';
 import { appColour, type Tone } from '../tones.js';
+import { taskRow } from './tasks.js';
 
 /** Apps shown as overlapping marks before the rest collapse into a count. */
 const MARKS_SHOWN = 3;
@@ -35,15 +36,6 @@ const CLOCK: Shape[] = [
   ['path', { d: 'M12 7v5l3 2' }],
 ];
 
-const TASKS: Shape[] = [
-  ['path', { d: 'M10 6h10' }],
-  ['path', { d: 'M10 12h10' }],
-  ['path', { d: 'M10 18h10' }],
-  ['path', { d: 'M4 6l1.6 1.6L8 5' }],
-  ['path', { d: 'M4 12l1.6 1.6L8 11' }],
-  ['path', { d: 'M4 18l1.6 1.6L8 17' }],
-];
-
 export function overviewView(status: TwinStatus): HTMLElement {
   const now = Date.now();
   return h(
@@ -54,7 +46,15 @@ export function overviewView(status: TwinStatus): HTMLElement {
     h(
       'div',
       { class: 'ov-split' },
-      h('div', { class: 'ov-main' }, inboxTiles(status), waitingPanel(status), networkPanel(status.network, now)),
+      h(
+        'div',
+        { class: 'ov-main' },
+        inboxTiles(status),
+        waitingPanel(status),
+        assignedPanel(status),
+        taskRunsPanel(status.taskRuns ?? []),
+        networkPanel(status.network, now),
+      ),
       h('div', { class: 'ov-side' }, heatmapPanel(status.activity), devicePanel(status, networkCallsThisWeek(status.network, now))),
     ),
   );
@@ -306,6 +306,77 @@ function waitingRow(item: SuggestionView): HTMLElement {
         onClick: () => void call(key, twin => twin.acceptRoutine(item.routineId)),
       },
       'ov-accept',
+    ),
+  );
+}
+
+/** The top few tasks Recall has assigned. The full ranking is on the Tasks page. */
+function assignedPanel(status: TwinStatus): HTMLElement {
+  const tasks = status.assignedTasks ?? [];
+  return h(
+    'section',
+    { class: 'ov-card', 'data-testid': 'overview-assigned', 'aria-labelledby': 'assigned-title' },
+    h(
+      'div',
+      { class: 'ov-card-head' },
+      h('h2', { class: 'ov-card-title', id: 'assigned-title' }, 'Assigned from Recall'),
+      h('span', { class: 'ov-card-note' }, 'Ranked by what Recall saw, past 7 days'),
+      h('a', { class: 'ov-link ov-head-end', href: '#/tasks' }, 'All tasks'),
+    ),
+    tasks.length === 0
+      ? h('div', { class: 'ov-wait-empty' }, emptyState('No tasks assigned yet.', 'Recall assigns a task once it has seen one of your automations’ apps.'))
+      : h('ul', { class: 'ov-wait-list' }, ...tasks.slice(0, MARKS_SHOWN).map((task, index) => taskRow(task, index + 1))),
+  );
+}
+
+/** Completed and failed automation runs per day, over two weeks. Each run is registered here, whatever started it. */
+const TASK_RUN_BAR_PX = 56;
+function taskRunsPanel(runs: readonly number[]): HTMLElement {
+  const total = runs.reduce((sum, count) => sum + count, 0);
+  const peak = Math.max(1, ...runs);
+  const days = runs.length;
+  const label = (index: number): string => {
+    const date = new Date(Date.now() - (days - 1 - index) * 86_400_000);
+    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  };
+  return h(
+    'section',
+    { class: 'ov-card', 'data-testid': 'overview-task-runs', 'aria-labelledby': 'task-runs-title' },
+    h(
+      'div',
+      { class: 'ov-card-head' },
+      h('h2', { class: 'ov-card-title', id: 'task-runs-title' }, 'Task runs'),
+      h('span', { class: 'ov-card-note' }, `Automation runs, past ${days} days`),
+    ),
+    h(
+      'dl',
+      { class: 'ov-figures' },
+      figure('Runs', String(total)),
+      figure('Busiest day', String(Math.max(0, ...runs))),
+    ),
+    h(
+      'div',
+      { class: 'ov-strip', role: 'img', 'aria-label': `${plural(total, 'task run')} in the past ${days} days.` },
+      h(
+        'div',
+        { class: 'ov-strip-bars' },
+        ...runs.map(count =>
+          h(
+            'span',
+            { class: 'ov-strip-day' },
+            count > 0
+              ? h('span', { class: 'ov-strip-seg is-run', style: { height: `${Math.max(3, Math.round((count / peak) * TASK_RUN_BAR_PX))}px` } })
+              : undefined,
+          ),
+        ),
+      ),
+      h(
+        'div',
+        { class: 'ov-strip-axis mono' },
+        h('span', null, label(0)),
+        h('span', null, label(Math.floor(days / 2))),
+        h('span', null, 'Today'),
+      ),
     ),
   );
 }

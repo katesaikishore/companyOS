@@ -292,4 +292,27 @@ describe('capture index, image references and app deletion', () => {
     expect(store.deleteCaptureForApp('Notes')).toEqual({ mediaIds: [] });
     store.close();
   });
+
+  it('counts an audio segment for the app read just before it, within ten minutes', () => {
+    const store = temps.track(new EncryptedStore(freshDir(), randomBytes(32)));
+    const minute = 60_000;
+    // Before any screen read: no app to count it for.
+    store.appendCapture(audio('a-0', CUT - minute, 'before anything'));
+    store.appendCapture(screen('s-1', CUT, 'inbox', { app: 'Mail' }));
+    // Same time as the read: the read comes first, so it counts for Mail.
+    store.appendCapture(audio('a-1', CUT, 'same time'));
+    store.appendCapture(audio('a-2', CUT + 9 * minute, 'still Mail'));
+    store.appendCapture(audio('a-3', CUT + 11 * minute, 'too long after'));
+    store.appendCapture(screen('s-2', CUT + 20 * minute, 'sheet', { app: 'Numbers' }));
+    store.appendCapture(audio('a-4', CUT + 21 * minute, 'Numbers now'));
+    // A read with no app: the audio after it is not counted for the app before.
+    store.appendCapture(screen('s-3', CUT + 30 * minute, 'login', { app: null }));
+    store.appendCapture(audio('a-5', CUT + 31 * minute, 'no app'));
+    const evidence = store.captureEvidence(CUT - 2 * minute, CUT + 20 * minute);
+    expect(evidence.sort((a, b) => a.app.localeCompare(b.app))).toEqual([
+      { app: 'Mail', count: 3, recent: 0, latest: CUT + 9 * minute },
+      { app: 'Numbers', count: 2, recent: 2, latest: CUT + 21 * minute },
+    ]);
+    store.close();
+  });
 });

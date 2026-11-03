@@ -18,6 +18,7 @@ import {
   type BundleSpec,
   type DownloadState,
   type ModelSpec,
+  type ModelTemplate,
   type NetworkEntry,
   type TwinAgent,
   type WorkerChannel,
@@ -257,20 +258,47 @@ export function forkModelWorker(workerPath: string): WorkerChannel {
   };
 }
 
+/** The worker keeps the model in memory only while it is in use, then stops. */
+const WORKER_IDLE_STOP_MS = 5 * 60_000;
+
+/**
+ * One client per model file and prompt template, shared by every job that uses the local model, so naming and planning
+ * share one utility process and one copy of the model in memory. A client that one job stopped starts a new worker on the
+ * next request, so a stop never leaves another job without a model.
+ */
+export class SharedModelClients {
+  private readonly clients = new Map<string, LocalModelClient>();
+
+  constructor(private readonly options: { models: ModelManager; workerPath: string }) {}
+
+  open(modelPath: string, template: ModelTemplate): LocalModelClient {
+    const key = `${modelPath}\u0000${template}`;
+    let client = this.clients.get(key);
+    if (!client) {
+      client = new LocalModelClient({
+        modelPath,
+        modelsDir: this.options.models.directory,
+        template,
+        start: () => forkModelWorker(this.options.workerPath),
+        idleStopMs: WORKER_IDLE_STOP_MS,
+      });
+      this.clients.set(key, client);
+    }
+    return client;
+  }
+}
+
 export interface RoutineNamerOptions {
   agent: TwinAgent;
   models: ModelManager;
-  /** The compiled worker, next to this module. */
-  workerPath: string;
+  /** The clients the naming job shares with the planner. */
+  clients: SharedModelClients;
   /** Seconds since the last keyboard or mouse input. */
   idleSeconds: () => number;
   onBattery: () => boolean;
   /** The chat model this device was recommended, when there is one. */
   preferredModelId: () => Promise<string | undefined>;
 }
-
-/** The worker keeps the model in memory only while it is in use, then stops. */
-const WORKER_IDLE_STOP_MS = 5 * 60_000;
 
 /**
  * Wires the engine's naming job to this device: the models folder, the utility process that runs the model, and the
@@ -286,14 +314,7 @@ export function createRoutineNamer(options: RoutineNamerOptions): RoutineNamingJ
     preferredModelId: options.preferredModelId,
     modelPath: spec => models.pathFor(spec),
     verify: spec => models.hasVerifiedFile(spec),
-    openModel: (modelPath, template) =>
-      new LocalModelClient({
-        modelPath,
-        modelsDir: models.directory,
-        template,
-        start: () => forkModelWorker(options.workerPath),
-        idleStopMs: WORKER_IDLE_STOP_MS,
-      }),
+    openModel: (modelPath, template) => options.clients.open(modelPath, template),
     allowed: () => modelWorkAllowed({ onBattery: options.onBattery(), idleSeconds: options.idleSeconds() }),
   });
 }

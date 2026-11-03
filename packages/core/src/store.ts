@@ -59,6 +59,11 @@ const CAPTURE_COLLECTION_OF: Readonly<Record<CaptureKind, CaptureCollection>> = 
 export const MAX_CAPTURE_HITS = 500;
 const CAPTURE_SNIPPET_TOKENS = 12;
 const CAPTURE_SCAN_CHARS = 240;
+/**
+ * How long after a screen read an audio segment still counts for that read's app. An unchanged screen is not read again,
+ * so a call over one still window can run for minutes with no new read.
+ */
+const AUDIO_APP_WINDOW_MS = 10 * 60_000;
 
 /**
  * One captured item to store. The text goes into the search index only. body is stored as JSON and should not repeat
@@ -216,6 +221,33 @@ export class EncryptedStore {
         );
       })();
     });
+  }
+
+  /**
+   * Screen and audio observations per app since a time: how many, and when the newest was. Holds no text. Audio is stored
+   * without an app, so a segment counts for the app of the screen read just before it, when that read is no more than
+   * AUDIO_APP_WINDOW_MS older. A read with no app, or none in that time, leaves the segment uncounted. Nothing is stored
+   * for this: the app is worked out each time from the order of the rows.
+   */
+  captureEvidence(sinceTs: number, recentSinceTs: number): Array<{ app: string; count: number; recent: number; latest: number }> {
+    if (!this.hasCaptureIndex()) return [];
+    // Each screen read starts a group, and the audio after it joins that group. At the same time, the screen read comes first.
+    return this.conn()
+      .prepare(
+        `WITH seen AS (
+           SELECT kind, ts, app,
+             COUNT(CASE WHEN kind = 'screen' THEN 1 END) OVER (ORDER BY ts, kind DESC ROWS UNBOUNDED PRECEDING) AS grp
+           FROM capture_fts WHERE ts >= ? AND kind IN ('screen', 'audio')
+         ), placed AS (
+           SELECT kind, ts,
+             FIRST_VALUE(app) OVER (PARTITION BY grp ORDER BY ts, kind DESC) AS app,
+             FIRST_VALUE(ts) OVER (PARTITION BY grp ORDER BY ts, kind DESC) AS readTs
+           FROM seen
+         )
+         SELECT app, COUNT(*) AS count, SUM(CASE WHEN ts >= ? THEN 1 ELSE 0 END) AS recent, MAX(ts) AS latest FROM placed
+         WHERE app IS NOT NULL AND (kind = 'screen' OR ts - readTs <= ?) GROUP BY app`,
+      )
+      .all(sinceTs, recentSinceTs, AUDIO_APP_WINDOW_MS) as Array<{ app: string; count: number; recent: number; latest: number }>;
   }
 
   /**
