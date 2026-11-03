@@ -94,6 +94,9 @@ name routines. Typing, clicking and sending are not built, and no release has be
   has no install control in setup or Settings yet.
 - **Today's tasks.** Each day's work is grouped into tasks by fixed rules: app names and the breaks between them. You
   confirm, rename, merge or split each task in the review. Only ids and your action are kept, plus any name you typed.
+- **Your day.** On the Overview, Write my recap has a local model (Qwen3 4B through Ollama) read today's tasks, screen
+  text and speech, and write what you worked on and what is still open. Times and apps come from the tasks; typed text
+  and connector text are never used.
 - **Routines.** Repeated sequences on at least three different days are suggested. With browser capture on, a web site
   is its own step. An unknown app is mined once it recurs on three days, unless its name looks like a web address.
   Shells, script hosts, terminals and system processes, such as Finder or Explorer, are never mined. Each suggestion

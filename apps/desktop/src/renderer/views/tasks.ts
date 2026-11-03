@@ -394,7 +394,7 @@ function assignedPanel(status: TwinStatus): HTMLElement {
 }
 
 /** One assigned task: its rank, what Recall saw, its level, and a link to the automation that runs it. */
-export function taskRow(task: AssignedTaskView, rank: number): HTMLElement {
+function taskRow(task: AssignedTaskView, rank: number): HTMLElement {
   return h(
     'li',
     { class: 'ov-wait-row', 'data-testid': 'task-row' },

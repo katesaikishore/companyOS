@@ -38,6 +38,7 @@ export const IPC = {
   requestPermission: 'twin:request-permission',
   openPrivacySettings: 'twin:open-privacy-settings',
   proposeTasks: 'twin:propose-tasks',
+  dayRecap: 'twin:day-recap',
   startTask: 'twin:start-task',
   stopTask: 'twin:stop-task',
   answerTaskStep: 'twin:answer-task-step',

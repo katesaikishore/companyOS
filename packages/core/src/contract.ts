@@ -8,6 +8,7 @@ import type { DownloadState, HardwareProfile, InstalledModel, LayaBundleView, Ne
 import type { RunResult } from './runner';
 import type { TaskDecision } from './tasks';
 import type { ProposedTask } from './operator/understand';
+import type { DayRecap } from './recap';
 
 /**
  * The contract between the desktop main process and its pages (the app and the tray).
@@ -600,6 +601,8 @@ export interface TwinBridge {
    * model for one next step per piece of work. Proposals only: nothing runs until startTask.
    */
   proposeTasks(): Promise<ProposedTask[]>;
+  /** The recap of a day (YYYY-MM-DD, today when absent), written by the local model from that day's tasks, screen text and speech. */
+  dayRecap(day?: string): Promise<DayRecap>;
   /** Starts a task. One task runs at a time. Steps that may send, share, delete or sign in wait for answerTaskStep. */
   startTask(request: OperatorTaskRequest): Promise<void>;
   /** Stops the running task. A step that waits for the person is declined. */

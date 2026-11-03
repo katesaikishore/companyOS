@@ -435,3 +435,28 @@
 .ov-fact.is-wide dd {
   text-align: left;
 }
+
+/* Today's recap. */
+.ov-recap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ov-recap-summary {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.ov-recap-head {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.ov-recap-loops {
+  margin: 0;
+  padding-left: 18px;
+  line-height: 1.45;
+}

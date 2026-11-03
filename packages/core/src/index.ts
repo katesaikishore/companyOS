@@ -54,3 +54,4 @@ export * from './week/ahead';
 export * from './operator/actions';
 export * from './operator/loop';
 export * from './operator/understand';
+export * from './recap';

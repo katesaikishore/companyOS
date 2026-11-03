@@ -1,4 +1,4 @@
-import type { CaptureHitView, HardwareProfile, ProposedTask, SetupPlan, TwinBridge, TwinConfig, TwinStatus } from '@companyos/twin-core';
+import type { CaptureHitView, DayRecap, HardwareProfile, ProposedTask, SetupPlan, TwinBridge, TwinConfig, TwinStatus } from '@companyos/twin-core';
 import type { RecallKind, RecallRange } from './recall-model.js';
 
 export type Route =
@@ -64,6 +64,8 @@ export const state = {
   task: { goal: '', app: 'TextEdit', shareMemory: false },
   /** Tasks proposed from the screen text, newest search only. Unset until the person asks. */
   proposals: undefined as ProposedTask[] | undefined,
+  /** Today's recap, once the person asks for it. It is kept in memory only, and written again on request. */
+  recap: undefined as DayRecap | undefined,
 };
 
 let renderer: (() => void) | undefined;

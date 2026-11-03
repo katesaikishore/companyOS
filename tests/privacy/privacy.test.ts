@@ -1,4 +1,4 @@
-import { DEFAULT_CONFIG, TwinAgent, dayKeyOf, templateUrl } from '@companyos/twin-core';
+import { DEFAULT_CONFIG, TwinAgent, dayKeyOf, templateUrl, writeRecap, type CompletionRequest } from '@companyos/twin-core';
 import childProcess from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import https from 'node:https';
@@ -227,6 +227,16 @@ describe('the local API is the one documented place where stored screen and micr
     const agent = new TwinAgent({ dataDir: storeDir, dataKey: randomBytes(32), now: () => at(10, 0) });
     const token = randomBytes(24).toString('base64url');
     const source = 'folder-source-api';
+    // The recap is written from the engine's raw search too, by a stand-in model that keeps what it was shown. Only screen and
+    // microphone text may reach it, whatever the engine holds for the block.
+    const shown: CompletionRequest[] = [];
+    const model = {
+      async complete(request: CompletionRequest) {
+        shown.push(request);
+        return { summary: 'An invoice and a meeting.', items: [{ task: 1, title: 'Invoice', detail: 'Worked on an invoice.' }], open_loops: [] };
+      },
+    };
+    const block = { id: 't1', name: 'Excel', renamed: false, apps: ['microsoft excel'], startTs: at(0, 11), endTs: at(0, 13), segments: [], confirmed: false };
     // The engine's raw search is wired in, so the server's own filter is what keeps typed and connector text out of a reply.
     const api = createLocalApi({
       host: '127.0.0.1',
@@ -295,6 +305,16 @@ describe('the local API is the one documented place where stored screen and micr
 
       const posted = await fetch(`${base}/v1/search`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
       expect(posted.status).toBe(405);
+
+      // The recap is written from the engine's raw search for the block. Its model sees the screen and microphone text, and
+      // neither the typed text nor the connector text the engine holds for the same hours.
+      await writeRecap({ day: dayKeyOf(at(0, 12)), tasks: [block] }, agent.searchCapture({ text: '', from: block.startTs, to: block.endTs }), model);
+      expect(shown).toHaveLength(1);
+      const prompt = `${shown[0].system}\n${shown[0].prompt}`;
+      expect(prompt).toContain(CANARIES.screenOcr);
+      expect(prompt).toContain(CANARIES.audioTranscript);
+      expect(prompt).not.toContain(CANARIES.typedText);
+      expect(prompt).not.toContain(CANARIES.connectorText);
     } finally {
       await api.stop();
       agent.close();

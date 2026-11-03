@@ -245,6 +245,10 @@ function registerIpc(): void {
   handle(IPC.decideTask, decision => requireRuntime().decideTask(decision));
 
   handle(IPC.proposeTasks, () => requireRuntime().proposeTasks());
+  handle(IPC.dayRecap, day => {
+    if (day !== undefined && (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day))) throw new Error('Invalid day.');
+    return requireRuntime().dayRecap(day);
+  });
 
   // The operator checks every step of a task. Here only the request's shape is checked.
   handle(IPC.startTask, request => {

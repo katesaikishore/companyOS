@@ -1,7 +1,8 @@
-import type { NetworkEntry, TwinStatus } from '@companyos/twin-core';
+import type { DayRecap, NetworkEntry, TwinStatus } from '@companyos/twin-core';
 import { h, type Child } from '../dom.js';
 import { LOCK, outlineIcon, SHIELD } from '../components/shell.js';
-import { emptyState, pageHeader } from '../components/ui.js';
+import { button, emptyState, pageHeader } from '../components/ui.js';
+import { act, bridge, pending, state } from '../store.js';
 import { formatBytes, plural } from '../format.js';
 import {
   NETWORK_DAYS,
@@ -12,10 +13,7 @@ import {
   rhythmLevels,
   summaryLine,
 } from '../overview-model.js';
-import { taskRow } from './tasks.js';
 
-/** Apps shown as overlapping marks before the rest collapse into a count. */
-const MARKS_SHOWN = 3;
 /** The height of a full network bar, in pixels. */
 const BAR_PX = 56;
 
@@ -32,7 +30,7 @@ export function overviewView(status: TwinStatus): HTMLElement {
       h(
         'div',
         { class: 'ov-main' },
-        assignedPanel(status),
+        recapPanel(status),
         taskRunsPanel(status.taskRuns ?? []),
         networkPanel(status.network, now),
       ),
@@ -49,22 +47,82 @@ function overviewHeader(status: TwinStatus): HTMLElement {
   );
 }
 
-/** The top few tasks Recall has assigned. The full ranking is on the Tasks page. */
-function assignedPanel(status: TwinStatus): HTMLElement {
-  const tasks = status.assignedTasks ?? [];
+/**
+ * Today's recap: what the person worked on and what is still open, written by the local model on request from today's
+ * tasks, screen text and speech. Times and apps come from the stored tasks; the model only names and describes them.
+ */
+function recapPanel(status: TwinStatus): HTMLElement {
+  const recap = state.recap;
+  const writing = pending('recap');
+  const capturing = status.config.screenCaptureEnabled;
   return h(
     'section',
-    { class: 'ov-card', 'data-testid': 'overview-assigned', 'aria-labelledby': 'assigned-title' },
+    { class: 'ov-card', 'data-testid': 'overview-recap', 'aria-labelledby': 'recap-title' },
     h(
       'div',
       { class: 'ov-card-head' },
-      h('h2', { class: 'ov-card-title', id: 'assigned-title' }, 'Assigned from Recall'),
-      h('span', { class: 'ov-card-note' }, 'Ranked by what Recall saw, past 7 days'),
-      h('a', { class: 'ov-link ov-head-end', href: '#/tasks' }, 'All tasks'),
+      h('h2', { class: 'ov-card-title', id: 'recap-title' }, 'Your day'),
+      h('span', { class: 'ov-card-note' }, 'Written on this Mac from today’s work'),
+      button(recap ? 'Write again' : 'Write my recap', {
+        variant: recap ? undefined : 'primary',
+        testid: 'recap-write',
+        disabled: writing,
+        onClick: () =>
+          void act('recap', async () => {
+            state.recap = await bridge().dayRecap();
+          }),
+      }, 'ov-head-end'),
     ),
-    tasks.length === 0
-      ? h('div', { class: 'ov-wait-empty' }, emptyState('No tasks assigned yet.', 'Recall assigns a task once it has seen one of your automations’ apps.'))
-      : h('ul', { class: 'ov-wait-list' }, ...tasks.slice(0, MARKS_SHOWN).map((task, index) => taskRow(task, index + 1))),
+    writing
+      ? h('p', { class: 'muted small', 'data-testid': 'recap-writing' }, 'Reading today’s work and writing the recap. This takes up to a minute.')
+      : !recap
+        ? h(
+            'div',
+            { class: 'ov-wait-empty' },
+            emptyState(
+              'What did you work on today?',
+              capturing
+                ? 'The twin reads today’s tasks, the text on your screen and what was said, and writes a short recap with what is still open.'
+                : 'The recap uses today’s tasks. Turn on screen text in Settings so it can also say what the work was about.',
+            ),
+          )
+        : recapBody(recap),
+  );
+}
+
+function recapBody(recap: DayRecap): HTMLElement {
+  const time = (ts: number) => new Date(ts).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  return h(
+    'div',
+    { class: 'ov-recap', 'data-testid': 'recap-body' },
+    h('p', { class: 'ov-recap-summary', 'data-testid': 'recap-summary' }, recap.summary),
+    recap.items.length > 0
+      ? h(
+          'ul',
+          { class: 'ov-wait-list' },
+          ...recap.items.map(item =>
+            h(
+              'li',
+              { class: 'ov-wait-row', 'data-testid': 'recap-item' },
+              h(
+                'span',
+                { class: 'ov-wait-copy' },
+                h('span', { class: 'ov-wait-name' }, item.title),
+                h('span', { class: 'ov-wait-meta' }, item.detail),
+                h('span', { class: 'ov-wait-meta mono' }, `${time(item.startTs)}–${time(item.endTs)} · ${plural(item.minutes, 'minute')} · ${item.apps.join(', ')}`),
+              ),
+            ),
+          ),
+        )
+      : undefined,
+    recap.openLoops.length > 0
+      ? h('div', { class: 'ov-recap-open' }, h('h3', { class: 'ov-recap-head' }, 'Still open'), h('ul', { class: 'ov-recap-loops', 'data-testid': 'recap-open' }, ...recap.openLoops.map(loop => h('li', null, loop))))
+      : undefined,
+    h(
+      'p',
+      { class: 'muted small mono' },
+      `From ${plural(recap.basis.tasks, 'task')}, ${plural(recap.basis.screenReads, 'screen read')} and ${plural(recap.basis.speech, 'speech item')} · ${plural(recap.basis.activeMinutes, 'active minute')}`,
+    ),
   );
 }
 

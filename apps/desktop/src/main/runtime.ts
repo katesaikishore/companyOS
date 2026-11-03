@@ -58,7 +58,7 @@ import {
   normalizeAppName,
 } from '@companyos/twin-core';
 import { SPEAKER_MIN_SAMPLES, SPEAKER_MODEL_ID, WHISPER_MODEL_ID } from '@companyos/twin-core';
-import { discoverFromScreen, proposeTasks, type ProposedTask, type ScreenDiscovery } from '@companyos/twin-core';
+import { discoverFromScreen, proposeTasks, recapBlocks, writeRecap, type DayRecap, type ProposedTask, type ScreenDiscovery } from '@companyos/twin-core';
 import { readSurface } from './app-surface';
 import { createOllamaChat, createOllamaEmbedder, createOllamaVision, visionModelReady } from './vision-ollama';
 import type { OperatorModel, OperatorTaskRequest } from '@companyos/twin-core';
@@ -263,6 +263,8 @@ export class TwinRuntime {
   private apiState: LocalApiState = 'off';
   private localApi: LocalApi | undefined;
   private apiToken: string | undefined;
+  /** Recaps being written, by day, so a second request for the same day waits for the first. */
+  private readonly recapsRunning = new Map<string, Promise<DayRecap>>();
   /** API and token changes run one at a time, as browser capture changes do. */
   private apiChanges: Promise<void> = Promise.resolve();
   /** Runs the saved pipes on their schedules. It starts and stops with the runtime. Its last-run times stay in memory. */
@@ -668,6 +670,33 @@ export class TwinRuntime {
       model: createOllamaChat({ record }),
       excludedApps: this.agent.configuration.excludedApps,
     });
+  }
+
+  /**
+   * The recap of one local day, today by default, written by the local model. Recall search returns the newest items
+   * first and at most a few hundred, so screen text and speech are read block by block, which spreads the samples over the
+   * day instead of its last few minutes. One recap per day is written at a time; asking again while it runs gets the same
+   * answer. Typed text and imported connector text are not used.
+   */
+  dayRecap(day?: string): Promise<DayRecap> {
+    if (day !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(day)) return Promise.reject(new Error('A day is written as YYYY-MM-DD.'));
+    const view = this.agent.dayTasks(day);
+    const running = this.recapsRunning.get(view.day);
+    if (running) return running;
+    const hits: CaptureHitView[] = [];
+    for (const block of recapBlocks(view)) {
+      for (const kind of ['screen', 'audio'] as const) {
+        try {
+          hits.push(...this.agent.searchCapture({ text: '', kind, from: block.startTs, to: block.endTs }));
+        } catch {
+          // A channel with nothing stored for the block has nothing to add.
+        }
+      }
+    }
+    const record = (entry: NetworkEntry): void => this.agent.recordNetworkCall(entry);
+    const job = writeRecap(view, hits, createOllamaChat({ record })).finally(() => this.recapsRunning.delete(view.day));
+    this.recapsRunning.set(view.day, job);
+    return job;
   }
 
   /** Starts a task from the Tasks page. The operator checks every step; this only passes the request on. */
