@@ -21,7 +21,6 @@ export const COPY = {
   routinesEmpty: 'No routines yet.',
   routinesEmptyText: 'The twin needs about three days of repetition to notice one.',
   forget: 'Forget',
-  openAutomation: 'Open automation',
   declined: 'Things you said no to',
   declinedEmpty: 'Nothing declined.',
   declinedEmptyText: 'Routines you say not now to, or dismiss, are listed here. Reset lets the twin suggest one again.',

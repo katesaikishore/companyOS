@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, posix, win32, type PlatformPath } from 'node:path';
 
 /** The name the extension and the native messaging manifests both use. Chrome, Edge and Firefox look the host up by it. */
-export const NATIVE_HOST_NAME = 'com.companyos.twin';
+const NATIVE_HOST_NAME = 'com.companyos.twin';
 
 /**
  * The ID Chrome gives the unpacked extension in apps/browser-ext/src/manifest.json, which is derived from its
@@ -12,13 +12,13 @@ export const NATIVE_HOST_NAME = 'com.companyos.twin';
 export const EXTENSION_ID = 'bpgbkfplkfblaedljnikfhkebkkleini';
 
 /** The browsers that can load the host. Firefox names its extension by an add-on ID, not by a key. */
-export type NativeBrowser = 'chrome' | 'edge' | 'firefox';
+type NativeBrowser = 'chrome' | 'edge' | 'firefox';
 
 /** The platforms the browser bridge runs on. Its socket is a Unix socket, so only these two turn capture on. */
 type BridgePlatform = 'darwin' | 'linux';
 
 /** The platforms that can register the native host. Windows does it per user, in the registry. */
-export type NativeHostPlatform = BridgePlatform | 'win32';
+type NativeHostPlatform = BridgePlatform | 'win32';
 
 /** Where each browser keeps its per-user manifest on macOS and Linux, relative to the home folder. */
 const MANIFEST_FOLDERS: Readonly<Record<BridgePlatform, Readonly<Record<NativeBrowser, readonly string[]>>>> = {
@@ -95,7 +95,7 @@ export function nativeHostScript(options: { packaged: boolean; resourcesPath: st
     : join(options.mainDir, '..', '..', '..', 'browser-ext', 'native-host', 'host.js');
 }
 
-export interface NativeHostOptions {
+interface NativeHostOptions {
   /** The app's data folder (Electron's userData). */
   userData: string;
   /** The home folder, where the macOS and Linux manifest folders live. */
@@ -114,9 +114,9 @@ export interface NativeHostOptions {
 }
 
 /** Runs reg.exe with a list of arguments, never through a shell. */
-export type RegistryRunner = (args: readonly string[]) => void;
+type RegistryRunner = (args: readonly string[]) => void;
 
-export interface NativeHostManifest {
+interface NativeHostManifest {
   name: string;
   description: string;
   path: string;
@@ -125,14 +125,14 @@ export interface NativeHostManifest {
   allowed_extensions?: string[];
 }
 
-export interface ManifestFile {
+interface ManifestFile {
   browser: NativeBrowser;
   /** Where the manifest is written. On Windows the registry points at this file. */
   file: string;
   manifest: NativeHostManifest;
 }
 
-export interface NativeHostPlan {
+interface NativeHostPlan {
   /** The file browsers start. Every manifest's path is this file. */
   launcher: string;
   manifests: ManifestFile[];
@@ -278,7 +278,7 @@ const runRegistry: RegistryRunner = args => {
 };
 
 /** The manifest allows one extension, by its ID, and no other. */
-export function manifestFor(launcher: string): NativeHostManifest {
+function manifestFor(launcher: string): NativeHostManifest {
   return {
     name: NATIVE_HOST_NAME,
     description: 'companyOS Twin browser bridge. Receives browser names and URL templates only.',
@@ -304,7 +304,7 @@ export function isFirefoxExtensionId(id: string): boolean {
   return FIREFOX_ID_PATTERN.test(id);
 }
 
-export interface LauncherOptions {
+interface LauncherOptions {
   /** The platform the launcher is written for. Windows gets a batch file, everything else a shell script. */
   platform?: NodeJS.Platform;
   runtime: string;

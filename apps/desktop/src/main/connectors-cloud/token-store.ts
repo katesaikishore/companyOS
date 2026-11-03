@@ -15,7 +15,7 @@ export interface TokenStore {
   remove(providerId: CloudProviderId): Promise<void>;
 }
 
-export interface FileTokenStoreOptions {
+interface FileTokenStoreOptions {
   /** Folder for the sealed files. Created with owner-only permissions when missing. */
   directory: string;
   seal(plain: Buffer): Buffer;

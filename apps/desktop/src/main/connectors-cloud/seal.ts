@@ -11,7 +11,7 @@ import { createFileTokenStore, type TokenStore } from './token-store';
 /** The folder under the user data folder that holds one sealed file per connected account. */
 export const CLOUD_TOKEN_FOLDER = 'connectors-cloud';
 
-export const SECURE_STORAGE_MESSAGE =
+const SECURE_STORAGE_MESSAGE =
   'Secure storage is not available on this system, so this sign-in cannot be saved. Install or unlock a keyring and try again.';
 
 /** Throws when the operating system cannot protect a value. Called before every seal and open. */
@@ -25,12 +25,12 @@ export function requireSealedStorage(): void {
 }
 
 /** Seals a plain buffer with the keychain. The guard runs first, so nothing is sealed by a backend that cannot protect it. */
-export function sealWithSafeStorage(plain: Buffer): Buffer {
+function sealWithSafeStorage(plain: Buffer): Buffer {
   requireSealedStorage();
   return safeStorage.encryptString(plain.toString('base64'));
 }
 
-export function openWithSafeStorage(sealed: Buffer): Buffer {
+function openWithSafeStorage(sealed: Buffer): Buffer {
   requireSealedStorage();
   return Buffer.from(safeStorage.decryptString(sealed), 'base64');
 }

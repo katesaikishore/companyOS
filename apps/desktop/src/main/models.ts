@@ -37,7 +37,7 @@ function findBundle(id: string): BundleSpec | undefined {
   return BUNDLES.find(bundle => bundle.id === id);
 }
 
-export interface ModelManagerOptions {
+interface ModelManagerOptions {
   modelsDir: string;
   agent: TwinAgent;
   /** Called whenever progress or state changes, so the page can refresh. */
@@ -240,7 +240,7 @@ export class ModelManager {
 }
 
 /** Starts the model worker in an Electron utility process, so inference never runs on the main thread. */
-export function forkModelWorker(workerPath: string): WorkerChannel {
+function forkModelWorker(workerPath: string): WorkerChannel {
   const child: UtilityProcess = utilityProcess.fork(workerPath, [], {
     serviceName: 'companyOS model',
     // The worker's output is dropped on purpose. It must never reach a log, because prompts are routine data.
@@ -288,7 +288,7 @@ export class SharedModelClients {
   }
 }
 
-export interface RoutineNamerOptions {
+interface RoutineNamerOptions {
   agent: TwinAgent;
   models: ModelManager;
   /** The clients the naming job shares with the planner. */

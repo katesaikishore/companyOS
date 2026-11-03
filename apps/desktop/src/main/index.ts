@@ -223,6 +223,8 @@ function registerIpc(): void {
   handle(IPC.createPlaybook, input => requireRuntime().createPlaybook(input));
   // Takes no input: the plan is made from the automations at level 3 or above, and the person confirms it.
   handle(IPC.planAndRun, () => requireRuntime().planAndRun());
+  handle(IPC.connectCloud, provider => requireRuntime().connectCloud(provider));
+  handle(IPC.disconnectCloud, provider => requireRuntime().disconnectCloud(provider));
   handle(IPC.runSwarm, (ids, name) => {
     if (!Array.isArray(ids) || ids.length > 9) throw new Error('Invalid swarm.');
     if (name !== undefined && (typeof name !== 'string' || name.length > 60 || /[\u0000-\u001f\u007f]/.test(name))) throw new Error('Invalid swarm name.');

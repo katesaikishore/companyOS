@@ -3,17 +3,15 @@ import { h, mount } from './dom.js';
 import { shell } from './components/shell.js';
 import { openCommandPalette } from './commands.js';
 import { downloadLeftLabel, layaFraction, layaStateLabel, modelFraction, modelStateLabel } from './labels.js';
-import { automationDetailView, automationsView } from './views/automations.js';
 import { knowsView } from './views/knows.js';
 import { ledgerView } from './views/ledger.js';
 import { readinessView } from './views/readiness.js';
 import { overviewView } from './views/overview.js';
 import { forgetRecall, recallView } from './views/recall.js';
 import { reviewView } from './views/review.js';
-import { openConnectorsSection, settingsView } from './views/settings.js';
+import { settingsView } from './views/settings.js';
+import { connectorsPageView } from './views/connectors-page.js';
 import { setupView } from './views/setup.js';
-import { suggestionsView } from './views/suggestions.js';
-import { swarmView } from './views/swarm.js';
 import { tasksView } from './views/tasks.js';
 import {
   bridge,
@@ -96,8 +94,7 @@ function signature(status: TwinStatus | undefined): string {
     pending: [...state.pending].sort(),
     wizard: [state.wizardForced, state.wizardStep, state.altOpen],
     setup: state.setup,
-    selection: [state.selectedSuggestion, state.selectedLedger, state.automationTab, state.renaming?.automationId, [...state.swarmPick].sort()],
-    runs: [...state.runResults.entries()],
+    selection: [state.selectedLedger],
     // The Recall search is compared only on its own page. Its images are listed by id, not by their data.
     recall: state.route.name === 'recall' ? { ...state.recall, frames: [...state.frames.keys()] } : undefined,
   });
@@ -133,12 +130,6 @@ function patchLive(status: TwinStatus): void {
 
 function viewFor(status: TwinStatus, route: Route): HTMLElement {
   switch (route.name) {
-    case 'suggestions':
-      return suggestionsView(status);
-    case 'automations':
-      return automationsView(status);
-    case 'automation':
-      return automationDetailView(status, route.id);
     case 'knows':
       return knowsView(status);
     case 'recall':
@@ -151,10 +142,8 @@ function viewFor(status: TwinStatus, route: Route): HTMLElement {
       return reviewView(status);
     case 'tasks':
       return tasksView(status);
-    case 'swarm':
-      return swarmView(status);
     case 'connectors':
-      return settingsView(status);
+      return connectorsPageView(status);
     case 'settings':
       return settingsView(status);
     default:
@@ -195,7 +184,6 @@ function render(): void {
   mount(appRoot, wizardOpen ? setupView(status) : shell(status, state.route, viewFor(status, state.route)));
   const column = appRoot.querySelector<HTMLElement>('main.main');
   if (column && keptScroll !== undefined) column.scrollTop = keptScroll;
-  else if (!wizardOpen && !sameRoute && state.route.name === 'connectors') openConnectorsSection();
   patchLive(status);
 }
 
@@ -224,7 +212,6 @@ function boot(): void {
     // Recall results and the images read on that page are cleared when the page is left.
     if (previous.name === 'recall' && state.route.name !== 'recall') forgetRecall();
     state.dirty.clear();
-    state.renaming = undefined;
     // Read status for the new route. The poll runs only while the window is visible, so a hidden window would show old data.
     void refresh();
   });

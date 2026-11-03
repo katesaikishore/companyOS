@@ -471,7 +471,6 @@ function gatePanel(row: AppReadinessRow): HTMLElement {
     reached
       ? h('p', { class: 'muted small readiness-gate-meta' }, 'This automation is already at L4.')
       : h('ul', { class: 'readiness-gate-list' }, ...gate.requirements.map(gateRow)),
-    h('a', { class: 'crumb readiness-open', href: `#/automations/${encodeURIComponent(gate.automationId)}` }, 'Open this automation'),
   );
 }
 

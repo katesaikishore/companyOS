@@ -30,7 +30,7 @@ const MAX_WAITING_KEYS = 256;
 /** How often the pause is checked. */
 const TICK_MS = 1_000;
 
-export interface KeystrokeServiceDeps {
+interface KeystrokeServiceDeps {
   source: KeyboardSource;
   /** The app in front, read now. Undefined when it cannot be named. */
   frontApp: () => Promise<string | undefined>;

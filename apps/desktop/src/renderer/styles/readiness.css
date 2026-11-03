@@ -594,14 +594,6 @@
   font-size: 12px;
 }
 
-.readiness-open {
-  display: inline-flex;
-  align-self: flex-start;
-  align-items: center;
-  min-height: 28px;
-  margin: 6px 18px 12px;
-}
-
 .readiness-style-note {
   padding: 12px 18px 14px;
 }

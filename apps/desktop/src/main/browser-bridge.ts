@@ -16,7 +16,7 @@ export const BROWSER_APP_NAMES: Readonly<Record<BrowserVisit['browser'], string>
   edge: 'Microsoft Edge',
 };
 
-export interface BrowserBridgeOptions {
+interface BrowserBridgeOptions {
   /** The per-install socket inside the app's data folder. Unix socket on macOS and Linux. */
   socketPath: string;
   /** Holds the bridge token. The file is mode 0600, and a new token is written on every start. */

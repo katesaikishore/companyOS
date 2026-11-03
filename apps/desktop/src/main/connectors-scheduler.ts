@@ -37,7 +37,7 @@ export interface ImportGate {
   idle: boolean;
 }
 
-export interface LocalConnectorServiceOptions {
+interface LocalConnectorServiceOptions {
   agent: ConnectorStore;
   now: () => number;
   gate: () => ImportGate;

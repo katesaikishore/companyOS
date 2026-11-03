@@ -18,7 +18,7 @@ import type { Laya } from '@receptron/laya';
  */
 
 export const LAYA_MODEL_ID = 'laya-onnx';
-export const LAYA_REPO = 'receptron/laya-onnx';
+const LAYA_REPO = 'receptron/laya-onnx';
 /** A commit, not `main`: the files cannot change under us. */
 export const LAYA_REVISION = 'd42786bdff8a7550316339c5fbf8f46caa83ea1b';
 
@@ -93,7 +93,7 @@ export function layaBundleDir(rootDir: string, spec: LayaBundleSpec = LAYA_BUNDL
 /** What a loaded model offers. The Laya class itself, so the types stay in step with the package. */
 export type LayaRuntime = Laya;
 
-export interface LayaProgressEvent {
+interface LayaProgressEvent {
   status: LayaBundleView['status'];
   file?: string;
   receivedBytes: number;

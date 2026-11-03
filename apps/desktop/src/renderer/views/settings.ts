@@ -71,15 +71,6 @@ const READING_LINE_PX = 120;
 
 let activeSection: SectionId = 'capture';
 
-/**
- * Scrolls a mounted Settings page to its Connectors section and marks it in the nav. The Connectors page in the sidebar
- * calls it once, when the route opens, so a later refresh does not pull the page back there.
- */
-export function openConnectorsSection(): void {
-  activeSection = 'connectors';
-  markNav();
-  document.getElementById(sectionDomId('connectors'))?.scrollIntoView();
-}
 let followingScroll = false;
 
 export function settingsView(status: TwinStatus): HTMLElement {
@@ -756,7 +747,7 @@ function isLocalKind(kind: string): kind is LocalConnectorKind {
   return (LOCAL_CONNECTOR_KINDS as readonly string[]).includes(kind);
 }
 
-function connectorRow(source: TwinConfig['connectors'][number], status: TwinStatus, now: number): HTMLElement {
+export function connectorRow(source: TwinConfig['connectors'][number], status: TwinStatus, now: number): HTMLElement {
   const key = `connector:${source.id}`;
   return h(
     'div',
@@ -796,7 +787,7 @@ function connectorRow(source: TwinConfig['connectors'][number], status: TwinStat
 }
 
 /** The four add buttons. They are off while the list is full, so a source past the limit cannot be asked for. */
-function connectorAddButtons(sourceCount: number): HTMLElement {
+export function connectorAddButtons(sourceCount: number): HTMLElement {
   const full = connectorsFull(sourceCount);
   return h(
     'div',

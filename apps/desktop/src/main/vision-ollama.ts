@@ -5,8 +5,8 @@ import type { CompletionRequest, NetworkEntry, OperatorModel, VisionCompleter, V
  * host, so a screenshot never leaves the device. Every call is written to the ledger with where it went and how many bytes
  * of picture it sent, never the picture or the reply.
  */
-export const OLLAMA_BASE = 'http://127.0.0.1:11434';
-export const VISION_MODEL = 'qwen3-vl:2b-instruct';
+const OLLAMA_BASE = 'http://127.0.0.1:11434';
+const VISION_MODEL = 'qwen3-vl:2b-instruct';
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]']);
 const CALL_TIMEOUT_MS = 120_000;
 const CHECK_TIMEOUT_MS = 2_000;
@@ -18,7 +18,7 @@ export function loopbackUrl(base: string): URL {
   return url;
 }
 
-export interface OllamaVisionOptions {
+interface OllamaVisionOptions {
   baseUrl?: string;
   model?: string;
   fetchImpl?: typeof fetch;
@@ -93,7 +93,7 @@ export function createOllamaVision(options: OllamaVisionOptions): VisionComplete
   };
 }
 
-export type VisionModelState = 'ready' | 'server_down' | 'model_missing';
+type VisionModelState = 'ready' | 'server_down' | 'model_missing';
 
 /**
  * Whether the server on this Mac is up and the vision model is pulled. It is a GET for the model list, with no picture, and

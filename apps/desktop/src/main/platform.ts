@@ -559,7 +559,7 @@ export function executorFor(platform: Platform): Executor {
   };
 }
 
-export interface PlatformChoice {
+interface PlatformChoice {
   platform?: Platform;
   detail: string;
 }

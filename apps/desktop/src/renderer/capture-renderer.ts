@@ -57,7 +57,7 @@ export function mayStart(state: StartGate, now: number): boolean {
 }
 
 /** Root-mean-square level of a segment: 0 for silence, and near 1 for full-scale sound. */
-export function rmsLevel(samples: Float32Array): number {
+function rmsLevel(samples: Float32Array): number {
   if (samples.length === 0) return 0;
   let sum = 0;
   for (const value of samples) sum += value * value;
@@ -68,7 +68,7 @@ export function rmsLevel(samples: Float32Array): number {
  * Converts audio to 16 kHz. Downsampling averages each group of input samples, which keeps the speech and removes the
  * high frequencies that would otherwise fold back into it. Upsampling repeats the nearest sample.
  */
-export function toSpeechRate(input: Float32Array, fromRate: number): Float32Array {
+function toSpeechRate(input: Float32Array, fromRate: number): Float32Array {
   if (fromRate === SAMPLE_RATE) return input;
   const ratio = fromRate / SAMPLE_RATE;
   const length = Math.floor(input.length / ratio);

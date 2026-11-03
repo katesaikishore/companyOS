@@ -9,18 +9,18 @@
 import { CLOUD_PROVIDER_IDS, type ClientIds, type CloudProviderId } from './providers';
 
 /** The ids this build ships with. Empty until the owner registers the OAuth apps and fills them in. */
-export const BUILT_IN_CLIENT_IDS: Readonly<Record<CloudProviderId, string>> = {
+const BUILT_IN_CLIENT_IDS: Readonly<Record<CloudProviderId, string>> = {
   googleCalendar: '',
   github: '',
 };
 
 /** The variable a developer sets to try a provider before its id is built in. */
-export const CLIENT_ID_ENVIRONMENT: Readonly<Record<CloudProviderId, string>> = {
+const CLIENT_ID_ENVIRONMENT: Readonly<Record<CloudProviderId, string>> = {
   googleCalendar: 'COMPANYOS_GOOGLE_CLIENT_ID',
   github: 'COMPANYOS_GITHUB_CLIENT_ID',
 };
 
-export interface ClientIdOptions {
+interface ClientIdOptions {
   /** True in a packaged build. The environment is then not read. */
   packaged: boolean;
   env: Readonly<Record<string, string | undefined>>;

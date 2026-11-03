@@ -1,9 +1,9 @@
 import { FrontAppTracker, type BridgedBrowser, type TwinAgent } from '@companyos/twin-core';
 import type { Platform } from './platform';
 
-export type CaptureState = 'capturing' | 'paused' | 'idle' | 'locked' | 'unsupported';
+type CaptureState = 'capturing' | 'paused' | 'idle' | 'locked' | 'unsupported';
 
-export interface CaptureDeps {
+interface CaptureDeps {
   agent: TwinAgent;
   platform: Platform | undefined;
   /** Called for each focus change the agent kept (not dropped by redaction). */

@@ -10,7 +10,7 @@ import type { Tone } from '../tones.js';
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 
 /** One element of an outline icon: its tag and attributes. */
-export type Shape = [tag: string, attributes: Record<string, string>];
+type Shape = [tag: string, attributes: Record<string, string>];
 
 const OVERVIEW: Shape[] = [
   ['rect', { x: '3', y: '3', width: '7', height: '9', rx: '1.5' }],
@@ -18,31 +18,14 @@ const OVERVIEW: Shape[] = [
   ['rect', { x: '14', y: '12', width: '7', height: '9', rx: '1.5' }],
   ['rect', { x: '3', y: '16', width: '7', height: '5', rx: '1.5' }],
 ];
-export const SUGGEST: Shape[] = [
-  ['path', { d: 'M9 18h6' }],
-  ['path', { d: 'M10 21h4' }],
-  ['path', { d: 'M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z' }],
-];
-export const AUTOMATE: Shape[] = [
-  ['path', { d: 'M4 12a8 8 0 0 1 13.7-5.6L20 9' }],
-  ['path', { d: 'M20 4v5h-5' }],
-  ['path', { d: 'M20 12a8 8 0 0 1-13.7 5.6L4 15' }],
-  ['path', { d: 'M4 20v-5h5' }],
-];
 /** A checklist: the tasks the twin works through for the person. */
-export const TASKS: Shape[] = [
+const TASKS: Shape[] = [
   ['path', { d: 'M9 6h11' }],
   ['path', { d: 'M9 12h11' }],
   ['path', { d: 'M9 18h11' }],
   ['path', { d: 'm3.5 6 1.5 1.5L7.5 4.5' }],
   ['path', { d: 'm3.5 12 1.5 1.5L7.5 10.5' }],
   ['path', { d: 'm3.5 18 1.5 1.5L7.5 16.5' }],
-];
-/** Three cursors: several automations working at once. */
-const SWARM: Shape[] = [
-  ['path', { d: 'M4 4l5 12 1.8-5.2L16 9z' }],
-  ['path', { d: 'M13 12l3.5 8.5 1.3-3.7 3.7-1.3z' }],
-  ['circle', { cx: '18', cy: '5', r: '2' }],
 ];
 /** A plug: the sources the twin reads from, such as folders, Git, calendar and mail. */
 const CONNECTORS: Shape[] = [
@@ -82,8 +65,6 @@ export const SHIELD: Shape[] = [
   ['path', { d: 'M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6l-8-3z' }],
   ['path', { d: 'm9 12 2 2 4-4' }],
 ];
-export const CHEVRON: Shape[] = [['path', { d: 'm9 6 6 6-6 6' }]];
-
 interface NavItem {
   label: string;
   href: string;
@@ -128,34 +109,6 @@ export function shell(status: TwinStatus, route: Route, content: Child): HTMLEle
       count: status.operator.state === 'waiting' ? 1 : 0,
       pill: true,
       active: route.name === 'tasks',
-    },
-    {
-      label: 'Suggestions',
-      href: '#/suggestions',
-      testid: 'nav-suggestions',
-      icon: SUGGEST,
-      tone: 'orange',
-      count: status.suggestions.length,
-      pill: true,
-      active: route.name === 'suggestions',
-    },
-    {
-      label: 'Automations',
-      href: '#/automations',
-      testid: 'nav-automations',
-      icon: AUTOMATE,
-      tone: 'green',
-      count: status.automations.length,
-      active: route.name === 'automations' || route.name === 'automation',
-    },
-    {
-      label: 'Swarm',
-      href: '#/swarm',
-      testid: 'nav-swarm',
-      icon: SWARM,
-      tone: 'green',
-      count: (status.liveRuns ?? []).filter(run => run.state === 'running').length || undefined,
-      active: route.name === 'swarm',
     },
     {
       label: 'Connectors',

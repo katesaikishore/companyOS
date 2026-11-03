@@ -34,7 +34,7 @@ export interface DesktopEntry {
 /** What the target needs from the app. A web address needs a handler for its scheme. A file needs a file argument. */
 export type OpenNeed = { kind: 'url'; scheme: 'http' | 'https' } | { kind: 'file' };
 
-export type OpenResolution =
+type OpenResolution =
   | { ok: true; entry: DesktopEntry }
   | { ok: false; reason: 'not_found' | 'ambiguous' | 'cannot_open' };
 
