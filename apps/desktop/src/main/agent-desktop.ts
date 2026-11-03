@@ -241,7 +241,7 @@ const MENU_CLOSE_MS = 2_000;
 export const SUPPORTED_MENU_DEPTH = 2;
 
 /** Cursor colours, far enough apart to tell runs apart at a glance. A design choice. */
-export const CURSOR_COLOURS = ['#E5484D', '#30A46C', '#0090FF', '#F76B15', '#8E4EC6', '#12A594'] as const;
+export const CURSOR_COLOURS = ['#E5484D', '#30A46C', '#0090FF', '#F76B15', '#8E4EC6', '#12A594', '#D6409F', '#AD7F58', '#FFB224'] as const;
 
 /** One colour for an agent id, the same on every run: a 32-bit FNV-1a hash of the id picks it. */
 function cursorColour(agentId: string): string {
@@ -355,7 +355,7 @@ export class AgentDesktopSession {
    * default cursor.
    */
   async style(sessionId: string, cursor: HandsCursor): Promise<void> {
-    const key = `${cursor.agentId}\u0000${cursor.label}`;
+    const key = `${cursor.agentId}\u0000${cursor.label}\u0000${cursor.colour}`;
     if (this.styled.has(key) || !AGENT_ID.test(cursor.agentId) || !CURSOR_COLOUR.test(cursor.colour)) return;
     const generation = this.generation;
     const call = await runCall(

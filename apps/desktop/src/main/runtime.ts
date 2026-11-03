@@ -82,7 +82,7 @@ import { LayaDecisionModel } from './decision-laya';
 import { ModelManager, SharedModelClients, createRoutineNamer } from './models';
 import { InputLock } from './input-lock';
 import { browserCapturePaths, installNativeHost, isBrowserCaptureSupported, removeNativeHost } from './native-host-install';
-import { AgentDesktopSession, cursorFor, cursorLabel, handsExecutor, type HandsCursor } from './agent-desktop';
+import { AgentDesktopSession, CURSOR_COLOURS, cursorFor, cursorLabel, handsExecutor, type HandsCursor } from './agent-desktop';
 import { gatherDuplicates } from './file-actions';
 import { choosePlatform, executorFor, type Platform } from './platform';
 import { PipeScheduler, removeLegacyPipeFiles } from './pipes';
@@ -654,7 +654,9 @@ export class TwinRuntime {
     const answer = this.options.confirmSwarm ? await this.options.confirmSwarm(views.map(view => view!.automation.name)) : false;
     console.info(`[swarm] size=${ids.length} answer=${answer || 'no'}`);
     if (!answer) return { name: label, confirmed: false, allowed: 'none', runs: [] };
-    const settled = await Promise.allSettled(ids.map(id => this.runSupervised(id, answer === 'all', label)));
+    const settled = await Promise.allSettled(
+      ids.map((id, index) => this.runSupervised(id, answer === 'all', label, CURSOR_COLOURS[index % CURSOR_COLOURS.length])),
+    );
     return {
       name: label,
       confirmed: true,
@@ -669,7 +671,7 @@ export class TwinRuntime {
   }
 
   /** One supervised run. `allowed` is set only by a swarm the person allowed in full: the run then asks nothing more. */
-  private async runSupervised(automationId: string, allowed: boolean, swarm?: string): Promise<RunResult> {
+  private async runSupervised(automationId: string, allowed: boolean, swarm?: string, colour?: string): Promise<RunResult> {
     return this.withRun(async () => {
       const platform = this.platform;
       if (!platform) throw new Error('App control is not available on this system yet.');
@@ -678,6 +680,8 @@ export class TwinRuntime {
       // The run's own cursor. Its label changes at every step to say what the step does, so each cursor on screen, and
       // each row of the live view, says what it is doing.
       const cursor = cursorFor(automation.id, automation.name);
+      // In a swarm each member gets its own colour, so no two of its cursors look alike on screen.
+      if (colour) cursor.colour = colour;
       const owner = cursor.agentId;
       const base = cursor.label;
       const runId = `run-${++this.runCount}`;
