@@ -20,7 +20,7 @@ function home(files: Record<string, string>): string {
 }
 
 describe('walkFolders', () => {
-  it('finds photos, documents and other files, and skips hidden folders, app bundles and code projects', () => {
+  it('finds photos, documents and other files, and skips hidden folders, app bundles and code projects', async () => {
     const root = home({
       'Downloads/passport.jpg': 'x',
       'Downloads/visa/letter.pdf': 'x',
@@ -34,7 +34,7 @@ describe('walkFolders', () => {
       'Desktop/repo/readme.md': 'x',
       'Desktop/archive.zip': 'x',
     });
-    const found = walkFolders(root).map(file => [file.path.slice(root.length + 1), file.kind, file.cloudOnly]);
+    const found = (await walkFolders(root)).map(file => [file.path.slice(root.length + 1), file.kind, file.cloudOnly]);
     expect(found).toEqual([
       ['Downloads/passport.jpg', 'image', false],
       ['Downloads/visa/letter.pdf', 'document', false],

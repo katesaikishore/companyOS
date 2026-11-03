@@ -42,6 +42,7 @@ export const IPC = {
   askDiscord: 'twin:ask-discord',
   checkDiscord: 'twin:check-discord',
   searchFiles: 'twin:search-files',
+  filePreviews: 'twin:file-previews',
   openIndexedFile: 'twin:open-indexed-file',
   indexFiles: 'twin:index-files',
   searchOpened: 'twin:search-opened',

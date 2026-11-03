@@ -61,7 +61,7 @@ import { SPEAKER_MIN_SAMPLES, SPEAKER_MODEL_ID, WHISPER_MODEL_ID } from '@compan
 import { discoverFromScreen, proposeTasks, recapBlocks, writeRecap, type DayRecap, type ProposedTask, type ScreenDiscovery } from '@companyos/twin-core';
 import { answerFromItems, closestItems, discordLine, selfCheck, type DiscordStatusView, type MemoryAnswer, type MemoryItem } from '@companyos/twin-core';
 import { DiscordReader } from './discord-reader';
-import { buildGraph, planQuery, rankFiles, type FileGraph, type FileHitView, type FileRecord, type FileSearchView } from '@companyos/twin-core';
+import { FileSearchIndex, parseQuery, type FileHitView, type FileSearchView } from '@companyos/twin-core';
 import { indexFiles, type FileIndexProgress } from './file-index';
 import { readSurface } from './app-surface';
 import { createOllamaChat, createOllamaEmbedder, createOllamaVision, visionModelReady } from './vision-ollama';
@@ -202,6 +202,13 @@ const DISCORD_CHECK_QUESTIONS = 8;
 const FILE_INDEX_FIRST_MS = 60_000;
 const FILE_INDEX_EVERY_MS = 6 * 3_600_000;
 const FILE_RESULTS = 12;
+/** The longest a search waits for its query embedding before ranking without meaning. */
+const QUERY_EMBED_TIMEOUT_MS = 400;
+const WARM_UP_TIMEOUT_MS = 15_000;
+const QUERY_CACHE = 64;
+/** Files that would run when opened: apps, scripts, installers and shortcuts. */
+const RUNNABLE = /\.(app|command|sh|bash|zsh|tool|terminal|workflow|scpt|applescript|pkg|mpkg|dmg|jar|py|rb|pl|js|exe|bat|cmd|ps1|webloc|inetloc|url|fileloc)$/i;
+const PREVIEW_CACHE = 300;
 
 export class TwinRuntime {
   private readonly agent: TwinAgent;
@@ -265,7 +272,11 @@ export class TwinRuntime {
   /** Stored Discord messages, counted after each read rather than on every status poll. */
   private discordCounts = { messages: 0, conversations: 0 };
   /** The file search index in memory, with its knowledge graph, rebuilt after each pass. */
-  private files: { records: FileRecord[]; graph: FileGraph; byPath: Map<string, FileRecord> } | undefined;
+  private files: FileSearchIndex | undefined;
+  /** Query embeddings by their words, newest last, so a repeated query does not wait for the model. */
+  private readonly queryVectors = new Map<string, number[]>();
+  /** Result previews by path, newest last. */
+  private readonly previews = new Map<string, string>();
   private fileProgress: FileIndexProgress = { running: false, files: 0, images: 0, documents: 0, done: 0, total: 0 };
   private fileIndexing: Promise<void> | undefined;
   private fileTimer: ReturnType<typeof setTimeout> | undefined;
@@ -682,6 +693,8 @@ export class TwinRuntime {
     if (changed.frameRetentionDays !== undefined) void this.sweepMedia();
     this.refreshCapture();
     if (changed.localApiEnabled !== undefined) await this.setLocalApi(saved.localApiEnabled);
+    // Turning file search off deletes the index, its previews and its remembered queries, so nothing of it is kept.
+    if (changed.fileSearchEnabled === false) this.clearFileIndex();
     return saved;
   }
 
@@ -736,13 +749,33 @@ export class TwinRuntime {
 
   private loadFileIndex(): void {
     const records = this.agent.fileIndex();
-    this.files = { records, graph: buildGraph(records), byPath: new Map(records.map(record => [record.path, record])) };
+    this.files = new FileSearchIndex(records);
+    // The previews of files that changed may be stale, so they are made again.
+    this.previews.clear();
+    // The embedding model is loaded now, so the first search does not wait for it.
+    // It may need a few seconds to load, so the warm-up waits longer than a search does.
+    if (this.agent.configuration.fileSearchEnabled && records.length > 0) void this.queryVector('warm up', WARM_UP_TIMEOUT_MS);
     this.fileProgress = {
       ...this.fileProgress,
       files: records.length,
       images: records.filter(record => record.kind === 'image').length,
       documents: records.filter(record => record.kind === 'document').length,
     };
+  }
+
+  private clearFileIndex(): void {
+    this.agent.saveFileIndex([]);
+    this.files = undefined;
+    this.previews.clear();
+    this.queryVectors.clear();
+    this.fileProgress = { running: false, files: 0, images: 0, documents: 0, done: 0, total: 0 };
+    this.options.onChange();
+  }
+
+  /** Refuses file search while it is off, so the search bar and its previews show nothing. */
+  private requireFileSearch(): FileSearchIndex {
+    if (!this.agent.configuration.fileSearchEnabled) throw new Error('File search is off. Turn it on in Connectors.');
+    return this.files ?? new FileSearchIndex([]);
   }
 
   private scheduleFiles(): void {
@@ -758,14 +791,18 @@ export class TwinRuntime {
     const job = indexFiles({
       helper: app.isPackaged ? join(process.resourcesPath, 'companyos-ocr') : join(app.getAppPath(), 'native-bin', 'companyos-ocr'),
       embedder: createOllamaEmbedder({ record }),
-      previous: () => this.files?.records ?? this.agent.fileIndex(),
-      save: records => this.agent.saveFileIndex(records),
+      previous: () => [...(this.files?.records ?? this.agent.fileIndex())],
+      // A pass that finishes after file search was turned off, or after a pause, keeps nothing.
+      save: records => {
+        if (this.agent.configuration.fileSearchEnabled && !this.agent.configuration.capturePaused) this.agent.saveFileIndex(records);
+      },
       onProgress: progress => {
         this.fileProgress = progress;
         this.options.onChange();
       },
     })
       .then(done => {
+        if (!this.agent.configuration.fileSearchEnabled) return;
         this.fileProgress = done;
         this.loadFileIndex();
       })
@@ -778,33 +815,70 @@ export class TwinRuntime {
   }
 
   /**
-   * Searches the file index with a question in plain words. The local model makes the plan, the small model embeds its topic,
-   * and the ranking mixes meaning, the knowledge graph and any photo shape asked for. Photos come back with a small preview.
+   * Searches the file index with a question in plain words, in milliseconds: the words are read by rules, the query is
+   * embedded by the small model (kept loaded, and remembered for repeated queries), and the prebuilt index ranks every file
+   * in one pass. Previews are not made here: the search bar asks for them after the results show.
    */
   async searchFiles(query: string): Promise<FileSearchView> {
+    const started = performance.now();
     const text = query.trim();
     if (text.length < 2 || text.length > 300) throw new Error('Search with 2 to 300 characters.');
-    const index = this.files ?? { records: [], graph: buildGraph([]), byPath: new Map() };
+    const index = this.requireFileSearch();
+    const plan = parseQuery(text);
+    const vector = await this.queryVector(plan.about);
+    const hits: FileHitView[] = index.search(plan, vector, FILE_RESULTS).map(hit => ({
+      path: hit.record.path,
+      name: hit.record.name,
+      folder: hit.record.folder,
+      kind: hit.record.kind,
+      mtime: hit.record.mtime,
+      why: hit.why,
+    }));
+    return {
+      plan: { kind: plan.kind, about: plan.about, names: plan.names, shape: plan.shape },
+      hits,
+      indexed: index.records.length,
+      ms: Math.round(performance.now() - started),
+      meaning: vector !== undefined,
+    };
+  }
+
+  /**
+   * The embedding of a query's words. Recent ones are remembered, so typing a query again, or backing up while typing, costs
+   * nothing. When the model does not answer within a short wait, the search goes on without meaning rather than waiting.
+   */
+  private async queryVector(words: string, timeoutMs = QUERY_EMBED_TIMEOUT_MS): Promise<number[] | undefined> {
+    const cached = this.queryVectors.get(words);
+    if (cached) return cached;
     const record = (entry: NetworkEntry): void => this.agent.recordNetworkCall(entry);
-    const plan = await planQuery(text, createOllamaChat({ record }));
-    let vector: number[] | undefined;
     try {
-      [vector] = await createOllamaEmbedder({ record }).embed([`${plan.about} ${plan.names.join(' ')}`.trim()]);
+      const embedding = createOllamaEmbedder({ record }).embed([words], AbortSignal.timeout(timeoutMs));
+      const [vector] = await embedding;
+      this.queryVectors.set(words, vector);
+      if (this.queryVectors.size > QUERY_CACHE) this.queryVectors.delete(this.queryVectors.keys().next().value as string);
+      return vector;
     } catch {
-      vector = undefined;
+      return undefined;
     }
-    const hits: FileHitView[] = await Promise.all(
-      rankFiles(plan, index.records, vector, index.graph, FILE_RESULTS).map(async hit => ({
-        path: hit.record.path,
-        name: hit.record.name,
-        folder: hit.record.folder,
-        kind: hit.record.kind,
-        mtime: hit.record.mtime,
-        why: hit.why,
-        preview: await this.previewOf(hit.record.path),
-      })),
+  }
+
+  /** Small previews for search results, from the system's own thumbnailer, made after the results show and remembered. */
+  async filePreviews(paths: unknown): Promise<Record<string, string>> {
+    if (!Array.isArray(paths)) throw new Error('Invalid previews request.');
+    const index = this.requireFileSearch();
+    const previews: Record<string, string> = {};
+    await Promise.all(
+      paths.slice(0, FILE_RESULTS).map(async path => {
+        // A file only in iCloud is not previewed: making its thumbnail would download it.
+        if (typeof path !== 'string' || !index.has(path) || index.get(path)?.cloudOnly) return;
+        const preview = this.previews.get(path) ?? (await this.previewOf(path));
+        if (!preview) return;
+        this.previews.set(path, preview);
+        if (this.previews.size > PREVIEW_CACHE) this.previews.delete(this.previews.keys().next().value as string);
+        previews[path] = preview;
+      }),
     );
-    return { plan: { kind: plan.kind, about: plan.about, names: plan.names, shape: plan.shape }, hits, indexed: index.records.length };
+    return previews;
   }
 
   /** A small preview from the system's own thumbnailer (photos, PDFs and documents), or undefined when it has none. */
@@ -819,8 +893,10 @@ export class TwinRuntime {
 
   /** Opens a search result, or shows it in Finder. Only a file that is in the index can be opened. */
   openIndexedFile(path: unknown, reveal: boolean): void {
-    if (typeof path !== 'string' || !this.files?.byPath.has(path)) throw new Error('That file is not in the search index.');
-    if (reveal) shell.showItemInFolder(path);
+    const index = this.requireFileSearch();
+    if (typeof path !== 'string' || !index.has(path)) throw new Error('That file is not in the search index.');
+    // A program or script is shown in Finder, never run: opening it from the search bar would execute it.
+    if (reveal || RUNNABLE.test(path)) shell.showItemInFolder(path);
     else void shell.openPath(path);
   }
 

@@ -241,8 +241,6 @@ export interface FileHitView {
   mtime: number;
   /** Why it matched, in a few words. */
   why: string[];
-  /** A small preview as a data URL, when the system can make one. */
-  preview?: string;
 }
 
 /** A file search: the plan the local model made from the words, and the best matches. */
@@ -251,6 +249,10 @@ export interface FileSearchView {
   hits: FileHitView[];
   /** Files in the index when the search ran. */
   indexed: number;
+  /** How long the search took in the app, in milliseconds. */
+  ms: number;
+  /** False when the embedding model did not answer in time, so the order comes from names, text and the graph only. */
+  meaning: boolean;
 }
 
 /** The file search index's state. */
@@ -661,6 +663,8 @@ export interface TwinBridge {
   checkDiscord(): Promise<void>;
   /** Searches the person's files with words in plain language. */
   searchFiles(query: string): Promise<FileSearchView>;
+  /** Small previews for search results, by path, made after the results show. */
+  filePreviews(paths: string[]): Promise<Record<string, string>>;
   /** Opens a file from the search index, or shows it in Finder. */
   openIndexedFile(path: string, reveal: boolean): Promise<void>;
   /** Runs a pass of the file index now. */

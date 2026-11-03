@@ -257,6 +257,7 @@ function registerIpc(): void {
     if (typeof query !== 'string') throw new Error('Invalid search.');
     return requireRuntime().searchFiles(query.slice(0, 300));
   });
+  handle(IPC.filePreviews, paths => requireRuntime().filePreviews(paths));
   handle(IPC.openIndexedFile, (path, reveal) => requireRuntime().openIndexedFile(path, reveal === true));
   handle(IPC.indexFiles, () => requireRuntime().indexFilesNow());
   handle(IPC.hideSearch, () => searchWindow?.hide());

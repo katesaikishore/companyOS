@@ -1,5 +1,6 @@
 import { execFile, spawn } from 'node:child_process';
-import { createReadStream, existsSync, readdirSync, statSync } from 'node:fs';
+import { createReadStream, existsSync } from 'node:fs';
+import { readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, extname, join, relative } from 'node:path';
 import { clipText, compress, embeddingText, extractEntities, type FileKind, type FileRecord, type TextEmbedder } from '@companyos/twin-core';
@@ -62,14 +63,17 @@ function kindOf(path: string): FileKind {
   return 'other';
 }
 
-/** Every file under the folders, skipping hidden folders, app bundles, build folders and anything past the depth or count. */
-export function walkFolders(home = homedir(), folders: readonly string[] = INDEX_FOLDERS): Found[] {
+/**
+ * Every file under the folders, skipping hidden folders, app bundles, build folders and anything past the depth or count.
+ * It reads asynchronously, so the app's main process keeps answering while thousands of files are listed.
+ */
+export async function walkFolders(home = homedir(), folders: readonly string[] = INDEX_FOLDERS): Promise<Found[]> {
   const found: Found[] = [];
-  const walk = (folder: string, root: string, depth: number): void => {
+  const walk = async (folder: string, root: string, depth: number): Promise<void> => {
     if (depth > MAX_DEPTH || found.length >= MAX_FILES) return;
     let names: string[];
     try {
-      names = readdirSync(folder);
+      names = await readdir(folder);
     } catch {
       return;
     }
@@ -83,17 +87,17 @@ export function walkFolders(home = homedir(), folders: readonly string[] = INDEX
       const path = join(folder, name);
       let stats;
       try {
-        stats = statSync(path);
+        stats = await stat(path);
       } catch {
         continue;
       }
-      if (stats.isDirectory()) walk(path, root, depth + 1);
+      if (stats.isDirectory()) await walk(path, root, depth + 1);
       else if (stats.isFile()) found.push({ path, root, size: stats.size, mtime: stats.mtimeMs, kind: kindOf(path), cloudOnly: stats.size > 0 && stats.blocks === 0 });
     }
   };
   for (const folder of folders) {
     const root = join(home, folder);
-    if (existsSync(root)) walk(root, root, 0);
+    if (existsSync(root)) await walk(root, root, 0);
   }
   return found;
 }
@@ -112,7 +116,8 @@ function readPlain(path: string): Promise<string> {
 /** A document's text through macOS's textutil, or nothing when it cannot be converted in time. */
 function readWithTextutil(path: string): Promise<string> {
   return new Promise(resolve => {
-    execFile('/usr/bin/textutil', ['-convert', 'txt', '-stdout', '--', path], { timeout: TEXTUTIL_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 }, (_error, stdout) => resolve(stdout ?? ''));
+    // -noload keeps textutil from fetching the images and styles an HTML file links to, so indexing sends nothing anywhere.
+    execFile('/usr/bin/textutil', ['-convert', 'txt', '-noload', '-stdout', '--', path], { timeout: TEXTUTIL_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 }, (_error, stdout) => resolve(stdout ?? ''));
   });
 }
 
@@ -166,7 +171,7 @@ export interface FileIndexOptions {
 /** One pass over the folders. Unchanged files keep their records; the rest are described, embedded and given their names. */
 export async function indexFiles(options: FileIndexOptions): Promise<FileIndexProgress> {
   const previous = new Map(options.previous().map(record => [record.path, record]));
-  const found = walkFolders(options.home);
+  const found = await walkFolders(options.home);
   const fresh = found.filter(file => {
     const old = previous.get(file.path);
     return !old || old.mtime !== file.mtime || old.size !== file.size || !old.vector;
@@ -196,6 +201,7 @@ export async function indexFiles(options: FileIndexOptions): Promise<FileIndexPr
     const name = basename(file.path);
     const folder = [basename(file.root), ...relative(file.root, file.path).split('/').slice(0, -1)].join('/');
     const record: FileRecord = { path: file.path, name, folder, kind: file.kind, size: file.size, mtime: file.mtime, text: clipText(text), entities: [] };
+    if (file.cloudOnly) record.cloudOnly = true;
     if (typeof row?.width === 'number' && typeof row.height === 'number') {
       record.width = row.width;
       record.height = row.height;
