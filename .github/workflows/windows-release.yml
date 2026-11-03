@@ -1,0 +1,96 @@
+name: windows-release
+
+# Builds the Windows installer for an existing version tag and attaches it to that tag's GitHub Release. Run it by hand
+# after the tag's release exists, for example: gh workflow run windows-release.yml -f tag=v0.1.0
+#
+# It does not create or publish a release. The tag must already have a GitHub Release, and the installer and its update
+# file (latest.yml and the blockmap) are added to that release, replacing any earlier copy of the same file. Signing uses
+# WIN_CSC_LINK and WIN_CSC_KEY_PASSWORD when they are set; without them the installer is built unsigned.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'The version tag, such as v0.1.0. Its GitHub Release must already exist.'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    name: Windows installer for ${{ inputs.tag }}
+    runs-on: windows-latest
+    permissions:
+      # Needed to attach the files to the release. Nothing else in this job writes to the repository.
+      contents: write
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      ONNXRUNTIME_NODE_INSTALL_CUDA: 'skip'
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Check the tag matches the desktop version
+        shell: bash
+        run: |
+          version="$(node -p "require('./apps/desktop/package.json').version")"
+          if [ "$TAG" != "v$version" ]; then
+            echo "The tag $TAG does not match apps/desktop/package.json version $version."
+            exit 1
+          fi
+
+      - name: Check the tag has a GitHub Release
+        shell: bash
+        run: |
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            echo "No GitHub Release exists for $TAG. Create it first, then run this workflow again."
+            exit 1
+          fi
+
+      - name: Install (also downloads the Electron binary)
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests (core engine and desktop)
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Package Windows (signed only when WIN_CSC_LINK is set)
+        shell: bash
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: |
+          if [ -n "$WIN_CSC_LINK" ]; then echo "Signing: a certificate is set."; else echo "Signing: no certificate, building unsigned."; fi
+          npm run dist -w @companyos/desktop
+
+      - name: Attach the installer and update file to the release
+        shell: bash
+        run: |
+          shopt -s nullglob
+          files=(apps/desktop/release/*.exe apps/desktop/release/*.exe.blockmap apps/desktop/release/latest.yml)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "The build produced no Windows installer."
+            exit 1
+          fi
+          printf 'Attaching:\n'; printf '  %s\n' "${files[@]}"
+          gh release upload "$TAG" "${files[@]}" --clobber
