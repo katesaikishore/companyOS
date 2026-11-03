@@ -254,6 +254,16 @@ function cursorColour(agentId: string): string {
 }
 
 /**
+ * A cursor label that says what the run is doing: the start of the automation's name, then the step, such as
+ * "Finance · Paste into Swarm Board!C3". The program draws a few words of it, so the step comes early.
+ */
+export function cursorLabel(name: string, doing: string): string {
+  // A leading dash is dropped, so the label can never read as a flag after --label.
+  const head = name.replace(/[\u0000-\u001f\u007f]/g, ' ').split(/[:\s]/).map(word => word.replace(/^-+/, '')).find(word => word.length > 0) ?? 'companyOS';
+  return `${head} · ${doing}`.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, CURSOR_LABEL_MAX);
+}
+
+/**
  * The named cursor for one automation. The agent id comes from the automation's id, so it stays the same across runs and a
  * reused id reuses its cursor and its colour. The label is the automation's name, with control characters made spaces.
  */

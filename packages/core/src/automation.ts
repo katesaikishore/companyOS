@@ -535,6 +535,50 @@ export function describeStep(step: Step): string {
   }
 }
 
+/**
+ * What a step does, in a few words, such as "Paste into Swarm Board!C3" or "Click Rename". It is drawn beside the
+ * automation's cursor while the step runs and shown in the live view, so each cursor says what it is doing. Entered text
+ * is never shown here, only where it goes.
+ */
+export function stepSummary(step: Step): string {
+  const name = (target: Locator): string => short(target.name ?? (target.namePrefix !== undefined ? `${target.namePrefix}…` : target.value ?? ''), 24);
+  switch (step.op) {
+    case 'focus_app':
+      return `Bring ${short(step.app, 24)} forward`;
+    case 'check_focus':
+      return `Check ${short(step.app, 24)} is in front`;
+    case 'open_url':
+      return 'Open a link';
+    case 'open_file':
+      return 'Open a file';
+    case 'press_shortcut':
+      return `Press ${step.shortcut}`;
+    case 'choose_menu':
+      return `Choose ${short(step.menu.join(' › '), 32)}`;
+    case 'click':
+      return `${step.button === 'right' ? 'Right-click' : step.count === 2 ? 'Double-click' : 'Click'} ${name(step.target)}`;
+    case 'paste_text':
+      return step.via ? `Paste into ${short(step.via.text, 28)}` : 'Paste text';
+    case 'press_key':
+      return `Press ${step.key}`;
+    case 'fill_field':
+      return `Fill ${name(step.target)}`;
+    case 'set_field':
+      return `Type into ${name(step.target)}`;
+    case 'check_text':
+      return step.source === 'clipboard' ? 'Check the copied values' : 'Check the window';
+    case 'wait':
+      return 'Wait for the app';
+    case 'gather_duplicates':
+      return 'Gather duplicate files';
+  }
+}
+
+function short(text: string, max: number): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length <= max ? flat : `${flat.slice(0, max - 1)}…`;
+}
+
 function describeWindow(step: { app: string; window?: string }): string {
   return step.window ? `the "${step.window}" window of "${step.app}"` : `"${step.app}"`;
 }

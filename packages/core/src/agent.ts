@@ -999,7 +999,7 @@ export class TwinAgent {
    */
   async run(
     automationId: string,
-    request: { mode: RunMode; values?: Record<string, string>; approve?: RunRequest['approve'] },
+    request: { mode: RunMode; values?: Record<string, string>; approve?: RunRequest['approve']; onStep?: RunRequest['onStep'] },
     executor: Executor,
   ): Promise<RunResult> {
     if (request.mode !== 'dry_run' && !this.config.automationsEnabled) {
@@ -1025,6 +1025,7 @@ export class TwinAgent {
           mode: request.mode,
           values: request.values,
           approve: request.approve,
+          onStep: request.onStep,
           policy: {
             level: state.level,
             maxLevel: this.config.maxAutonomyLevel,

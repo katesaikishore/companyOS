@@ -11,6 +11,7 @@ import {
   evaluateStep,
   missingText,
   runAutomation,
+  stepSummary,
   type Approval,
   type Executor,
   type Step,
@@ -235,6 +236,29 @@ describe('the gather_duplicates step', () => {
     expect(result.steps[0]).toMatchObject({ outcome: 'passed', reason: 'Done. 3 duplicate copies (4.5 MB) moved into ~/companyOS Duplicates, with a manifest to undo it.' });
     const unattended = await runAutomation(playbook([GATHER]), { mode: 'unattended', policy: { ...POLICY, level: 4, unattended: true } }, exec);
     expect(unattended.status).toBe('blocked');
+  });
+});
+
+describe('what each cursor says it is doing', () => {
+  it('sums up each step in a few words, naming where text goes and never the text itself', () => {
+    expect(stepSummary(FILL)).toBe('Fill Name box…');
+    expect(stepSummary({ op: 'paste_text', ...SHEETS, text: '=SECRET("x")', via: { target: NAME_BOX, text: "'Swarm Board'!C3" } })).toBe(
+      "Paste into 'Swarm Board'!C3",
+    );
+    expect(stepSummary({ op: 'paste_text', app: 'TextEdit', text: 'private memo' })).toBe('Paste text');
+    expect(stepSummary({ op: 'click', ...SHEETS, target: { role: 'statictext', namePrefix: 'Sheet' }, count: 2 })).toBe('Double-click Sheet…');
+    expect(stepSummary(CHECK)).toBe('Check the copied values');
+    expect(stepSummary({ op: 'choose_menu', app: 'TextEdit', menu: ['Format', 'Make Rich Text'] })).toBe('Choose Format › Make Rich Text');
+  });
+
+  it('tells the live view each step as it begins, with the step count', async () => {
+    const seen: string[] = [];
+    await runAutomation(
+      playbook([FILL, COPY, CHECK]),
+      { mode: 'supervised', policy: POLICY, approve: async () => 'run', onStep: (index, total, step) => seen.push(`${index + 1}/${total} ${stepSummary(step)}`) },
+      desktop('cod\t171\t312468 prepaid\t24'),
+    );
+    expect(seen).toEqual(['1/3 Fill Name box…', '2/3 Press cmd+c', '3/3 Check the copied values']);
   });
 });
 

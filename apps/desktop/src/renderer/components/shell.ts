@@ -38,6 +38,12 @@ export const TASKS: Shape[] = [
   ['path', { d: 'M4 12l1.6 1.6L8 11' }],
   ['path', { d: 'M4 18l1.6 1.6L8 17' }],
 ];
+/** Three cursors: several automations working at once. */
+const SWARM: Shape[] = [
+  ['path', { d: 'M4 4l5 12 1.8-5.2L16 9z' }],
+  ['path', { d: 'M13 12l3.5 8.5 1.3-3.7 3.7-1.3z' }],
+  ['circle', { cx: '18', cy: '5', r: '2' }],
+];
 /** A plug: the sources the twin reads from, such as folders, Git, calendar and mail. */
 const CONNECTORS: Shape[] = [
   ['path', { d: 'M9 3v5' }],
@@ -129,6 +135,15 @@ export function shell(status: TwinStatus, route: Route, content: Child): HTMLEle
       tone: 'green',
       count: status.automations.length,
       active: route.name === 'automations' || route.name === 'automation',
+    },
+    {
+      label: 'Swarm',
+      href: '#/swarm',
+      testid: 'nav-swarm',
+      icon: SWARM,
+      tone: 'green',
+      count: (status.liveRuns ?? []).filter(run => run.state === 'running').length || undefined,
+      active: route.name === 'swarm',
     },
     {
       label: 'Connectors',

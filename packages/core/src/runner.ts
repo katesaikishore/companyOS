@@ -117,6 +117,8 @@ export interface RunRequest {
   currentPolicy?: () => PolicyContext;
   /** A global stop request cancels steps that have not started, even if automations are turned back on. */
   shouldStop?: () => boolean;
+  /** Called as each step begins, before it is checked or asked about, so a live view can say what the run is doing. */
+  onStep?: (index: number, total: number, step: Step) => void;
   /** Called only for steps the policy marks 'ask', and only in supervised mode. 'run' approves the rest of this run. */
   approve?: (step: Step, decision: Decision) => Promise<Approval>;
   /**
@@ -329,6 +331,12 @@ export async function runAutomation(automation: Automation, request: RunRequest,
     if (index === checkedWithFocus) continue;
     const record = (outcome: StepOutcome, reason: string, failureReason?: string): void =>
       recordAt(index, step, outcome, reason, failureReason);
+
+    try {
+      request.onStep?.(index, resolved.length, step);
+    } catch {
+      // A live view must not stop a run.
+    }
 
     if (request.mode === 'dry_run') {
       // Shown as if the owner had raised the level to run it, so the preview names every approval it would need.
