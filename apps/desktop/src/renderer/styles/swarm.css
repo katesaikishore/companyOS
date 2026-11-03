@@ -27,8 +27,9 @@
 }
 .swarm-pick-row {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 10px;
+  row-gap: 2px;
   align-items: center;
   padding: 8px 4px;
   border-bottom: 1px solid var(--divider);
@@ -38,6 +39,10 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* The step count and level sit under the name, so a long name keeps its room. */
+.swarm-pick-meta {
+  grid-column: 2;
 }
 .swarm-pick-meta,
 .swarm-run-step {
