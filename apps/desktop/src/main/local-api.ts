@@ -40,8 +40,6 @@ export interface LocalApiOptions {
   /** The JPEG bytes of one stored image, or null when it is gone or cannot be read. */
   frameImage: (id: string) => Promise<Buffer | null>;
   status: () => LocalApiStatus;
-  /** The recap of a day, YYYY-MM-DD, today when absent. Written by the local model, so it can take half a minute. */
-  recap: (day: string | undefined) => Promise<unknown>;
 }
 
 export interface LocalApi {
@@ -125,7 +123,6 @@ async function respond(options: LocalApiOptions, request: IncomingMessage, respo
   }
   if (url.pathname === '/v1/status') return json(response, 200, options.status());
   if (url.pathname === '/v1/search') return searchReply(options, url.searchParams, response);
-  if (url.pathname === '/v1/recap') return recapReply(options, url.searchParams, response);
   const frame = FRAME_PATH.exec(url.pathname)?.[1];
   if (frame !== undefined) return frameReply(options, frame, response);
   return json(response, 404, { error: NOT_FOUND });
@@ -163,18 +160,6 @@ function searchReply(options: LocalApiOptions, params: URLSearchParams, response
   } catch {
     // The engine's own message can quote the query, so it is not sent on.
     return json(response, 400, { error: 'The search could not run with these settings.' });
-  }
-}
-
-const DAY_PARAM = /^\d{4}-\d{2}-\d{2}$/;
-
-async function recapReply(options: LocalApiOptions, params: URLSearchParams, response: ServerResponse): Promise<void> {
-  const day = params.get('day') ?? undefined;
-  if (day !== undefined && !DAY_PARAM.test(day)) return json(response, 400, { error: 'The day is not valid.' });
-  try {
-    return json(response, 200, await options.recap(day));
-  } catch {
-    return json(response, 503, { error: 'The recap could not be written. The local model may not be running.' });
   }
 }
 

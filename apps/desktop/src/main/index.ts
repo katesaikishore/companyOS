@@ -301,7 +301,6 @@ function registerIpc(): void {
     if (approved) requireRuntime().forgetSpeakers();
   });
   handle(IPC.copyApiToken, () => requireRuntime().copyApiToken(value => clipboard.writeText(value)));
-  handle(IPC.copyMcpConfig, () => requireRuntime().copyMcpConfig(value => clipboard.writeText(value)));
   handle(IPC.rotateApiToken, async () => {
     const approved = await confirmed({
       type: 'warning',

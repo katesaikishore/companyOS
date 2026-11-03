@@ -1311,24 +1311,6 @@ export class TwinRuntime {
     copy(await this.queueApi(() => this.apiTokenValue()));
   }
 
-  /**
-   * Copies an MCP config for agents such as Claude Desktop or Cursor: this app's own binary run in Node mode on the bundled
-   * server, with the local API token. The token goes to the clipboard only, as with Copy token.
-   */
-  async copyMcpConfig(copy: (text: string) => void): Promise<void> {
-    const token = await this.queueApi(() => this.apiTokenValue());
-    const config = {
-      mcpServers: {
-        companyos: {
-          command: process.execPath,
-          args: [join(app.getAppPath(), 'dist', 'main', 'mcp-server.js')],
-          env: { ELECTRON_RUN_AS_NODE: '1', COMPANYOS_API_TOKEN: token, COMPANYOS_API_PORT: String(LOCAL_API_PORT) },
-        },
-      },
-    };
-    copy(JSON.stringify(config, null, 2));
-  }
-
   /** Replaces the local API token. The API reads the token on every request, so the old one stops working at once. */
   rotateApiToken(): Promise<void> {
     return this.queueApi(async () => {
@@ -1686,8 +1668,6 @@ export class TwinRuntime {
         search: request => (this.agent.configuration.screenCaptureEnabled ? withheldFromLocalApi(this.agent.searchCapture(request)) : []),
         frameImage: id => (this.agent.configuration.screenCaptureEnabled ? this.readFrame(id) : Promise.resolve(null)),
         status: () => this.captureChannels(),
-        // The recap is written from the same screen and microphone text the search serves, so it follows the same rule.
-        recap: day => (this.agent.configuration.screenCaptureEnabled ? this.dayRecap(day) : Promise.reject(new Error('Screen reading is off.'))),
       });
       await this.apiTokenValue();
       await api.start();

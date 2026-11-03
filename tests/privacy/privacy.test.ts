@@ -245,7 +245,6 @@ describe('the local API is the one documented place where stored screen and micr
       search: request => agent.searchCapture(request),
       frameImage: async () => null,
       status: () => ({ screenState: 'on', audioState: 'on', screenCount: 1, audioCount: 1, mediaBytes: 0 }),
-      recap: day => writeRecap({ day: day ?? dayKeyOf(at(0, 12)), tasks: [block] }, agent.searchCapture({ text: '', from: block.startTs, to: block.endTs }), model),
     });
     try {
       agent.updateConfig({
@@ -307,17 +306,15 @@ describe('the local API is the one documented place where stored screen and micr
       const posted = await fetch(`${base}/v1/search`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
       expect(posted.status).toBe(405);
 
-      // The recap's model sees the block's screen and microphone text, and neither the typed text nor the connector text the
-      // engine holds for the same hours. The reply carries no canary at all.
-      const recap = await fetch(`${base}/v1/recap`, authorised);
-      expect(recap.status).toBe(200);
+      // The recap is written from the engine's raw search for the block. Its model sees the screen and microphone text, and
+      // neither the typed text nor the connector text the engine holds for the same hours.
+      await writeRecap({ day: dayKeyOf(at(0, 12)), tasks: [block] }, agent.searchCapture({ text: '', from: block.startTs, to: block.endTs }), model);
       expect(shown).toHaveLength(1);
       const prompt = `${shown[0].system}\n${shown[0].prompt}`;
       expect(prompt).toContain(CANARIES.screenOcr);
       expect(prompt).toContain(CANARIES.audioTranscript);
       expect(prompt).not.toContain(CANARIES.typedText);
       expect(prompt).not.toContain(CANARIES.connectorText);
-      expect(findLeaks([{ name: 'local-api:recap', text: await recap.text() }])).toEqual([]);
     } finally {
       await api.stop();
       agent.close();

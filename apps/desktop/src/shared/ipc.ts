@@ -34,7 +34,6 @@ export const IPC = {
   nameSpeaker: 'twin:name-speaker',
   forgetSpeakers: 'twin:forget-speakers',
   copyApiToken: 'twin:copy-api-token',
-  copyMcpConfig: 'twin:copy-mcp-config',
   rotateApiToken: 'twin:rotate-api-token',
   requestPermission: 'twin:request-permission',
   openPrivacySettings: 'twin:open-privacy-settings',

@@ -97,9 +97,6 @@ name routines. Typing, clicking and sending are not built, and no release has be
 - **Your day.** On the Overview, Write my recap has a local model (Qwen3 4B through Ollama) read today's tasks, screen
   text and speech, and write what you worked on and what is still open. Times and apps come from the tasks; typed text
   and connector text are never used.
-- **Use your memory from an agent (MCP).** With the local API on, Settings → Copy MCP config gives a config for Claude
-  Desktop, Claude Code or Cursor. The server ships inside the app and offers `search_memory`, `day_recap` and
-  `capture_status`, through the same token-protected, read-only API: screen and speech text only.
 - **Routines.** Repeated sequences on at least three different days are suggested. With browser capture on, a web site
   is its own step. An unknown app is mined once it recurs on three days, unless its name looks like a web address.
   Shells, script hosts, terminals and system processes, such as Finder or Explorer, are never mined. Each suggestion

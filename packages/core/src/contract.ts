@@ -573,8 +573,6 @@ export interface TwinBridge {
   deleteCapture(): Promise<void>;
   /** Copies the local API token to the clipboard. The token itself never reaches the page. */
   copyApiToken(): Promise<void>;
-  /** Copies an MCP server config, with the local API token, for agents such as Claude Desktop. Nothing reaches the page. */
-  copyMcpConfig(): Promise<void>;
   /** Replaces the local API token after the person confirms. The old token stops working at once. */
   rotateApiToken(): Promise<void>;
   /** Asks the operating system for screen or microphone access. The result shows in the status. */

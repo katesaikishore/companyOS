@@ -65,7 +65,6 @@ async function start(overrides: Partial<LocalApiOptions> = {}): Promise<number> 
     search: () => [],
     frameImage: async () => null,
     status: () => status(),
-    recap: async () => ({ day: '2026-11-03', summary: 'ok', items: [], openLoops: [] }),
     ...overrides,
   });
   return api.start();
@@ -270,27 +269,5 @@ describe('local API', () => {
     await call(port, { path: `/v1/search?q=${CANARY}`, headers: bearer('d'.repeat(64)) });
     await call(port, { method: 'POST', path: '/v1/search' });
     for (const spy of consoleSpies) expect(spy).not.toHaveBeenCalled();
-  });
-});
-
-describe('local API recap', () => {
-  it('passes a valid day on, refuses a malformed one, and turns a failure into a fixed sentence', async () => {
-    const days: Array<string | undefined> = [];
-    const port = await start({
-      recap: async day => {
-        days.push(day);
-        if (day === '2026-01-01') throw new Error(`model down ${CANARY}`);
-        return { day, summary: 'ok' };
-      },
-    });
-    const ok = await call(port, { path: '/v1/recap?day=2026-11-02', headers: bearer(TOKEN) });
-    expect(ok.status).toBe(200);
-    expect(JSON.parse(ok.body.toString())).toEqual({ day: '2026-11-02', summary: 'ok' });
-    expect((await call(port, { path: '/v1/recap?day=yesterday', headers: bearer(TOKEN) })).status).toBe(400);
-    const failed = await call(port, { path: '/v1/recap?day=2026-01-01', headers: bearer(TOKEN) });
-    expect(failed.status).toBe(503);
-    expect(failed.body.toString()).not.toContain(CANARY);
-    expect((await call(port, { path: '/v1/recap' })).status).toBe(401);
-    expect(days).toEqual(['2026-11-02', '2026-01-01']);
   });
 });
