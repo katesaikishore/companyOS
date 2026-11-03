@@ -1,4 +1,4 @@
-import type { CaptureHitView, HardwareProfile, SetupPlan, TwinBridge, TwinConfig, TwinStatus } from '@companyos/twin-core';
+import type { CaptureHitView, HardwareProfile, ProposedTask, SetupPlan, TwinBridge, TwinConfig, TwinStatus } from '@companyos/twin-core';
 import type { RecallKind, RecallRange } from './recall-model.js';
 
 export type Route =
@@ -41,8 +41,6 @@ interface SetupData {
   error?: string;
 }
 
-/** A run result and when it arrived. The time is part of the stored value, so a repeat with the same steps still redraws. */
-
 /** Page state shared by the views. It lives in memory only; the twin's data stays in the main process. */
 export const state = {
   status: undefined as TwinStatus | undefined,
@@ -64,6 +62,8 @@ export const state = {
   frames: new Map<string, string | null>(),
   /** The Tasks page form. The Chutes key is never kept here: it is read from its field when saved. */
   task: { goal: '', app: 'TextEdit', shareMemory: false },
+  /** Tasks proposed from the screen text, newest search only. Unset until the person asks. */
+  proposals: undefined as ProposedTask[] | undefined,
 };
 
 let renderer: (() => void) | undefined;

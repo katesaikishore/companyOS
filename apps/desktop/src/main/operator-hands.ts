@@ -18,7 +18,9 @@ const MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 const MAX_CONTROLS = 200;
 /** Names and descriptions are kept long enough for the safety check to see every word. The prompt shows less. */
 const MAX_LABEL = 300;
-const MAX_VALUE = 80;
+/** A field's text as the model sees it: its start and its end, so a line typed at the end can be seen to have landed. */
+const MAX_VALUE = 200;
+const VALUE_HEAD = 60;
 const MAX_TITLE = 120;
 const TEXT_ROLES = new Set(['textfield', 'textarea', 'searchfield', 'combobox']);
 const WINDOW_ID = /^w-\d+$/;
@@ -48,20 +50,32 @@ function clean(text: unknown, max: number): string {
   return typeof text === 'string' ? text.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, ' ').trim().slice(0, max) : '';
 }
 
+/** Long text cut to its start and its end, with an ellipsis between, so the newest lines at the end stay in view. */
+function headAndTail(text: string): string {
+  if (text.length <= MAX_VALUE) return text;
+  return `${text.slice(0, VALUE_HEAD)} … ${text.slice(text.length - (MAX_VALUE - VALUE_HEAD - 3))}`;
+}
+
 /** The addressable controls in a snapshot. A secure field is marked, and its value is never kept. */
 export function controlsOf(snapshot: Envelope | undefined): Observation['controls'] {
   const controls: Observation['controls'] = [];
   const walk = (node: unknown): void => {
     if (!node || typeof node !== 'object' || controls.length >= MAX_CONTROLS) return;
     const element = node as { ref_id?: unknown; role?: unknown; name?: unknown; description?: unknown; value?: unknown; states?: unknown; children?: unknown };
-    if (typeof element.ref_id === 'string' && typeof element.role === 'string') {
+    // A disabled or hidden control cannot take an action, so it is left out: a small model would keep pressing it.
+    const states = Array.isArray(element.states) ? element.states : [];
+    const inert = states.includes('disabled') || states.includes('hidden');
+    if (typeof element.ref_id === 'string' && typeof element.role === 'string' && !inert) {
       const name = clean(element.name, MAX_LABEL);
       const description = clean(element.description, MAX_LABEL);
-      const secure = /secure/i.test(element.role) || (Array.isArray(element.states) && element.states.includes('secure'));
+      const secure = /secure/i.test(element.role) || states.includes('secure');
       const control: Observation['controls'][number] = { ref: element.ref_id, role: element.role, name: name || description };
       if (description && description !== control.name) control.description = description;
       if (secure) control.secure = true;
-      else if (TEXT_ROLES.has(element.role) && typeof element.value === 'string') control.value = clean(element.value, MAX_VALUE);
+      else if (TEXT_ROLES.has(element.role) && typeof element.value === 'string') {
+        control.value = headAndTail(clean(element.value, Number.MAX_SAFE_INTEGER));
+        if (/[\r\n]/.test(element.value)) control.multiline = true;
+      }
       controls.push(control);
     }
     if (Array.isArray(element.children)) for (const child of element.children) walk(child);
@@ -84,11 +98,17 @@ export function deliveryOf(result: Envelope | undefined): ActResult {
 
 type HandAction = Exclude<OperatorAction, { type: 'done' } | { type: 'fail' }>;
 
+function isTextControl(ref: string, observation: Observation): boolean {
+  const target = observation.controls.find(control => control.ref === ref);
+  return target !== undefined && TEXT_ROLES.has(target.role);
+}
+
 /** The fixed argument list for one action. */
 export function argsFor(action: HandAction, observation: Observation): string[] {
   switch (action.type) {
     case 'click':
-      return ['click', '--', action.ref];
+      // A text field takes no press action, so a click on one is delivered as what it means: put the cursor there.
+      return isTextControl(action.ref, observation) ? ['focus', '--', action.ref] : ['click', '--', action.ref];
     case 'type':
       return ['type', '--', action.ref, action.text];
     case 'scroll':
@@ -133,6 +153,19 @@ export function agentDesktopHands(binary: string, exec: Exec = defaultExec): Ope
     async act(action, observation, signal) {
       if ((action.type === 'launch' || action.type === 'focus_app') && !APP_NAME.test(action.app)) {
         return { delivery: 'not_delivered', code: 'app_name_refused' };
+      }
+      // Text typed into a field that already holds text goes after it. The model cannot place the cursor, and agent-desktop
+      // types where the cursor is, which is often the start, so the hands move to the end first.
+      const target = action.type === 'type' ? observation.controls.find(control => control.ref === action.ref) : undefined;
+      if (action.type === 'type' && target?.value && TEXT_ROLES.has(target.role)) {
+        const focused = deliveryOf(envelope(await exec(binary, ['focus', '--', action.ref], signal)));
+        if (focused.delivery !== 'delivered') return focused;
+        const moved = deliveryOf(envelope(await exec(binary, ['press', '--app', observation.app, '--', 'cmd+down'], signal)));
+        if (moved.delivery === 'not_delivered') return moved;
+        // Added to a document, the text starts its own line, so it never runs onto the end of the last one.
+        if (target.multiline && !/^[\r\n]/.test(action.text)) {
+          return deliveryOf(envelope(await exec(binary, argsFor({ ...action, text: `\n${action.text}` }, observation), signal)));
+        }
       }
       return deliveryOf(envelope(await exec(binary, argsFor(action, observation), signal)));
     },

@@ -1941,3 +1941,26 @@ a {
     padding: 16px 28px;
   }
 }
+
+/* A labelled form field: the label above its input, as on the Tasks page. */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.field-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* .input grows along a row. In a field the input sits under its label, so it keeps its own height. */
+.field > .input {
+  flex: none;
+}
+
+.field > textarea.input {
+  padding: 8px 10px;
+  resize: vertical;
+}

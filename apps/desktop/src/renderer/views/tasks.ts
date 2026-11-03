@@ -1,9 +1,9 @@
-import type { AssignedTaskView, OperatorStepView, OperatorTaskView, TwinStatus } from '@companyos/twin-core';
+import type { AssignedTaskView, OperatorStepView, OperatorTaskView, ProposedTask, TwinStatus } from '@companyos/twin-core';
 import { h, type Child } from '../dom.js';
 import { button, chip, emptyState, pageHeader, panel, panelHead, type ChipTone } from '../components/ui.js';
 import { formatWhen, plural } from '../format.js';
 import { levelLabel } from '../labels.js';
-import { act, bridge, go, pending, state } from '../store.js';
+import { act, bridge, go, pending, requestRender, state } from '../store.js';
 
 /**
  * The Tasks page: the person tells the twin what to do in an app, and the operator works through it one step at a time
@@ -44,6 +44,7 @@ export function tasksView(status: TwinStatus): HTMLElement {
     { class: 'stack tasks-view', 'data-testid': 'view-tasks' },
     pageHeader('Tasks', 'Tell the twin what to do in an app. It works one small step at a time, through agent-desktop.'),
     operator.pending ? approvalPanel(operator.pending) : undefined,
+    operator.state === 'idle' ? proposalsPanel(status) : undefined,
     operator.state === 'idle' ? taskForm(status) : runningPanel(operator),
     operator.steps.length > 0 ? stepsPanel(operator) : undefined,
     operator.state === 'idle' && operator.result ? resultPanel(operator) : undefined,
@@ -156,6 +157,69 @@ function taskForm(status: TwinStatus): HTMLElement {
   );
 }
 
+/**
+ * Tasks proposed from what was on screen in the last day. The twin groups the screen text by meaning and names one next
+ * step for each piece of work, all on this Mac. A proposal runs only when the person presses Run, and then every step goes
+ * through the same checks as a task typed in the box.
+ */
+function proposalsPanel(status: TwinStatus): HTMLElement {
+  const proposals = state.proposals;
+  const capturing = status.config.screenCaptureEnabled;
+  const find = button(proposals === undefined ? 'Find tasks from my screen' : 'Look again', {
+    variant: proposals === undefined ? 'primary' : undefined,
+    testid: 'task-propose',
+    disabled: pending('task-propose') || !capturing,
+    onClick: () =>
+      void act('task-propose', async () => {
+        state.proposals = await bridge().proposeTasks();
+      }),
+  });
+  return panel(
+    { testid: 'task-proposals' },
+    panelHead('From your screen', 'What you worked on in the last day, and one next step for each. Worked out on this Mac.'),
+    !capturing
+      ? h('p', { class: 'muted small' }, 'Turn on screen text in Settings, so the twin has something to understand.')
+      : pending('task-propose')
+        ? h('p', { class: 'muted small', 'data-testid': 'task-proposing' }, 'Reading your screen text and working out the tasks…')
+        : proposals === undefined
+          ? undefined
+          : proposals.length === 0
+            ? h('p', { class: 'muted small', 'data-testid': 'task-proposals-empty' }, 'No clear next step in the last day of screen text.')
+            : h('ul', { class: 'ov-wait-list', 'data-testid': 'task-proposal-list' }, ...proposals.map(task => proposalRow(task, status))),
+    h('div', { class: 'actions' }, find),
+  );
+}
+
+function proposalRow(task: ProposedTask, status: TwinStatus): HTMLElement {
+  const blocked = !status.operator.ready.agentDesktop || (status.config.operatorModel === 'chutes' && !status.operator.ready.chutesKey);
+  return h(
+    'li',
+    { class: 'ov-wait-row', 'data-testid': 'task-proposal' },
+    h(
+      'span',
+      { class: 'ov-wait-copy' },
+      h('span', { class: 'ov-wait-name' }, task.goal),
+      h('span', { class: 'ov-wait-meta mono' }, `${task.topic} · ${task.app} · ${plural(task.evidence, 'read')} · ${formatWhen(task.lastSeen)}`),
+    ),
+    button('Edit', {
+      testid: 'task-proposal-edit',
+      onClick: () => {
+        state.task.goal = task.goal;
+        state.task.app = task.app;
+        state.dirty.delete(GOAL_KEY);
+        state.dirty.delete(APP_KEY);
+        requestRender();
+      },
+    }),
+    button('Run', {
+      variant: 'primary',
+      testid: 'task-proposal-run',
+      disabled: pending('task-start') || blocked,
+      onClick: () => void act('task-start', () => bridge().startTask({ goal: task.goal, app: task.app })),
+    }),
+  );
+}
+
 function runningPanel(operator: OperatorTaskView): HTMLElement {
   return panel(
     { testid: 'task-running' },
@@ -236,7 +300,7 @@ function modelPanel(status: TwinStatus): HTMLElement {
       h(
         'p',
         { class: 'muted small' },
-        'Runs with Ollama on this Mac, so nothing leaves the device. In our tests the small local model could not finish tasks, and the large model on Chutes could.',
+        'Runs with Ollama on this Mac, so nothing leaves the device. Tasks are worked out and planned by Qwen3 4B (2.5 GB): ollama pull qwen3:4b-instruct-2507-q4_K_M. Tasks from your screen also need all-minilm (46 MB).',
       ),
     );
   } else {

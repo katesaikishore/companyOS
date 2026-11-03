@@ -1,4 +1,4 @@
-import type { CompletionRequest, NetworkEntry, OperatorModel, VisionCompleter, VisionRequest } from '@companyos/twin-core';
+import type { CompletionRequest, NetworkEntry, OperatorModel, TextEmbedder, VisionCompleter, VisionRequest } from '@companyos/twin-core';
 
 /**
  * The local vision model, served by Ollama on this Mac. The address must be the loopback address: the app refuses any other
@@ -6,7 +6,13 @@ import type { CompletionRequest, NetworkEntry, OperatorModel, VisionCompleter, V
  * of picture it sent, never the picture or the reply.
  */
 const OLLAMA_BASE = 'http://127.0.0.1:11434';
-const VISION_MODEL = 'qwen3-vl:2b-instruct';
+export const VISION_MODEL = 'qwen3-vl:2b-instruct';
+/**
+ * The model that plans the operator's steps from an app's controls: Qwen3 4B Instruct at Q4, 2.5 GB, text only. The 2B
+ * vision model understands screen text well but could not plan steps: on a real TextEdit window it pressed Close instead of
+ * typing. The 4B model typed the right line at once.
+ */
+export const PLANNER_MODEL = 'qwen3:4b-instruct-2507-q4_K_M';
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]']);
 const CALL_TIMEOUT_MS = 120_000;
 const CHECK_TIMEOUT_MS = 2_000;
@@ -21,6 +27,8 @@ export function loopbackUrl(base: string): URL {
 interface OllamaVisionOptions {
   baseUrl?: string;
   model?: string;
+  /** How long Ollama keeps the model in memory after a call, such as '5m' or 0 to free it at once. Ollama's default when unset. */
+  keepAlive?: string | number;
   fetchImpl?: typeof fetch;
   record: (entry: NetworkEntry) => void;
   now?: () => number;
@@ -124,10 +132,62 @@ export async function visionModelReady(
   return names.includes(model) ? 'ready' : 'model_missing';
 }
 
-/** A text model on the Ollama server on this Mac, for the task operator. Hidden reasoning is off. Nothing leaves the device. */
+/** The embedding model for understanding screen text: all-MiniLM-L6, 46 MB, 384 numbers per text. */
+export const EMBED_MODEL = 'all-minilm';
+
+/**
+ * A text embedder on the Ollama server on this Mac. The text goes to the loopback address only, and each call is written to
+ * the ledger with its size, never the text.
+ */
+export function createOllamaEmbedder(options: OllamaVisionOptions): TextEmbedder {
+  const base = loopbackUrl(options.baseUrl ?? OLLAMA_BASE);
+  const model = options.model ?? EMBED_MODEL;
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const now = options.now ?? Date.now;
+  const url = new URL('/api/embed', base);
+  return {
+    async embed(texts, signal) {
+      const ts = now();
+      const body = JSON.stringify({ model, input: texts });
+      const log = (outcome: NetworkEntry['outcome'], status?: number): void =>
+        options.record({ ts, purpose: 'local_model', host: url.hostname, path: url.pathname, bytes: Buffer.byteLength(body), outcome, ...(status === undefined ? {} : { status }) });
+      let response: Response;
+      try {
+        response = await fetchImpl(url, {
+          method: 'POST',
+          redirect: 'error',
+          headers: { 'content-type': 'application/json' },
+          body,
+          signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(CALL_TIMEOUT_MS)]),
+        });
+      } catch {
+        log(signal?.aborted ? 'cancelled' : 'failed');
+        throw new Error('Ollama is not running on this Mac. Open Ollama, then try again.');
+      }
+      if (!response.ok) {
+        log('failed', response.status);
+        if (response.status === 404) throw new Error(`The embedding model ${model} is not installed in Ollama. Run: ollama pull ${model}`);
+        throw new Error(`The embedding model returned ${response.status}.`);
+      }
+      const reply = (await response.json().catch(() => ({}))) as { embeddings?: unknown };
+      const vectors = reply.embeddings;
+      if (!Array.isArray(vectors) || vectors.length !== texts.length || !vectors.every(row => Array.isArray(row) && row.every(n => typeof n === 'number'))) {
+        log('failed');
+        throw new Error('The embedding model gave an answer that is not a list of vectors.');
+      }
+      log('ok');
+      return vectors as number[][];
+    },
+  };
+}
+
+/**
+ * A text model on the Ollama server on this Mac: the step planner by default, or the vision model when it is passed in to
+ * understand screen text. Hidden reasoning is off. Nothing leaves the device.
+ */
 export function createOllamaChat(options: OllamaVisionOptions): OperatorModel {
   const base = loopbackUrl(options.baseUrl ?? OLLAMA_BASE);
-  const model = options.model ?? VISION_MODEL;
+  const model = options.model ?? PLANNER_MODEL;
   const fetchImpl = options.fetchImpl ?? fetch;
   const now = options.now ?? Date.now;
   const url = new URL('/api/chat', base);
@@ -140,6 +200,7 @@ export function createOllamaChat(options: OllamaVisionOptions): OperatorModel {
         think: false,
         format: request.schema,
         options: { temperature: 0, num_predict: request.maxTokens },
+        ...(options.keepAlive === undefined ? {} : { keep_alive: options.keepAlive }),
         messages: [
           { role: 'system', content: request.system },
           { role: 'user', content: request.prompt },

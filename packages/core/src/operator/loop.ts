@@ -88,6 +88,8 @@ const MODEL_RETRY_MS = 1000;
 /** One action with a short reason fits well inside this. */
 const MAX_REPLY_TOKENS = 600;
 const SHOWN_NAME = 80;
+/** A field's text is shown longer than a name, so the end of a document, where typed lines go, can be checked. */
+const SHOWN_VALUE = 200;
 
 const SYSTEM =
   'You operate one desktop app for the person through its accessibility controls. ' +
@@ -97,7 +99,8 @@ const SYSTEM =
   'The actions are: click a control; type text into a field; press a key combo such as cmd+n, cmd+s or return; ' +
   'scroll a control up or down; launch an app or focus an app by name; done; fail. ' +
   'When the app has no window, or a click does not land, a menu shortcut such as cmd+n often does the same job. ' +
-  'To write into a text field or text area, use type on it directly. Do not click it first. ' +
+  'To write into a text field or text area, use type on it directly. Do not click it first. Typed text goes after the text already there, so to add a line to a document start the text with a new line (\\n). ' +
+  'Never click Close, Minimize or Full Screen: they act on the window, not the work. ' +
   'A step marked "may have landed" may already have worked: check before doing it again. ' +
   'The window title shows where the app is, such as the open folder or document. When it already matches the goal, reply done. ' +
   'Keep the reason under 20 words. ' +
@@ -110,10 +113,14 @@ function quoted(text: string, max: number): string {
   return JSON.stringify(text.slice(0, max));
 }
 
+/** Roles that take text. A small model clicks them instead of typing, so their line says how to use them. */
+const TEXT_ROLES = new Set(['textfield', 'textarea', 'searchfield', 'combobox']);
+
 function controlLine(control: Observation['controls'][number]): string {
   const description = control.description && control.description !== control.name ? ` (${quoted(control.description, SHOWN_NAME)})` : '';
-  const value = control.value ? ` = ${quoted(control.value, SHOWN_NAME)}` : '';
-  return `- ${control.ref} ${control.role} ${quoted(control.name, SHOWN_NAME)}${description}${value}`;
+  const value = control.value ? ` = ${quoted(control.value, SHOWN_VALUE)}` : '';
+  const hint = TEXT_ROLES.has(control.role) && !control.secure ? ' [use type on this]' : '';
+  return `- ${control.ref} ${control.role} ${quoted(control.name, SHOWN_NAME)}${description}${value}${hint}`;
 }
 
 function stepLine(step: OperatorStep): string {
@@ -126,6 +133,7 @@ function stepLine(step: OperatorStep): string {
     action.type === 'launch' || action.type === 'focus_app' ? action.app : '';
   const outcome =
     step.delivery === 'unknown' ? 'may have landed, check before repeating' :
+    step.delivery === 'not_delivered' ? 'did not land, do not repeat it: try a different action' :
     step.delivery ?? (step.verdict === 'ask' ? 'held for the person' : step.verdict ?? '');
   return `${step.n}. ${action.type} ${target} -> ${outcome}`;
 }
@@ -151,9 +159,16 @@ export function operatorPrompt(task: OperatorTask, observation: Observation, his
     .join('\n\n');
 }
 
-/** An action's identity without its reason, to spot the model doing the same thing again. */
-function sameStep(action: OperatorAction): string {
+/**
+ * An action's identity without its reason, to spot the model doing the same thing again. Refs change with every snapshot,
+ * so the target is named by its role and name instead: the same text typed into the same field is the same step.
+ */
+function sameStep(action: OperatorAction, observation: Observation): string {
   const { reason: _reason, ...rest } = action as OperatorAction & { reason?: string };
+  if ('ref' in rest) {
+    const control = observation.controls.find(candidate => candidate.ref === rest.ref);
+    return JSON.stringify({ ...rest, ref: control ? `${control.role}:${control.name}` : rest.ref });
+  }
   return JSON.stringify(rest);
 }
 
@@ -184,6 +199,8 @@ export async function runTask(task: OperatorTask, model: OperatorModel, hands: O
   let app = task.app;
   let invalidInARow = 0;
   let last: { key: string; delivery: ActResult['delivery'] } | undefined;
+  /** Text steps that landed or may have. Typing the same text into the same field again would write it twice. */
+  const typed = new Set<string>();
   const rules = (): JudgeOptions => ({ excludedApps: options.excludedAppsNow?.() ?? options.excludedApps, autonomousApps: options.autonomousApps });
   const record = (step: OperatorStep): void => {
     steps.push(step);
@@ -254,8 +271,11 @@ export async function runTask(task: OperatorTask, model: OperatorModel, hands: O
     const target = control ? control.name || control.description || `unnamed ${control.role}` : undefined;
     let verdict = judge(action, observation, rules());
     // The same step again, after one that landed or may have landed, could do it twice. It waits for the person.
-    if (verdict.verdict === 'allow' && last && last.key === sameStep(action) && last.delivery !== 'not_delivered') {
+    const key = sameStep(action, observation);
+    if (verdict.verdict === 'allow' && last && last.key === key && last.delivery !== 'not_delivered') {
       verdict = { verdict: 'ask', why: 'This repeats the last step, which may already have worked.' };
+    } else if (verdict.verdict === 'allow' && action.type === 'type' && typed.has(key)) {
+      verdict = { verdict: 'ask', why: 'This text was already typed into this field.' };
     }
     if (verdict.verdict === 'deny') {
       record({ n, app, action, target, verdict: 'deny', why: verdict.why });
@@ -280,7 +300,8 @@ export async function runTask(task: OperatorTask, model: OperatorModel, hands: O
       result = { delivery: 'unknown', code: 'act_failed' };
     }
     record({ n, app, action, target, verdict: verdict.verdict, why: 'why' in verdict ? verdict.why : undefined, approved, delivery: result.delivery, code: result.code });
-    last = { key: sameStep(action), delivery: result.delivery };
+    last = { key, delivery: result.delivery };
+    if (action.type === 'type' && result.delivery !== 'not_delivered') typed.add(key);
     // Switch apps only when the launch or focus landed. Otherwise the model sees the app it was in and can try again.
     if ((action.type === 'launch' || action.type === 'focus_app') && (result.delivery === 'delivered' || result.delivery === 'unverified')) app = action.app;
   }

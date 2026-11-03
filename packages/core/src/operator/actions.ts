@@ -24,6 +24,8 @@ export interface Control {
   secure?: boolean;
   /** The current text of a text field, cut short. Left out for other roles and for secure fields. */
   value?: string;
+  /** True for a text field whose text has more than one line, such as a document. Text added to it starts a new line. */
+  multiline?: boolean;
 }
 
 export interface Observation {
@@ -60,8 +62,8 @@ export const ACTION_SCHEMA = {
     direction: { type: 'string', enum: ['up', 'down'] },
     reason: { type: 'string' },
   },
-  // ref and name are always present, empty when unused, so a small model cannot leave the target out.
-  required: ['action', 'ref', 'name', 'reason'],
+  // ref, name and text are always present, empty when unused, so a small model cannot leave the target or the text out.
+  required: ['action', 'ref', 'name', 'text', 'reason'],
 } as const;
 
 /** The apps the operator may act in without asking each step: local editors where a step cannot send anything. */
@@ -73,13 +75,23 @@ const BUNDLE_ID = /^[a-z0-9-]+(?:\.[a-z0-9-]+){2,}$/i;
 const KEYS = /^[a-z0-9]+(?:\+[a-z0-9]+){0,3}$/;
 const MAX_TEXT = 2000;
 
+/**
+ * A target field that is too long to name anything is treated as left empty. Small models fill every field, for example
+ * the whole document as the name of a done reply, and that must not turn a good answer into an invalid one.
+ */
+const target = (max: number) =>
+  z
+    .string()
+    .optional()
+    .transform(value => (value !== undefined && value.length <= max ? value : undefined));
+
 const Reply = z.object({
   action: z.enum(ACTION_NAMES),
-  ref: z.string().max(80).optional(),
-  name: z.string().max(120).optional(),
+  ref: target(80),
+  name: target(120),
   text: z.string().max(MAX_TEXT).optional(),
-  keys: z.string().max(40).optional(),
-  app: z.string().max(80).optional(),
+  keys: target(40),
+  app: target(80),
   direction: z.enum(['up', 'down']).optional(),
   reason: z.string().trim().min(1).max(300),
 });
@@ -180,7 +192,7 @@ export interface JudgeOptions {
 const SCRIPT_HOSTS = new Set(['script editor', 'automator', 'shortcuts', 'terminal', 'iterm', 'iterm2', 'warp', 'rio', 'wave', 'termius', 'kitty', 'alacritty', 'ghostty', 'wezterm', 'hyper']);
 const OUTBOUND_WORDS =
   /\b(send|post|publish|reply|submit|share|forward|invite|e-?mail|message|upload|attach|approve|accept|decline|allow|connect|subscribe|follow|like|comment|rsvp|push|pay|payment|purchase|buy|order|checkout|check out|transfer|donate|sign in|sign up|log in|login|register|continue with)\b/i;
-const DESTRUCTIVE_WORDS = /\b(delete|remove|erase|trash|bin|discard|don't save|do not save|revert|replace|overwrite|clear|reset|wipe|log out|sign out|quit|shut down|restart|uninstall|archive)\b/i;
+const DESTRUCTIVE_WORDS = /\b(close|delete|remove|erase|trash|bin|discard|don't save|do not save|revert|replace|overwrite|clear|reset|wipe|log out|sign out|quit|shut down|restart|uninstall|archive)\b/i;
 const PASSWORD_WORDS = /\b(password|passwort|passphrase|passcode|kennwort|contraseña|senha|mot de passe|pin)\b/i;
 /** Keys that only edit or move inside a local editor. Anything else waits for the person, even in an allowed app. */
 const SAFE_KEYS = new Set(['return', 'tab', 'space', 'up', 'down', 'left', 'right', 'backspace', 'delete', 'escape', 'home', 'end', 'pageup', 'pagedown', 'cmd+n', 'cmd+a', 'cmd+c', 'cmd+v', 'cmd+z', 'cmd+shift+z', 'cmd+b', 'cmd+i', 'cmd+u']);
