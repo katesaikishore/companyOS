@@ -66,18 +66,56 @@ func recognise(_ png: Data) -> [String: String] {
     return ["text": readingOrder(request.results ?? [])]
 }
 
+/** How much of a PDF's text is sent. Who issued a document is often past its first page's tables, so this is generous. */
+let pdfTextChars = 12_000
+
+/** A PDF page drawn on white, about 1,700 pixels on its long side and turned as it is shown, for Vision to read. */
+func pageImage(_ page: PDFPage) -> CGImage? {
+    guard let ref = page.pageRef else { return nil }
+    let box = ref.getBoxRect(.mediaBox)
+    guard box.width > 0, box.height > 0 else { return nil }
+    let turned = ref.rotationAngle % 180 != 0
+    let size = turned ? CGSize(width: box.height, height: box.width) : box.size
+    let scale = 1700 / max(size.width, size.height)
+    let width = Int(size.width * scale), height = Int(size.height * scale)
+    guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }
+    context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+    context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+    context.scaleBy(x: scale, y: scale)
+    // At the page's own size, the drawing transform only turns and moves the page, so the scale above is all of the zoom.
+    context.concatenate(ref.getDrawingTransform(.mediaBox, rect: CGRect(origin: .zero, size: size), rotate: 0, preserveAspectRatio: true))
+    context.drawPDFPage(ref)
+    return context.makeImage()
+}
+
 /**
  * Describes one image file for search: its size as shown (orientation applied), the faces in it as boxes relative to the
  * image, Apple's scene labels with their confidence, and the start of any text in it. The file is read in a reduced size.
  */
 func describe(_ path: String) -> [String: Any] {
     let url = URL(fileURLWithPath: path)
-    // A PDF gives the text of its first pages, through PDFKit.
+    // A PDF gives the text of its first pages, through PDFKit. A scan has no text to give, so its first pages are read
+    // with Vision instead.
     if url.pathExtension.lowercased() == "pdf" {
         guard let document = PDFDocument(url: url) else { return ["path": path, "error": "decode"] }
+        // A PDF with a password, as many bank statements are, shows nothing without it, so it is found by its name.
+        if document.isLocked { return ["path": path, "pages": document.pageCount, "text": "", "locked": true] }
         var text = ""
         for index in 0..<min(document.pageCount, 3) { text += (document.page(at: index)?.string ?? "") + "\n" }
-        return ["path": path, "pages": document.pageCount, "text": String(text.prefix(3000))]
+        // A scan may still carry a short printed line, such as a scanner's stamp, so it is the text per page that counts.
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).count >= 40 * max(1, min(document.pageCount, 3)) {
+            return ["path": path, "pages": document.pageCount, "text": String(text.prefix(pdfTextChars))]
+        }
+        var read = ""
+        for index in 0..<min(document.pageCount, 2) {
+            guard let page = document.page(at: index), let image = pageImage(page) else { continue }
+            let request = VNRecognizeTextRequest()
+            request.recognitionLevel = .accurate
+            request.usesLanguageCorrection = true
+            guard (try? VNImageRequestHandler(cgImage: image, options: [:]).perform([request])) != nil else { continue }
+            read += readingOrder(request.results ?? []) + "\n"
+        }
+        return ["path": path, "pages": document.pageCount, "text": String(read.prefix(pdfTextChars)), "scanned": true]
     }
     guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
           let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],

@@ -3,7 +3,7 @@ import { createReadStream, existsSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, extname, join, relative } from 'node:path';
-import { clipText, compress, embeddingText, extractEntities, type FileKind, type FileRecord, type TextEmbedder } from '@companyos/twin-core';
+import { FACTS_VERSION, clipText, compress, embeddingText, extractFacts, type FileKind, type FileRecord, type TextEmbedder } from '@companyos/twin-core';
 
 /**
  * The file search index, built inside the app: it walks Desktop, Documents, Downloads and Pictures, describes each file
@@ -169,13 +169,19 @@ export interface FileIndexOptions {
   home?: string;
 }
 
-/** One pass over the folders. Unchanged files keep their records; the rest are described, embedded and given their names. */
+/**
+ * One pass over the folders. Unchanged files keep their records; the rest are described, given their facts and embedded.
+ * A record whose facts were read by other rules (FACTS_VERSION) counts as changed, so the first pass after a change to the
+ * rules reads every file again.
+ * Reading a file only in iCloud would make macOS download it, so such a file is kept by its name until it is on this Mac.
+ */
 export async function indexFiles(options: FileIndexOptions): Promise<FileIndexProgress> {
   const previous = new Map(options.previous().map(record => [record.path, record]));
   const found = await walkFolders(options.home);
   const fresh = found.filter(file => {
     const old = previous.get(file.path);
-    return !old || old.mtime !== file.mtime || old.size !== file.size || !old.vector;
+    // A file that was only in iCloud and is on this Mac now, because it was opened, is read for the first time.
+    return !old || old.mtime !== file.mtime || old.size !== file.size || !old.vector || old.factsVersion !== FACTS_VERSION || (old.cloudOnly === true && !file.cloudOnly);
   });
   const progress: FileIndexProgress = { running: true, files: found.length, images: 0, documents: 0, done: 0, total: fresh.length };
   options.onProgress({ ...progress });
@@ -200,8 +206,8 @@ export async function indexFiles(options: FileIndexOptions): Promise<FileIndexPr
     else if (file.size <= MAX_TEXT_FILE_BYTES && TEXTUTIL_TYPES.has(ext)) text = await readWithTextutil(file.path);
     if (!row) tick();
     const name = basename(file.path);
-    const folder = [basename(file.root), ...relative(file.root, file.path).split('/').slice(0, -1)].join('/');
-    const record: FileRecord = { path: file.path, name, folder, kind: file.kind, size: file.size, mtime: file.mtime, text: clipText(text), entities: [] };
+    const folder = [basename(file.root), ...relative(file.root, file.path).split(/[\\/]/).slice(0, -1)].join('/');
+    const record: FileRecord = { path: file.path, name, folder, kind: file.kind, size: file.size, mtime: file.mtime, text: clipText(text) };
     if (file.cloudOnly) record.cloudOnly = true;
     if (typeof row?.width === 'number' && typeof row.height === 'number') {
       record.width = row.width;
@@ -209,7 +215,9 @@ export async function indexFiles(options: FileIndexOptions): Promise<FileIndexPr
       record.faces = Array.isArray(row.faces) ? (row.faces as number[][]) : [];
       record.labels = Array.isArray(row.labels) ? (row.labels as Array<{ label?: unknown }>).map(label => String(label.label ?? '')).filter(Boolean) : [];
     }
-    record.entities = extractEntities(record);
+    // The facts are read from all the text, before the record keeps only its start.
+    record.facts = extractFacts({ name, folder, text });
+    record.factsVersion = FACTS_VERSION;
     records.push(record);
   }
 

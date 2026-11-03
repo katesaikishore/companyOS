@@ -1,8 +1,9 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { QueryVectors, walkFolders } from '../src/main/file-index';
+import { FACTS_VERSION, type FileRecord } from '@companyos/twin-core';
+import { QueryVectors, indexFiles, walkFolders } from '../src/main/file-index';
 
 const homes: string[] = [];
 afterEach(() => {
@@ -41,6 +42,33 @@ describe('walkFolders', () => {
       ['Documents/notes.md', 'document', false],
       ['Desktop/archive.zip', 'other', false],
     ]);
+  });
+});
+
+describe('indexFiles', () => {
+  it('reads a file again once it is on this Mac after being only in iCloud, or when the rules changed, and keeps an unchanged one', async () => {
+    const root = home({ 'Documents/opened.txt': 'ICICI Bank account statement', 'Documents/old-rules.txt': 'HDFC Bank payslip', 'Documents/same.txt': 'unchanged' });
+    const kept = (name: string, extra: Partial<FileRecord>): FileRecord => {
+      const path = join(root, 'Documents', name);
+      const stats = statSync(path);
+      return { path, name, folder: 'Documents', kind: 'document', size: stats.size, mtime: stats.mtimeMs, text: '', facts: [], factsVersion: FACTS_VERSION, vector: 'AA==', scale: 1, ...extra };
+    };
+    const embedded: string[] = [];
+    let saved: FileRecord[] = [];
+    await indexFiles({
+      helper: join(root, 'no-helper'),
+      embedder: { embed: async texts => (embedded.push(...texts), texts.map(() => [1, 0])) },
+      previous: () => [kept('opened.txt', { cloudOnly: true }), kept('old-rules.txt', { factsVersion: FACTS_VERSION - 1 }), kept('same.txt', { text: 'as it was' })],
+      save: records => (saved = records),
+      onProgress: () => undefined,
+      home: root,
+    });
+    expect(embedded).toHaveLength(2);
+    expect(saved.find(record => record.name === 'old-rules.txt')?.factsVersion).toBe(FACTS_VERSION);
+    const opened = saved.find(record => record.name === 'opened.txt');
+    expect(opened?.cloudOnly).toBeUndefined();
+    expect(opened?.facts).toEqual(expect.arrayContaining(['type:bank statement', 'org:icici bank']));
+    expect(saved.find(record => record.name === 'same.txt')?.text).toBe('as it was');
   });
 });
 

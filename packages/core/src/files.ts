@@ -1,9 +1,11 @@
+import { factCard, factKind, factValue, factWords, periodRange, typesAskedFor } from './file-knowledge';
 
 /**
- * File and photo search on this device: an index of the person's files with a compressed embedding of each, a small
- * knowledge graph of the names they mention, and a plan read from a question in plain words by fast rules. Ranking
- * mixes meaning (the embedding), the graph (files that share a name with the question, or with its neighbours) and the
- * shape rules a question asks for, such as a passport photo.
+ * File and photo search on this device: an index of the person's files with a compressed embedding of each, a knowledge
+ * graph of the typed facts read from their text (what each file is, who issued it, who and which account it is about,
+ * the months it covers), and a plan read from a question in plain words by fast rules. Ranking mixes meaning (the
+ * embedding), the graph (how much of the question, rare words weighing most, the file's facts cover) and the shape
+ * rules a question asks for, such as a passport photo.
  */
 
 export type FileKind = 'image' | 'document' | 'other';
@@ -24,8 +26,14 @@ export interface FileRecord {
   labels?: string[];
   /** The start of the file's text, or the text in an image. */
   text: string;
-  /** Names, organisations, emails and projects found in the file. Lower case. */
-  entities: string[];
+  /**
+   * The file's knowledge, compressed to a few typed facts read from all of its text, such as "type:bank statement" or
+   * "org:icici bank" (see file-knowledge.ts). They are the file's nodes in the knowledge graph. A record from before facts
+   * were read has none, and the next pass reads them.
+   */
+  facts?: string[];
+  /** The version of the rules that read the facts (FACTS_VERSION). Facts from other rules are read again. */
+  factsVersion?: number;
   /** True for a file whose content is only in iCloud. It is indexed by name only, and never previewed. */
   cloudOnly?: boolean;
   /** The embedding, compressed to one signed byte per number, and its scale, as base64. */
@@ -57,10 +65,16 @@ export interface FileHit {
 }
 
 const TEXT_CHARS = 1500;
+/** How much each signal adds to a file's score. Shape and a preferred period add 0.1 each. */
+const GRAPH_WEIGHTS = { meaning: 0.4, graph: 0.35, type: 0.1, name: 0.1, text: 0.05 };
 
-/** The text an embedding is made from: name, folder, labels and the start of the text. */
-export function embeddingText(record: Pick<FileRecord, 'name' | 'folder' | 'labels' | 'text'>): string {
-  return [record.name, record.folder, (record.labels ?? []).join(' '), record.text.slice(0, 600)].filter(Boolean).join(' | ');
+/**
+ * The text an embedding is made from: name, folder, the card of the file's facts, labels and the start of the text. The
+ * card comes before the text, so a statement's meaning is "bank statement, icici bank" and not its first rows of numbers,
+ * and the model, which reads only its first 256 tokens, always sees it.
+ */
+export function embeddingText(record: Pick<FileRecord, 'name' | 'folder' | 'labels' | 'text' | 'facts'>): string {
+  return [record.name, record.folder, factCard(record.facts ?? []), (record.labels ?? []).join(' '), record.text.slice(0, 400)].filter(Boolean).join(' | ');
 }
 
 /** A vector as one signed byte per number and a scale: a quarter of the size of 32-bit floats, enough for ranking. */
@@ -77,85 +91,128 @@ export function expand(vector: string, scale: number): Float32Array {
   return Float32Array.from(values, value => value * scale);
 }
 
-const STOP = new Set(['the', 'and', 'for', 'with', 'from', 'this', 'that', 'page', 'date', 'name', 'total', 'invoice', 'copy', 'final', 'new', 'img', 'image', 'screenshot', 'scan', 'document', 'file', 'untitled', 'download']);
-const EMAIL = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g;
-/** Two to four capitalised words in a row, such as "Priya Shah" or "Acme Supplies Ltd". */
-const PROPER = /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\b/g;
-/** One all-capitals word of three or more letters, such as "ACME" or "GST". */
-const ACRONYM = /\b([A-Z]{3,10})\b/g;
+/** Facts that name someone or something, between which the graph keeps neighbours. */
+const NAME_KINDS = new Set(['org', 'person', 'email', 'project']);
+/** How close two names must be, by how often they appear together against how common each is, to be neighbours. */
+const NEAR_THRESHOLD = 0.3;
+/** The tie a file gets from a neighbour of a fact the question names, against 1 for the fact itself. */
+const NEAR_TIE = 0.4;
+/** The tie a file gets from an organisation it only mentions, such as another bank in a statement's transactions. */
+const MENTION_TIE = 0.5;
 
-/**
- * The names a file mentions, by simple rules: emails, runs of capitalised words, capitalised acronyms, and the folder names
- * under the root, which are usually projects. Lower case, each once, at most twenty.
- */
-export function extractEntities(record: Pick<FileRecord, 'name' | 'folder' | 'text'>): string[] {
-  const found = new Set<string>();
-  const add = (value: string) => {
-    const clean = value.toLowerCase().replace(/\s+/g, ' ').trim();
-    if (clean.length >= 3 && clean.length <= 60 && !STOP.has(clean)) found.add(clean);
-  };
-  const source = `${record.name.replace(/[_-]+/g, ' ').replace(/\.[a-z0-9]+$/i, '')}\n${record.text}`;
-  for (const match of source.matchAll(EMAIL)) add(match[0]);
-  for (const match of source.matchAll(PROPER)) add(match[1]);
-  for (const match of source.matchAll(ACRONYM)) add(match[1]);
-  for (const part of record.folder.split('/').slice(1)) add(part);
-  return [...found].slice(0, 20);
-}
-
-/** The knowledge graph: for each name, the files that mention it, and the names seen with it in the same files. */
+/** The knowledge graph: facts and the files they are facts of, the words that reach them, and neighbours between names. */
 export interface FileGraph {
+  /** For each fact, the files it is a fact of. */
   files: Map<string, string[]>;
-  neighbours: Map<string, Map<string, number>>;
-  /** Each word of each name, to the names it is part of, so "priya" finds "priya shah" without scanning every name. */
+  /** For each word, the facts it reaches (see factWords), so "icici" finds "org:icici bank" without a scan of every fact. */
   words: Map<string, string[]>;
-  /** Each name's three closest neighbours, sorted once when the graph is built. */
+  /**
+   * How rare each word is among the files its facts belong to, as an inverse document frequency: "icici" in three files
+   * weighs far more than "bank" in three hundred, so a question's rare words decide which files tie to it.
+   */
+  rarity: Map<string, number>;
+  /** The rarity of a word no fact has, the most a word can weigh. */
+  unknownRarity: number;
+  /**
+   * Each name's closest names: seen in the same files often against how common each is (cosine of their files), so a
+   * name in every file, such as the person's own, is nobody's neighbour. Up to three, sorted once when the graph is built.
+   */
   near: Map<string, string[]>;
 }
 
 export function buildGraph(records: readonly FileRecord[]): FileGraph {
   const files = new Map<string, string[]>();
-  const neighbours = new Map<string, Map<string, number>>();
-  const words = new Map<string, string[]>();
+  const together = new Map<string, Map<string, number>>();
   for (const record of records) {
-    for (const entity of record.entities) {
-      const paths = files.get(entity);
+    const facts = record.facts ?? [];
+    for (const fact of facts) {
+      const paths = files.get(fact);
       if (paths) paths.push(record.path);
-      else {
-        files.set(entity, [record.path]);
-        for (const word of entity.split(/[^a-z0-9@.]+/).filter(word => word.length >= 2)) {
-          const named = words.get(word);
-          if (named) named.push(entity);
-          else words.set(word, [entity]);
-        }
-      }
-      for (const other of record.entities) {
-        if (other === entity) continue;
-        const row = neighbours.get(entity) ?? new Map<string, number>();
+      else files.set(fact, [record.path]);
+    }
+    const names = facts.filter(fact => NAME_KINDS.has(factKind(fact)));
+    for (const fact of names) {
+      for (const other of names) {
+        if (other === fact) continue;
+        const row = together.get(fact) ?? new Map<string, number>();
         row.set(other, (row.get(other) ?? 0) + 1);
-        neighbours.set(entity, row);
+        together.set(fact, row);
       }
     }
   }
+  const words = new Map<string, string[]>();
+  const reach = new Map<string, Set<string>>();
+  for (const [fact, paths] of files) {
+    for (const word of factWords(fact)) {
+      const facts = words.get(word);
+      if (facts) facts.push(fact);
+      else words.set(word, [fact]);
+      const seen = reach.get(word) ?? new Set<string>();
+      for (const path of paths) seen.add(path);
+      reach.set(word, seen);
+    }
+  }
+  const total = Math.max(1, records.length);
+  const rarity = new Map<string, number>();
+  for (const [word, paths] of reach) rarity.set(word, Math.log(1 + total / paths.size));
   const near = new Map<string, string[]>();
-  for (const [entity, row] of neighbours) near.set(entity, [...row].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([other]) => other));
-  return { files, neighbours, words, near };
+  for (const [fact, row] of together) {
+    const own = files.get(fact)?.length ?? 1;
+    const closest = [...row]
+      .filter(([, count]) => count >= 2)
+      .map(([other, count]) => [other, count / Math.sqrt(own * (files.get(other)?.length ?? 1))] as const)
+      .filter(([, closeness]) => closeness >= NEAR_THRESHOLD)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([other]) => other);
+    if (closest.length > 0) near.set(fact, closest);
+  }
+  return { files, words, rarity, unknownRarity: Math.log(1 + total), near };
+}
+
+export interface GraphTie {
+  /** How much of the question the file's facts cover, from 0 to 1, each word weighed by its rarity. */
+  score: number;
+  /** The file's own facts the question's words reached, for the reason shown with the result. */
+  facts: string[];
 }
 
 /**
- * How strongly the graph ties each file to the words of a query: a file that names one of them directly scores 1, and a
- * file that names one of their closest neighbours scores less. A word ties to every name it is a whole word of, so "priya"
- * finds "priya shah". Looked up in the word map, so it costs the same however many names there are.
+ * How strongly the graph ties each file to a question's words, each given with its other forms, such as a singular. A
+ * word ties a file fully when it reaches one of the file's facts, and less when it reaches a neighbour of one of them.
+ * The ties add up across the words, each weighed by its rarity, and are divided by the weight of all the words, so a file
+ * that is an ICICI bank statement covers "icici bank statement" and a receipt from another bank covers only "bank".
+ * Looked up in the word map, so it costs the same however many facts there are.
  */
-export function graphScores(graph: FileGraph, words: readonly string[]): Map<string, number> {
-  const scores = new Map<string, number>();
-  const raise = (path: string, value: number) => scores.set(path, Math.max(scores.get(path) ?? 0, value));
-  for (const word of words) {
-    for (const entity of graph.words.get(word) ?? []) {
-      for (const path of graph.files.get(entity) ?? []) raise(path, 1);
-      for (const other of graph.near.get(entity) ?? []) for (const path of graph.files.get(other) ?? []) raise(path, 0.4);
+export function graphScores(graph: FileGraph, words: readonly (readonly string[])[]): Map<string, GraphTie> {
+  const ties = new Map<string, GraphTie>();
+  let weight = 0;
+  for (const forms of words) {
+    if (forms.length === 0) continue;
+    const rarity = Math.max(...forms.map(form => graph.rarity.get(form) ?? 0)) || graph.unknownRarity;
+    weight += rarity;
+    // The best tie of each file for this word, so a word that reaches two of a file's facts counts once.
+    const best = new Map<string, { tie: number; fact?: string }>();
+    const raise = (path: string, tie: number, fact?: string) => {
+      const current = best.get(path);
+      if (!current || tie > current.tie) best.set(path, { tie, fact });
+    };
+    for (const form of forms) {
+      for (const fact of graph.words.get(form) ?? []) {
+        const tie = factKind(fact) === 'mention' ? MENTION_TIE : 1;
+        for (const path of graph.files.get(fact) ?? []) raise(path, tie, fact);
+        for (const other of graph.near.get(fact) ?? []) for (const path of graph.files.get(other) ?? []) raise(path, NEAR_TIE);
+      }
+    }
+    for (const [path, { tie, fact }] of best) {
+      const entry = ties.get(path) ?? { score: 0, facts: [] };
+      entry.score += rarity * tie;
+      if (fact && !entry.facts.includes(fact)) entry.facts.push(fact);
+      ties.set(path, entry);
     }
   }
-  return scores;
+  for (const entry of ties.values()) entry.score = weight > 0 ? entry.score / weight : 0;
+  return ties;
 }
 
 /** Why a photo fits a shape, or undefined when it does not. A passport photo has one face that fills much of a portrait or square frame. */
@@ -269,6 +326,9 @@ export class FileSearchIndex {
   private readonly lowerNames: string[];
   private readonly lowerText: string[];
   private readonly byPath: Map<string, number>;
+  /** Each file's document type, from its facts, and the months its text covers. */
+  private readonly types: Array<string | undefined>;
+  private readonly periods: Array<Array<{ after: number; before: number }>>;
 
   constructor(records: readonly FileRecord[]) {
     this.records = records;
@@ -290,6 +350,16 @@ export class FileSearchIndex {
     this.lowerNames = records.map(record => record.name.toLowerCase());
     this.lowerText = records.map(record => `${record.folder} ${(record.labels ?? []).join(' ')} ${record.text}`.toLowerCase());
     this.byPath = new Map(records.map((record, row) => [record.path, row]));
+    this.types = records.map(record => {
+      const type = (record.facts ?? []).find(fact => factKind(fact) === 'type');
+      return type ? factValue(type) : undefined;
+    });
+    this.periods = records.map(record =>
+      (record.facts ?? []).filter(fact => factKind(fact) === 'period').flatMap(fact => {
+        const range = periodRange(fact);
+        return range ? [range] : [];
+      }),
+    );
   }
 
   has(path: string): boolean {
@@ -302,8 +372,9 @@ export class FileSearchIndex {
   }
 
   /**
-   * The best matches for a plan. Kind, shape and dates filter; meaning, the graph, the file name and the file's text decide
-   * the order. The query vector, when there is one, must come from the same embedding model as the index.
+   * The best matches for a plan. Kind, shape and dates filter; meaning, the graph, the kind of document, the file name and
+   * the file's text decide the order. The query vector, when there is one, must come from the same embedding model as the
+   * index.
    */
   search(plan: FilePlan, queryVector: ArrayLike<number> | undefined, limit = 20): FileHit[] {
     let query: Float32Array | undefined;
@@ -314,9 +385,10 @@ export class FileSearchIndex {
       norm = Math.sqrt(norm) || 1;
       for (let i = 0; i < this.dim; i++) query[i] /= norm;
     }
-    const tied = graphScores(this.graph, plan.names.flatMap(variants));
     const words = plan.names.map(variants);
-    const hits: FileHit[] = [];
+    const tied = graphScores(this.graph, words);
+    const wanted = typesAskedFor(plan.about);
+    const scored: Array<{ row: number; score: number; shape: string; nameHits: number; textHits: number; typeFit: boolean; inPeriod: boolean }> = [];
     for (let row = 0; row < this.records.length; row++) {
       const record = this.records[row];
       if (plan.kind !== 'any' && record.kind !== plan.kind) continue;
@@ -329,27 +401,61 @@ export class FileSearchIndex {
         const offset = row * this.dim;
         for (let i = 0; i < this.dim; i++) meaning += query[i] * this.matrix[offset + i];
       }
-      const graphTie = tied.get(record.path) ?? 0;
+      const tie = tied.get(record.path);
+      const graphTie = tie?.score ?? 0;
+      const type = this.types[row];
+      const typeFit = type !== undefined && wanted.includes(type);
       const nameHits = words.filter(forms => forms.some(form => this.lowerNames[row].includes(form))).length;
       const textHits = words.filter(forms => forms.some(form => this.lowerText[row].includes(form))).length;
       const share = (count: number) => (words.length === 0 ? 0 : count / words.length);
-      const inPeriod = plan.prefer !== undefined && record.mtime >= plan.prefer.after && record.mtime <= plan.prefer.before;
-      const score = meaning * 0.5 + graphTie * 0.2 + share(nameHits) * 0.15 + share(textHits) * 0.1 + (shape ? 0.1 : 0) + (inPeriod ? 0.1 : 0);
+      // A named month or year prefers files from then: saved then, or whose text covers then, as a statement for March
+      // saved in April does.
+      const prefer = plan.prefer;
+      const inPeriod =
+        prefer !== undefined &&
+        ((record.mtime >= prefer.after && record.mtime <= prefer.before) || this.periods[row].some(range => range.after <= prefer.before && range.before >= prefer.after));
+      const score =
+        meaning * GRAPH_WEIGHTS.meaning +
+        graphTie * GRAPH_WEIGHTS.graph +
+        (typeFit ? GRAPH_WEIGHTS.type : 0) +
+        share(nameHits) * GRAPH_WEIGHTS.name +
+        share(textHits) * GRAPH_WEIGHTS.text +
+        (shape ? 0.1 : 0) +
+        (inPeriod ? 0.1 : 0);
       // A query of words keeps only files that match them somehow. A query that is only a kind, a shape or a time keeps
       // every file that fits, newest first.
       if (words.length > 0 && score <= 0) continue;
+      scored.push({ row, score, shape, nameHits, textHits, typeFit, inPeriod });
+    }
+    scored.sort((a, b) => b.score - a.score || this.records[b.row].mtime - this.records[a.row].mtime);
+    // Why each one matched is put into words only for the results shown, not for every file that scored.
+    return scored.slice(0, limit).map(({ row, score, shape, nameHits, textHits, typeFit, inPeriod }) => {
+      const record = this.records[row];
+      const tie = tied.get(record.path);
+      const type = this.types[row];
       const why: string[] = shape ? [shape] : [];
-      if (graphTie > 0) why.push(graphTie >= 1 ? 'names what you asked for' : 'linked to it');
+      if (tie && tie.facts.length > 0) why.push(factCard(tie.facts));
+      else if (tie && tie.score > 0) why.push('linked to it');
+      if (typeFit && type && !tie?.facts.includes(`type:${type}`)) why.push(type);
       if (nameHits > 0) why.push('name matches');
       else if (textHits > 0) why.push('text matches');
       if (inPeriod) why.push('from then');
-      hits.push({ record, score, why });
-    }
-    return hits.sort((a, b) => b.score - a.score || b.record.mtime - a.record.mtime).slice(0, limit);
+      return { record, score, why };
+    });
   }
 }
 
-/** The record's text cut to the size the index keeps. */
+/** A number long enough to be an account, card or Aadhaar number, whole or written in groups of four. */
+const LONG_NUMBER = /\b\d{4}(?:[ -]?\d{4}){2,3}\b|\b\d{9,18}\b/g;
+
+/**
+ * The record's text cut to the size the index keeps, with long numbers hidden but their last four digits, as statements
+ * print them: the index needs to know an account ends in 4321, never the whole number.
+ */
 export function clipText(text: string): string {
-  return text.replace(/\s+/g, ' ').trim().slice(0, TEXT_CHARS);
+  return text
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, TEXT_CHARS)
+    .replace(LONG_NUMBER, number => `XXXX${number.replace(/\D/g, '').slice(-4)}`);
 }

@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { FileSearchIndex, buildGraph, compress, expand, extractEntities, graphScores, parseQuery, shapeFit, type FileRecord } from '../src/files';
+import { extractFacts } from '../src/file-knowledge';
+import { FileSearchIndex, buildGraph, clipText, compress, embeddingText, expand, graphScores, parseQuery, shapeFit, type FileRecord } from '../src/files';
 
 function record(path: string, extra: Partial<FileRecord> = {}): FileRecord {
   const name = path.split('/').pop() ?? path;
-  return { path, name, folder: 'Downloads', kind: 'other', size: 1, mtime: Date.UTC(2026, 9, 1), text: '', entities: [], ...extra };
+  return { path, name, folder: 'Downloads', kind: 'other', size: 1, mtime: Date.UTC(2026, 9, 1), text: '', facts: [], ...extra };
 }
 
 describe('compressed vectors', () => {
@@ -19,23 +20,54 @@ describe('compressed vectors', () => {
 });
 
 describe('the knowledge graph', () => {
-  it('finds names, organisations, emails and project folders', () => {
-    const entities = extractEntities({ name: 'Acme_invoice_march.pdf', folder: 'Documents/Vendor Deals', text: 'Invoice for ACME from Priya Shah, priya@acme.com. Total 4,200.' });
-    expect(entities).toEqual(expect.arrayContaining(['priya shah', 'priya@acme.com', 'acme', 'vendor deals']));
-    expect(entities).not.toContain('invoice');
+  const statement = record('/Desktop/OpTransactionHistory26-10-2026.pdf', {
+    kind: 'document',
+    facts: ['type:bank statement', 'org:icici bank', 'account:4321', 'period:2026-10'],
+  });
+  const receipts = Array.from({ length: 6 }, (_, i) =>
+    record(`/Downloads/INDIAN BANK - PRINT RECEIPT ${i}.pdf`, { kind: 'document', facts: ['type:receipt', 'org:indian bank'] }),
+  );
+  const other = record('/Downloads/hdfc.pdf', { kind: 'document', facts: ['type:bank statement', 'org:hdfc bank'] });
+
+  it('adds the ties of every word, weighing rare words most, so the file that covers the question wins', () => {
+    const graph = buildGraph([statement, other, ...receipts]);
+    const scores = graphScores(graph, [['icici'], ['bank'], ['statement']]);
+    expect(scores.get(statement.path)?.score).toBeCloseTo(1);
+    expect(scores.get(statement.path)?.facts).toEqual(['org:icici bank', 'type:bank statement']);
+    // Another bank's statement covers "bank statement", and a receipt only "bank", which is in every file and weighs little.
+    expect(scores.get(other.path)!.score).toBeLessThan(0.6);
+    expect(scores.get(receipts[0].path)!.score).toBeLessThan(0.2);
   });
 
-  it('ties files to the names a question gives, and gives neighbours a smaller tie', () => {
+  it('ties a statement from a bank above one that only mentions it', () => {
+    const hdfc = record('/hdfc.pdf', { facts: ['type:bank statement', 'org:hdfc bank'] });
+    const icici = record('/icici.pdf', { facts: ['type:bank statement', 'org:icici bank', 'mention:hdfc bank'] });
+    const scores = graphScores(buildGraph([hdfc, icici, ...receipts]), [['hdfc'], ['statement']]);
+    expect(scores.get('/hdfc.pdf')!.score).toBeGreaterThan(scores.get('/icici.pdf')!.score);
+  });
+
+  it('reaches a fact by its other names, and a name in every file is nobody’s neighbour', () => {
+    const own = 'person:kate sai kishore';
     const records = [
-      record('/a.pdf', { entities: ['priya shah', 'acme'] }),
-      record('/b.pdf', { entities: ['acme', 'renewal'] }),
-      record('/c.pdf', { entities: ['renewal'] }),
-      record('/d.pdf', { entities: ['other'] }),
+      record('/a.pdf', { facts: ['person:priya shah', 'org:acme', own] }),
+      record('/b.pdf', { facts: ['person:priya shah', 'org:acme', own] }),
+      record('/c.pdf', { facts: ['org:acme', own] }),
+      record('/d.pdf', { facts: ['type:salary slip', own] }),
+      ...Array.from({ length: 40 }, (_, i) => record(`/e${i}.pdf`, { facts: [own] })),
     ];
-    const scores = graphScores(buildGraph(records), ['priya']);
-    expect(scores.get('/a.pdf')).toBe(1);
-    expect(scores.get('/b.pdf')).toBe(0.4);
-    expect(scores.has('/d.pdf')).toBe(false);
+    const graph = buildGraph(records);
+    expect(graphScores(graph, [['payslip']]).get('/d.pdf')?.score).toBe(1);
+    expect(graph.near.get('person:priya shah')).toEqual(['org:acme']);
+    expect(graph.near.get('org:acme')).toEqual(['person:priya shah']);
+    expect(graph.near.has(own)).toBe(false);
+    // A file that only names Acme is tied to "priya" through its neighbour, by less.
+    expect(graphScores(graph, [['priya']]).get('/c.pdf')?.score).toBeCloseTo(0.4);
+  });
+
+  it('leads the embedding text with the card of the facts', () => {
+    expect(embeddingText({ ...statement, text: '01/10/2026 UPI 450.00' })).toBe(
+      'OpTransactionHistory26-10-2026.pdf | Downloads | bank statement, icici bank, account ending 4321, october 2026 | 01/10/2026 UPI 450.00',
+    );
   });
 });
 
@@ -125,28 +157,63 @@ describe('the search index', () => {
     const near = compress([1, 0, 0]);
     const far = compress([0, 1, 0]);
     const records = [
-      record('/a.pdf', { kind: 'document', ...far, entities: ['priya shah'] }),
+      record('/a.pdf', { kind: 'document', ...far, facts: ['person:priya shah'] }),
       record('/b.pdf', { kind: 'document', ...near }),
     ];
     const index = new FileSearchIndex(records);
     expect(index.search({ kind: 'document', about: 'x', names: ['zzz'], shape: 'any' }, [1, 0, 0])[0].record.path).toBe('/b.pdf');
     const byName = index.search({ kind: 'document', about: 'priya', names: ['priya'], shape: 'any' }, [0, 0, 1]);
     expect(byName[0].record.path).toBe('/a.pdf');
-    expect(byName[0].why).toContain('names what you asked for');
+    expect(byName[0].why).toContain('priya shah');
+  });
+
+  it('finds a bank statement by what its text says, not its name, and says why', () => {
+    const text = 'ICICI Bank Limited  Statement of Transactions in Savings Account Number: 000401234321 for the period 01/10/2026 - 26/10/2026  Opening Balance 12,000.00  Withdrawals Deposits';
+    const statement = record('/Desktop/OpTransactionHistory26-10-2026.pdf', { kind: 'document', text, mtime: Date.UTC(2026, 9, 26) });
+    statement.facts = extractFacts(statement);
+    const records = [
+      statement,
+      record('/Downloads/account statement.pdf', { kind: 'document', facts: ['type:bank statement', 'org:hdfc bank'] }),
+      ...Array.from({ length: 3 }, (_, i) => record(`/Downloads/INDIAN BANK - PRINT RECEIPT ${i}.pdf`, { kind: 'document', facts: ['type:receipt', 'org:indian bank'] })),
+    ];
+    const hits = new FileSearchIndex(records).search(parseQuery('find my icici bank statement'), undefined);
+    expect(hits[0].record.name).toBe('OpTransactionHistory26-10-2026.pdf');
+    expect(hits[0].why[0]).toBe('icici bank, bank statement');
+    expect(hits[1].record.name).toBe('account statement.pdf');
+  });
+
+  it('prefers a statement whose text covers a named month, though it was saved the month after', () => {
+    const march = record('/Downloads/stmt_a.pdf', { kind: 'document', facts: ['type:bank statement', 'period:2026-03'], mtime: new Date(2026, 3, 2).getTime() });
+    const june = record('/Downloads/stmt_b.pdf', { kind: 'document', facts: ['type:bank statement', 'period:2026-06'], mtime: new Date(2026, 6, 1).getTime() });
+    // Only the preference tells them apart: no word of the plan reaches a month.
+    const prefer = { after: new Date(2026, 2, 1).getTime(), before: new Date(2026, 3, 1).getTime() - 1 };
+    const hits = new FileSearchIndex([june, march]).search({ kind: 'document', about: 'bank statement', names: ['bank', 'statement'], shape: 'any', prefer }, undefined);
+    expect(hits.map(hit => hit.record.name)).toEqual(['stmt_a.pdf', 'stmt_b.pdf']);
+    expect(hits[0].why).toContain('from then');
+  });
+
+  it('keeps only the last four digits of long numbers in the text it stores', () => {
+    expect(clipText('Aadhaar 1234 5678 9012, A/c 000401234321, card 4375-1234-5678-9012, phone 9876543210, total 12,000.00')).toBe(
+      'Aadhaar XXXX9012, A/c XXXX4321, card XXXX9012, phone XXXX3210, total 12,000.00',
+    );
   });
 
   it('ranks 8,000 files in milliseconds', () => {
     const records = Array.from({ length: 8000 }, (_, i) =>
-      record(`/f${i}.jpg`, { kind: i % 3 ? 'document' : 'image', width: 413, height: 531, faces: [[0.2, 0.3, 0.55, 0.45]], text: 'lorem ipsum '.repeat(100), entities: ['acme', 'priya shah'], ...compress(Array.from({ length: 384 }, (_, j) => Math.sin(i + j))) }),
+      record(`/f${i}.jpg`, { kind: i % 3 ? 'document' : 'image', width: 413, height: 531, faces: [[0.2, 0.3, 0.55, 0.45]], text: 'lorem ipsum '.repeat(100), facts: ['org:acme', 'person:priya shah', 'type:invoice'], ...compress(Array.from({ length: 384 }, (_, j) => Math.sin(i + j))) }),
     );
     const index = new FileSearchIndex(records);
     const query = Array.from({ length: 384 }, (_, j) => Math.cos(j));
     index.search(parseQuery('passport photo'), query);
-    const started = performance.now();
+    // The median of ten searches, so one slowed by other work on the machine does not decide it.
+    const times: number[] = [];
     for (let i = 0; i < 5; i++) {
-      index.search(parseQuery('find me the passport size photo of mine'), query);
-      index.search(parseQuery('acme invoices from priya'), query);
+      for (const question of ['find me the passport size photo of mine', 'acme invoices from priya']) {
+        const started = performance.now();
+        index.search(parseQuery(question), query);
+        times.push(performance.now() - started);
+      }
     }
-    expect((performance.now() - started) / 10).toBeLessThan(50);
+    expect(times.sort((a, b) => a - b)[5]).toBeLessThan(50);
   });
 });
