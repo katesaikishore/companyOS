@@ -178,6 +178,36 @@ describe.runIf(STARTS_FAKE_PROGRAM)('the desktop steps through agent-desktop', (
     expect(calls()).toEqual([]);
   });
 
+  it('prefers the window whose title is exactly the name over one that only starts with it', async () => {
+    const reader = { ...OTHER, id: 'w-5', title: 'Summary' };
+    const editor = { ...OTHER, id: 'w-6', title: 'Summary - Google Docs' };
+    const calls = fake({ windows: [editor, reader] });
+    await pressKeyWithAgentDesktop(options(), 'Google Chrome', 'Summary', 'cmd+r');
+    expect(calls().at(-1)).toEqual(['press', 'cmd+r', '--window-id', 'w-5', '--headed']);
+  });
+
+  it('finds a nameless field by its value', async () => {
+    const field = { ref_id: '@s1:e7', role: 'textfield', value: 'untitled folder' };
+    const calls = fake({ windows: [{ ...WINDOW, title: 'untitled folder Info' }], find: { textfield: [field] } });
+    await setFieldWithAgentDesktop(options(), 'Finder', 'untitled folder Info', { role: 'textfield', value: 'untitled folder' }, 'Audit');
+    expect(calls().at(-1)).toEqual(['type', '@s1:e7', 'Audit', '--headed']);
+  });
+
+  it('goes to where to paste and pastes in one call, and pastes nothing when the field does not show the place', async () => {
+    const good = fake({ find: { group: [NAME_BOX] }, field: "'City Desk'!B2" });
+    const board = clipboard();
+    const via = { target: { role: 'group' as const, namePrefix: 'Name box' }, text: "'City Desk'!B2" };
+    await expect(pasteWithAgentDesktop(options({ clipboard: board }), 'Google Chrome', 'Benchmark', '=COUNTIF(A:A,"x")', via)).resolves.toBe(true);
+    expect(good().filter(args => args[0] === 'press').map(args => args[1])).toEqual(['cmd+a', 'cmd+v', 'return', 'cmd+v']);
+    expect(board.writes).toContain('=COUNTIF(A:A,"x")');
+
+    const bad = fake({ find: { group: [NAME_BOX] }, field: 'A1' });
+    const untouched = clipboard();
+    await expect(pasteWithAgentDesktop(options({ clipboard: untouched }), 'Google Chrome', 'Benchmark', '=COUNTIF(A:A,"x")', via)).resolves.toBe(false);
+    expect(untouched.writes).not.toContain('=COUNTIF(A:A,"x")');
+    expect(bad().filter(args => args[0] === 'press').map(args => args[1])).not.toContain('return');
+  });
+
   it('runs every call in the session under the automation’s cursor', async () => {
     const session = { id: async () => 'sess-1', style: async () => undefined, forget: () => undefined } as unknown as HandsOptions['session'];
     const calls = fake();

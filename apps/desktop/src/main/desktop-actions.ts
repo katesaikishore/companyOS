@@ -46,6 +46,8 @@ const MESSAGES = {
 const MIN_WINDOW_HEIGHT = 100;
 /** How long a pasted text may take to reach the app before the person's clipboard is put back. */
 const PASTE_SETTLE_MS = 600;
+/** How long the app may take to move the selection after a field is submitted, before text is pasted there. */
+const VIA_SETTLE_MS = 700;
 
 interface Match {
   ref?: string;
@@ -98,7 +100,10 @@ async function windowFor(options: HandsOptions, context: Context, app: string, w
     const bounds = entry.bounds as { height?: unknown } | undefined;
     return entry.visible === true && typeof bounds?.height === 'number' && bounds.height >= MIN_WINDOW_HEIGHT;
   });
-  const named = window === undefined ? visible : visible.filter(entry => typeof entry.title === 'string' && entry.title.startsWith(window));
+  // A window whose title is exactly the name wins over windows whose titles only start with it.
+  const exact = window === undefined ? [] : visible.filter(entry => entry.title === window);
+  const named =
+    window === undefined ? visible : exact.length > 0 ? exact : visible.filter(entry => typeof entry.title === 'string' && entry.title.startsWith(window));
   if (named.length === 0) return refused('not_found', MESSAGES.noWindow);
   if (window === undefined && named.length > 1) return refused('ambiguous', MESSAGES.severalWindows);
   const id = named[0].id;
@@ -131,12 +136,16 @@ function boundsOf(value: unknown): Match['bounds'] {
   return { x: b.x as number, y: b.y as number, width: b.width as number, height: b.height as number };
 }
 
-/** The element the locator names: exact name or name prefix, inside a dialog when asked, first or last. */
+/** The element the locator names: exact name, name prefix or value, inside a dialog when asked, first or last. */
 function pick(matches: readonly Match[], target: Locator): Match | undefined {
   const named = matches.filter(match => {
-    if (match.name === undefined) return false;
+    if (target.value !== undefined) {
+      if (match.value !== target.value) return false;
+    } else if (match.name === undefined) {
+      return false;
+    }
     if (target.name !== undefined && match.name !== target.name) return false;
-    if (target.namePrefix !== undefined && !match.name.startsWith(target.namePrefix)) return false;
+    if (target.namePrefix !== undefined && !match.name?.startsWith(target.namePrefix)) return false;
     if (target.inDialog && !match.path.some(part => /^(alertdialog|dialog|sheet)\b/.test(part))) return false;
     // A tab scrolled out of view reports a width of one point; it cannot be clicked where it is drawn.
     return !match.bounds || match.bounds.width > 2;
@@ -219,7 +228,13 @@ export async function clickWithAgentDesktop(options: HandsOptions, app: string, 
   );
 }
 
-export async function pasteWithAgentDesktop(options: HandsOptions, app: string, window: string | undefined, text: string): Promise<boolean> {
+export async function pasteWithAgentDesktop(
+  options: HandsOptions,
+  app: string,
+  window: string | undefined,
+  text: string,
+  via?: { target: Locator; text: string },
+): Promise<boolean> {
   return outcome(
     await recorded(options, 'paste_text', async () => {
       const problem = inputProblem(options, app, window);
@@ -227,8 +242,15 @@ export async function pasteWithAgentDesktop(options: HandsOptions, app: string, 
       const context = await contextFor(options);
       const windowId = await windowFor(options, context, app, window);
       if (isResult(windowId)) return windowId;
-      const focused = await call(options, context, ['focus-window', '--window-id', windowId]);
-      if (!focused.result.ok) return focused.result;
+      if (via) {
+        // Where to paste is entered and checked first, in the same turn, so no other run can move the selection between.
+        const at = await fill(options, context, app, windowId, via.target, via.text, true);
+        if (!at.ok) return at;
+        await new Promise(resolve => setTimeout(resolve, VIA_SETTLE_MS));
+      } else {
+        const focused = await call(options, context, ['focus-window', '--window-id', windowId]);
+        if (!focused.result.ok) return focused.result;
+      }
       return paste(options, context, windowId, text);
     }),
   );
@@ -270,27 +292,40 @@ export async function fillWithAgentDesktop(
       const context = await contextFor(options);
       const windowId = await windowFor(options, context, app, window);
       if (isResult(windowId)) return windowId;
-      const match = await locate(options, context, app, windowId, target);
-      if (isResult(match)) return match;
-      const clicked = await clickMatch(options, context, windowId, match, 'left');
-      if (!clicked.ok) return clicked;
-      const selected = await press(options, context, windowId, 'cmd+a');
-      if (!selected.ok) return selected;
-      const pasted = await paste(options, context, windowId, text);
-      if (!pasted.ok) return pasted;
-      const fields = [...(await elements(options, context, app, windowId, 'textfield')), ...(await elements(options, context, app, windowId, 'combobox'))];
-      const focused = fields.find(field => field.states.includes('focused'));
-      if (!focused) {
-        await press(options, context, windowId, 'escape');
-        return refused('not_found', MESSAGES.notFocused);
-      }
-      if ((focused.value ?? '').trim() !== text.trim()) {
-        await press(options, context, windowId, 'escape');
-        return refused('unverified', MESSAGES.fieldMismatch);
-      }
-      return submit ? press(options, context, windowId, 'return') : { ok: true };
+      return fill(options, context, app, windowId, target, text, submit);
     }),
   );
+}
+
+/** Fills one field in a window already chosen: the body of a fill step, and the first half of a paste with `via`. */
+async function fill(
+  options: HandsOptions,
+  context: Context,
+  app: string,
+  windowId: string,
+  target: Locator,
+  text: string,
+  submit: boolean,
+): Promise<HandsResult> {
+  const match = await locate(options, context, app, windowId, target);
+  if (isResult(match)) return match;
+  const clicked = await clickMatch(options, context, windowId, match, 'left');
+  if (!clicked.ok) return clicked;
+  const selected = await press(options, context, windowId, 'cmd+a');
+  if (!selected.ok) return selected;
+  const pasted = await paste(options, context, windowId, text);
+  if (!pasted.ok) return pasted;
+  const fields = [...(await elements(options, context, app, windowId, 'textfield')), ...(await elements(options, context, app, windowId, 'combobox'))];
+  const focused = fields.find(field => field.states.includes('focused'));
+  if (!focused) {
+    await press(options, context, windowId, 'escape');
+    return refused('not_found', MESSAGES.notFocused);
+  }
+  if ((focused.value ?? '').trim() !== text.trim()) {
+    await press(options, context, windowId, 'escape');
+    return refused('unverified', MESSAGES.fieldMismatch);
+  }
+  return submit ? press(options, context, windowId, 'return') : { ok: true };
 }
 
 /**
@@ -318,7 +353,8 @@ export async function setFieldWithAgentDesktop(options: HandsOptions, app: strin
 }
 
 /**
- * The text a check reads: the clipboard, or every piece of static text in the window, one per line. A table that the
+ * The text a check reads: the clipboard, or the window's text, one piece per line: static text, item names and the
+ * contents of text areas. A table that the
  * window also exposes column by column is read by row only, so each cell is read once.
  */
 export async function readTextWithAgentDesktop(options: HandsOptions, app: string, window: string | undefined, source: 'clipboard' | 'window'): Promise<string> {
@@ -333,10 +369,16 @@ export async function readTextWithAgentDesktop(options: HandsOptions, app: strin
     const context = await contextFor(options);
     const windowId = await windowFor(options, context, app, window);
     if (isResult(windowId)) return windowId;
+    // Shown text, the names of items such as files in a folder, and the contents of text areas such as a document.
     const texts = await elements(options, context, app, windowId, 'statictext');
-    text = texts
-      .filter(match => match.name !== undefined && !match.path.includes('column'))
-      .map(match => match.name)
+    const items = await elements(options, context, app, windowId, 'image');
+    const areas = await elements(options, context, app, windowId, 'textarea');
+    text = [
+      ...texts.filter(match => !match.path.includes('column')).map(match => match.name),
+      ...items.map(match => match.name),
+      ...areas.map(match => match.value),
+    ]
+      .filter((part): part is string => part !== undefined)
       .join('\n');
     return { ok: true };
   });

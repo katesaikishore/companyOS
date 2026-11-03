@@ -93,7 +93,7 @@ export const UI_ROLES = [
 ] as const;
 
 /**
- * One element in a window: its role, and its name exactly or by the start of it. `last` picks the last match instead of
+ * One element in a window: its role, and its name exactly, the start of its name, or its value. `last` picks the last match instead of
  * the first, and `inDialog` keeps only elements inside an open dialog, so a dialog's OK never resolves to a button behind it.
  */
 export const LocatorSchema = z
@@ -101,11 +101,16 @@ export const LocatorSchema = z
     role: z.enum(UI_ROLES),
     name: UiLabel.optional(),
     namePrefix: UiLabel.optional(),
+    /** The element's value exactly, for a field that has no name, such as the Name field of Finder's Get Info. */
+    value: UiLabel.optional(),
     last: z.boolean().optional(),
     inDialog: z.boolean().optional(),
   })
   .strict()
-  .refine(locator => (locator.name === undefined) !== (locator.namePrefix === undefined), 'Give a name or a name prefix.');
+  .refine(
+    locator => [locator.name, locator.namePrefix, locator.value].filter(part => part !== undefined).length === 1,
+    'Give one of a name, a name prefix or a value.',
+  );
 export type Locator = z.infer<typeof LocatorSchema>;
 
 /** Text a step enters: printable characters, tabs and line breaks only, so it cannot carry other control keys. */
@@ -122,6 +127,8 @@ const KeyName = z
 
 /** What a check reads: the clipboard, or every piece of text shown in the window. */
 const CheckSource = z.enum(['clipboard', 'window']);
+/** The longest a check may keep reading for the expected text, and the longest a wait step may pause. */
+export const SETTLE_MAX_MS = 15_000;
 
 /**
  * The steps an automation may contain. Focus and check are the original vocabulary. Open URL, open file and press
@@ -146,7 +153,16 @@ export const StepSchema = z.discriminatedUnion('op', [
       button: z.enum(['left', 'right']).optional(),
     })
     .strict(),
-  z.object({ op: z.literal('paste_text'), app: TargetAppRef, window: UiLabel.optional(), text: EnteredText }).strict(),
+  z
+    .object({
+      op: z.literal('paste_text'),
+      app: TargetAppRef,
+      window: UiLabel.optional(),
+      text: EnteredText,
+      // Where to paste, entered first in the same turn of the input: such as a cell range in a spreadsheet's Name box.
+      via: z.object({ target: LocatorSchema, text: EnteredText.max(400) }).strict().optional(),
+    })
+    .strict(),
   z.object({ op: z.literal('press_key'), app: TargetAppRef, window: UiLabel.optional(), key: KeyName }).strict(),
   z
     .object({
@@ -168,8 +184,11 @@ export const StepSchema = z.discriminatedUnion('op', [
       window: UiLabel.optional(),
       source: CheckSource,
       expect: z.array(z.string().min(1).max(400).regex(ENTERED_TEXT)).min(1).max(40),
+      /** Keep reading the window for up to this long until every value is shown, for a page that is still loading. */
+      withinMs: z.number().int().min(0).max(SETTLE_MAX_MS).optional(),
     })
     .strict(),
+  z.object({ op: z.literal('wait'), app: TargetAppRef, ms: z.number().int().min(50).max(SETTLE_MAX_MS) }).strict(),
 ]);
 
 /** The most steps one automation may hold. A desktop playbook strings many small steps together. */
@@ -340,8 +359,12 @@ export function parseKeyChord(value: string): string | undefined {
  * undefined. The keys are the same fixed list a chord uses.
  */
 export function parseKeyName(value: string): string | undefined {
-  return CHORD_KEY.test(value) ? value : parseKeyChord(value);
+  if (CHORD_KEY.test(value) || PUNCTUATION_KEY.test(value)) return value;
+  return parseKeyChord(value);
 }
+
+/** Punctuation keys a desktop step may press alone, by name, such as slash for a calculator's divide. */
+const PUNCTUATION_KEY = /^(?:slash|equal|period|comma|minus|semicolon)$/;
 
 /**
  * Compiles a mined routine into an automation. Each routine position becomes a focus step and a
@@ -432,6 +455,7 @@ export function resolveStep(step: Step, params: readonly Param[], values: Readon
     case 'fill_field':
     case 'set_field':
     case 'check_text':
+    case 'wait':
       // Desktop steps take no parameters. The schema checked their text, names and keys when the automation loaded.
       return { ...step, app: targetAppName(app) };
   }
@@ -470,7 +494,9 @@ export function describeStep(step: Step): string {
     case 'click':
       return `${step.button === 'right' ? 'Right-click' : 'Click'} ${describeTarget(step.target)} in ${describeWindow(step)}?`;
     case 'paste_text':
-      return `Paste ${describeText(step.text)} into ${describeWindow(step)}?`;
+      return step.via
+        ? `Go to ${describeText(step.via.text)} and paste ${describeText(step.text)} in ${describeWindow(step)}?`
+        : `Paste ${describeText(step.text)} into ${describeWindow(step)}?`;
     case 'press_key':
       return `Press ${step.key} in ${describeWindow(step)}?`;
     case 'fill_field':
@@ -479,6 +505,8 @@ export function describeStep(step: Step): string {
       return `Type ${describeText(step.text)} into ${describeTarget(step.target)} in ${describeWindow(step)}?`;
     case 'check_text':
       return `Check that ${step.source === 'clipboard' ? 'the clipboard' : describeWindow(step)} shows ${step.expect.length === 1 ? describeText(step.expect[0]) : `${step.expect.length} expected values`}?`;
+    case 'wait':
+      return `Wait ${step.ms} ms for "${step.app}"?`;
   }
 }
 
@@ -487,7 +515,7 @@ function describeWindow(step: { app: string; window?: string }): string {
 }
 
 function describeTarget(target: Locator): string {
-  return `the ${target.role} "${target.name ?? `${target.namePrefix}…`}"`;
+  return `the ${target.role} "${target.name ?? (target.namePrefix !== undefined ? `${target.namePrefix}…` : target.value)}"`;
 }
 
 /** Text as an approval shows it: in full when short, otherwise its start and its length. */

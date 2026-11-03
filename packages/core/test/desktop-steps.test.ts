@@ -165,6 +165,45 @@ describe('a playbook run', () => {
   });
 });
 
+describe('the waits, retries and keys a playbook needs', () => {
+  it('accepts a value locator, a paste with where to paste, punctuation keys and bounded waits', () => {
+    expect(StepSchema.safeParse({ op: 'set_field', app: 'Finder', target: { role: 'textfield', value: 'untitled folder' }, text: 'Audit' }).success).toBe(true);
+    expect(StepSchema.safeParse({ op: 'paste_text', ...SHEETS, text: '=SUM(A1:A3)', via: { target: NAME_BOX, text: "'City Desk'!B2" } }).success).toBe(true);
+    expect(StepSchema.safeParse({ op: 'press_key', app: 'Calculator', key: 'slash' }).success).toBe(true);
+    expect(StepSchema.safeParse({ op: 'wait', app: 'Google Chrome', ms: 1500 }).success).toBe(true);
+    expect(StepSchema.safeParse({ op: 'wait', app: 'Google Chrome', ms: 60_000 }).success).toBe(false);
+    expect(StepSchema.safeParse({ op: 'check_text', ...SHEETS, source: 'window', expect: ['x'], withinMs: 20_000 }).success).toBe(false);
+    expect(StepSchema.safeParse({ op: 'press_shortcut', app: 'Calculator', shortcut: 'slash' }).success).toBe(false);
+  });
+
+  it('pauses outside the input lock, so other runs keep their turns, and needs no approval', async () => {
+    let locked = 0;
+    let asked = 0;
+    const exec = desktop('', { exclusive: async work => (locked++, work()) });
+    const result = await runAutomation(
+      playbook([{ op: 'wait', app: 'Google Chrome', ms: 50 }]),
+      { mode: 'supervised', policy: POLICY, approve: async () => (asked++, true) },
+      exec,
+    );
+    expect(result.status).toBe('completed');
+    expect(result.steps[0]).toMatchObject({ op: 'wait', outcome: 'executed' });
+    expect(locked).toBe(0);
+    expect(asked).toBe(0);
+  });
+
+  it('reads a window again until the values appear, within the step’s limit', async () => {
+    const reads = ['Loading…', 'Loading…', 'Orders: 195'];
+    const exec = desktop('', { readText: async () => reads.shift() ?? 'Orders: 195' });
+    const step: Step = { op: 'check_text', ...SHEETS, source: 'window', expect: ['Orders: 195'], withinMs: 3000 };
+    const result = await runAutomation(playbook([step]), { mode: 'supervised', policy: POLICY }, exec);
+    expect(result.status).toBe('completed');
+    expect(reads).toEqual([]);
+
+    const never = await runAutomation(playbook([{ ...step, withinMs: 0 }]), { mode: 'supervised', policy: POLICY }, desktop('Loading…'));
+    expect(never.status).toBe('failed');
+  });
+});
+
 describe('TwinAgent.createPlaybook', () => {
   it('stores a draft at level 2 with its effects, refuses an invalid playbook, and keeps its name out of the export', () => {
     const agent = temps.track(new TwinAgent({ dataDir: temps.folder('twin-playbook-'), dataKey: randomBytes(32), now: () => 1_800_000_000_000 }));

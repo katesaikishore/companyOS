@@ -277,7 +277,7 @@ export function isSiteLikeName(name: string): boolean {
  */
 export function effectOfOp(op: StepOp, app: string): EffectClass {
   // Checking focus or reading shown text changes nothing.
-  if (op === 'check_focus' || op === 'check_text') return 'read_only';
+  if (op === 'check_focus' || op === 'check_text' || op === 'wait') return 'read_only';
   // A click, pasted text, a key or a filled field does whatever the app does with it, and the twin cannot see into that.
   if (op === 'click' || op === 'paste_text' || op === 'press_key' || op === 'fill_field' || op === 'set_field') return 'external_effect';
   // A link or a file can trigger an action in the app, and a shortcut or a menu item does whatever the app binds it to.

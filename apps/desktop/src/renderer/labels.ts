@@ -108,11 +108,13 @@ export function stepTitle(step: Step, params: readonly Param[]): string {
       return `Type ${textLabel(step.text)} in ${targetLabel(step.target)}`;
     case 'check_text':
       return `Check ${step.source === 'clipboard' ? 'the clipboard' : 'the window'} shows ${step.expect.length === 1 ? textLabel(step.expect[0]) : `${step.expect.length} values`}`;
+    case 'wait':
+      return `Wait ${step.ms} ms`;
   }
 }
 
 function targetLabel(target: Locator): string {
-  return `"${target.name ?? `${target.namePrefix}…`}"`;
+  return `"${target.name ?? (target.namePrefix !== undefined ? `${target.namePrefix}…` : target.value)}"`;
 }
 
 /** Text as a workflow row shows it: short text whole, longer text cut with its length. */

@@ -55,7 +55,8 @@ export interface Executor {
    * StepRefusedError when nothing was done, such as when the element or window was not found.
    */
   click?(app: string, window: string | undefined, target: Locator, button: 'left' | 'right'): Promise<boolean>;
-  pasteText?(app: string, window: string | undefined, text: string): Promise<boolean>;
+  /** Pastes text; with `via`, first enters where to paste in a field, checked, all in one turn of the input. */
+  pasteText?(app: string, window: string | undefined, text: string, via?: { target: Locator; text: string }): Promise<boolean>;
   pressKey?(app: string, window: string | undefined, key: string): Promise<boolean>;
   fillField?(app: string, window: string | undefined, target: Locator, text: string, submit: boolean): Promise<boolean>;
   setField?(app: string, window: string | undefined, target: Locator, text: string): Promise<boolean>;
@@ -120,6 +121,8 @@ export interface RunRequest {
 }
 
 const DEFAULT_SETTLE_MS = 1_500;
+/** How often a check that waits for text reads again. */
+const CHECK_POLL_MS = 500;
 const SETTLE_POLL_MS = 150;
 
 const FAILED_REASON = {
@@ -218,7 +221,7 @@ async function perform(step: Step, executor: Executor): Promise<Performed> {
       case 'click':
         return { ok: (await executor.click?.(step.app, step.window, step.target, step.button ?? 'left')) === true };
       case 'paste_text':
-        return { ok: (await executor.pasteText?.(step.app, step.window, step.text)) === true };
+        return { ok: (await executor.pasteText?.(step.app, step.window, step.text, step.via)) === true };
       case 'press_key':
         return { ok: (await executor.pressKey?.(step.app, step.window, step.key)) === true };
       case 'fill_field':
@@ -437,23 +440,30 @@ export async function runAutomation(automation: Automation, request: RunRequest,
       }
 
       if (step.op === 'check_text') {
-        // Reads the clipboard or the window's text, and passes only when every expected value is there. The text read is
-        // compared and dropped; only which values were missing is counted.
-        let text: string | undefined;
-        try {
-          text = await executor.readText?.(step.app, step.window, step.source);
-        } catch (error) {
-          const refusal = refusalMessage(error);
-          if (refusal !== undefined) {
-            record('blocked', 'The text could not be read.', refusal);
-            return 'blocked';
+        // Reads the clipboard or the window's text, and passes only when every expected value is there. A window is read
+        // again for up to withinMs while values are missing, since a page may still be loading. The text read is compared
+        // and dropped; only how many values were missing is kept.
+        const deadline = Date.now() + (step.withinMs ?? 0);
+        let missing: string[] = step.expect;
+        for (;;) {
+          let text: string | undefined;
+          try {
+            text = await executor.readText?.(step.app, step.window, step.source);
+          } catch (error) {
+            const refusal = refusalMessage(error);
+            if (refusal !== undefined) {
+              record('blocked', 'The text could not be read.', refusal);
+              return 'blocked';
+            }
           }
+          if (text === undefined) {
+            record('failed', 'The text could not be read.');
+            return 'failed';
+          }
+          missing = missingText(text, step.expect);
+          if (missing.length === 0 || Date.now() >= deadline || request.shouldStop?.()) break;
+          await new Promise(resolve => setTimeout(resolve, CHECK_POLL_MS));
         }
-        if (text === undefined) {
-          record('failed', 'The text could not be read.');
-          return 'failed';
-        }
-        const missing = missingText(text, step.expect);
         if (missing.length === 0) {
           passed++;
           record('passed', `Shown: all ${step.expect.length} expected value${step.expect.length === 1 ? '' : 's'}.`);
@@ -504,6 +514,13 @@ export async function runAutomation(automation: Automation, request: RunRequest,
 
       return checkInFront(index, step);
     };
+
+    // A pause touches nothing, so it waits outside the input lock and other runs keep their turns meanwhile.
+    if (step.op === 'wait') {
+      await new Promise(resolve => setTimeout(resolve, step.ms));
+      record('executed', `Waited ${step.ms} ms.`);
+      continue;
+    }
 
     const outcome = executor.exclusive ? await executor.exclusive(act) : await act();
     if (outcome !== undefined) return finish(outcome);
