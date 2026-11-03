@@ -36,6 +36,7 @@ export function connectorsPageView(status: TwinStatus): HTMLElement {
         : h('div', null, ...sources.map(source => connectorRow(source, status, now))),
       connectorAddButtons(status.config.connectors.length),
     ),
+    filesPanel(status),
     discordPanel(status),
     panel(
       { testid: 'connectors-cloud' },
@@ -47,6 +48,47 @@ export function connectorsPageView(status: TwinStatus): HTMLElement {
         gmailRow(),
       ),
     ),
+  );
+}
+
+/**
+ * File and photo search: the index of Desktop, Documents, Downloads and Pictures that Ctrl+Space searches. It runs inside
+ * the app, a minute after it starts and every six hours, and reads only files that changed.
+ */
+function filesPanel(status: TwinStatus): HTMLElement {
+  const files = status.files;
+  const enabled = status.config.fileSearchEnabled;
+  return panel(
+    { testid: 'connectors-files' },
+    panelHead('Search my files', 'Press Ctrl+Space anywhere and ask in plain words, such as “my passport size photo”. The index stays encrypted on this Mac.'),
+    toggleRow({
+      testid: 'files-toggle',
+      label: 'Index Desktop, Documents, Downloads and Pictures',
+      note: 'Photos are described by Apple’s on-device Vision, documents by their text, and each file by a small local model.',
+      checked: enabled,
+      disabled: pending('files-toggle'),
+      onChange: checked =>
+        void saveConfig('files-toggle', { fileSearchEnabled: checked }).then(() => {
+          if (checked) void bridge().indexFiles();
+        }),
+    }),
+    enabled && files
+      ? h(
+          'div',
+          { class: 'settings-row', 'data-testid': 'files-status' },
+          h(
+            'div',
+            { class: 'settings-model-main' },
+            h('span', { class: 'settings-row-title' }, files.running ? `Indexing: ${files.done} of ${files.total} new or changed files` : `${plural(files.files, 'file')} indexed`),
+            h(
+              'span',
+              { class: 'settings-row-note' },
+              `${plural(files.images, 'photo')}, ${plural(files.documents, 'document')}${files.indexedAt ? ` · last pass ${formatWhen(files.indexedAt)}` : ''}${files.noEmbeddings ? ' · the embedding model was not running, so search uses names only until the next pass' : ''}`,
+            ),
+          ),
+          button('Index now', { testid: 'files-index-now', disabled: files.running, onClick: () => void act('files-index', () => bridge().indexFiles()) }),
+        )
+      : undefined,
   );
 }
 

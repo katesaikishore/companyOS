@@ -47,6 +47,11 @@ const CHANNEL = {
   dayRecap: 'twin:day-recap',
   askDiscord: 'twin:ask-discord',
   checkDiscord: 'twin:check-discord',
+  searchFiles: 'twin:search-files',
+  openIndexedFile: 'twin:open-indexed-file',
+  indexFiles: 'twin:index-files',
+  searchOpened: 'twin:search-opened',
+  hideSearch: 'twin:hide-search',
   startTask: 'twin:start-task',
   stopTask: 'twin:stop-task',
   answerTaskStep: 'twin:answer-task-step',
@@ -106,6 +111,15 @@ const bridge: TwinBridge = {
   dayRecap: day => ipcRenderer.invoke(CHANNEL.dayRecap, day),
   askDiscord: question => ipcRenderer.invoke(CHANNEL.askDiscord, question),
   checkDiscord: () => ipcRenderer.invoke(CHANNEL.checkDiscord),
+  searchFiles: query => ipcRenderer.invoke(CHANNEL.searchFiles, query),
+  openIndexedFile: (path, reveal) => ipcRenderer.invoke(CHANNEL.openIndexedFile, path, reveal),
+  indexFiles: () => ipcRenderer.invoke(CHANNEL.indexFiles),
+  hideSearch: () => ipcRenderer.invoke(CHANNEL.hideSearch),
+  onSearchOpened: listener => {
+    const wrapped = () => listener();
+    ipcRenderer.on(CHANNEL.searchOpened, wrapped);
+    return () => ipcRenderer.removeListener(CHANNEL.searchOpened, wrapped);
+  },
   startTask: request => ipcRenderer.invoke(CHANNEL.startTask, request),
   stopTask: () => ipcRenderer.invoke(CHANNEL.stopTask),
   answerTaskStep: (id, approve) => ipcRenderer.invoke(CHANNEL.answerTaskStep, id, approve),

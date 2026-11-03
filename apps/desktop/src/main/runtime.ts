@@ -61,13 +61,15 @@ import { SPEAKER_MIN_SAMPLES, SPEAKER_MODEL_ID, WHISPER_MODEL_ID } from '@compan
 import { discoverFromScreen, proposeTasks, recapBlocks, writeRecap, type DayRecap, type ProposedTask, type ScreenDiscovery } from '@companyos/twin-core';
 import { answerFromItems, closestItems, discordLine, selfCheck, type DiscordStatusView, type MemoryAnswer, type MemoryItem } from '@companyos/twin-core';
 import { DiscordReader } from './discord-reader';
+import { buildGraph, planQuery, rankFiles, type FileGraph, type FileHitView, type FileRecord, type FileSearchView } from '@companyos/twin-core';
+import { indexFiles, type FileIndexProgress } from './file-index';
 import { readSurface } from './app-surface';
 import { createOllamaChat, createOllamaEmbedder, createOllamaVision, visionModelReady } from './vision-ollama';
 import type { OperatorModel, OperatorTaskRequest } from '@companyos/twin-core';
 import { OperatorService, type OperatorModelChoice } from './operator-service';
 import { agentDesktopHands } from './operator-hands';
 import { createChutesChat, validChutesKey } from './remote-model';
-import { app, clipboard, desktopCapturer, shell, systemPreferences } from 'electron';
+import { app, clipboard, desktopCapturer, nativeImage, shell, systemPreferences } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { rmSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -197,6 +199,9 @@ const DISCORD_CHECK_MIN_MESSAGES = 20;
 const DISCORD_CHECK_NEW_MESSAGES = 30;
 const DISCORD_CHECK_EVERY_MS = 3_600_000;
 const DISCORD_CHECK_QUESTIONS = 8;
+const FILE_INDEX_FIRST_MS = 60_000;
+const FILE_INDEX_EVERY_MS = 6 * 3_600_000;
+const FILE_RESULTS = 12;
 
 export class TwinRuntime {
   private readonly agent: TwinAgent;
@@ -259,6 +264,11 @@ export class TwinRuntime {
   private discordChecking: Promise<void> | undefined;
   /** Stored Discord messages, counted after each read rather than on every status poll. */
   private discordCounts = { messages: 0, conversations: 0 };
+  /** The file search index in memory, with its knowledge graph, rebuilt after each pass. */
+  private files: { records: FileRecord[]; graph: FileGraph; byPath: Map<string, FileRecord> } | undefined;
+  private fileProgress: FileIndexProgress = { running: false, files: 0, images: 0, documents: 0, done: 0, total: 0 };
+  private fileIndexing: Promise<void> | undefined;
+  private fileTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly audio: AudioCaptureService;
   private readonly systemAudio: AudioCaptureService;
   /** The speaker model's process. Started by the first segment when speaker identification is on, and stopped when idle. */
@@ -493,6 +503,9 @@ export class TwinRuntime {
     this.cloud.start();
     this.countDiscord();
     this.discord.start();
+    this.loadFileIndex();
+    // The first pass waits a minute, so it does not compete with the app starting; then it runs every six hours.
+    this.fileTimer = setTimeout(() => this.scheduleFiles(), FILE_INDEX_FIRST_MS);
     this.startKindLabels();
     this.sweepTimer = setInterval(() => void this.sweepMedia(), DAY_MS);
     this.sweepTimer.unref();
@@ -512,6 +525,7 @@ export class TwinRuntime {
     this.connectors.stop();
     this.cloud.stop();
     this.discord.stop();
+    clearTimeout(this.fileTimer);
     this.stopKindLabels();
     void this.handsSession.end();
   }
@@ -607,6 +621,7 @@ export class TwinRuntime {
       connectorItems: this.agent.connectorCount(),
       connectorCounts: this.connectors.lastCounts(),
       cloudAccounts: this.cloud.accounts(),
+      files: { enabled: this.agent.configuration.fileSearchEnabled, ...this.fileProgress },
       discord: {
         enabled: this.agent.configuration.discordReadingEnabled,
         messages: this.discordCounts.messages,
@@ -717,6 +732,96 @@ export class TwinRuntime {
       model: createOllamaChat({ record }),
       excludedApps: this.agent.configuration.excludedApps,
     });
+  }
+
+  private loadFileIndex(): void {
+    const records = this.agent.fileIndex();
+    this.files = { records, graph: buildGraph(records), byPath: new Map(records.map(record => [record.path, record])) };
+    this.fileProgress = {
+      ...this.fileProgress,
+      files: records.length,
+      images: records.filter(record => record.kind === 'image').length,
+      documents: records.filter(record => record.kind === 'document').length,
+    };
+  }
+
+  private scheduleFiles(): void {
+    void this.indexFilesNow().catch(() => undefined);
+    this.fileTimer = setTimeout(() => this.scheduleFiles(), FILE_INDEX_EVERY_MS);
+  }
+
+  /** One pass of the file index, when file search is on and capture is not paused. One pass runs at a time. */
+  indexFilesNow(): Promise<void> {
+    if (this.fileIndexing) return this.fileIndexing;
+    if (!this.agent.configuration.fileSearchEnabled || this.agent.configuration.capturePaused) return Promise.resolve();
+    const record = (entry: NetworkEntry): void => this.agent.recordNetworkCall(entry);
+    const job = indexFiles({
+      helper: app.isPackaged ? join(process.resourcesPath, 'companyos-ocr') : join(app.getAppPath(), 'native-bin', 'companyos-ocr'),
+      embedder: createOllamaEmbedder({ record }),
+      previous: () => this.files?.records ?? this.agent.fileIndex(),
+      save: records => this.agent.saveFileIndex(records),
+      onProgress: progress => {
+        this.fileProgress = progress;
+        this.options.onChange();
+      },
+    })
+      .then(done => {
+        this.fileProgress = done;
+        this.loadFileIndex();
+      })
+      .finally(() => {
+        this.fileIndexing = undefined;
+        this.options.onChange();
+      });
+    this.fileIndexing = job;
+    return job;
+  }
+
+  /**
+   * Searches the file index with a question in plain words. The local model makes the plan, the small model embeds its topic,
+   * and the ranking mixes meaning, the knowledge graph and any photo shape asked for. Photos come back with a small preview.
+   */
+  async searchFiles(query: string): Promise<FileSearchView> {
+    const text = query.trim();
+    if (text.length < 2 || text.length > 300) throw new Error('Search with 2 to 300 characters.');
+    const index = this.files ?? { records: [], graph: buildGraph([]), byPath: new Map() };
+    const record = (entry: NetworkEntry): void => this.agent.recordNetworkCall(entry);
+    const plan = await planQuery(text, createOllamaChat({ record }));
+    let vector: number[] | undefined;
+    try {
+      [vector] = await createOllamaEmbedder({ record }).embed([`${plan.about} ${plan.names.join(' ')}`.trim()]);
+    } catch {
+      vector = undefined;
+    }
+    const hits: FileHitView[] = await Promise.all(
+      rankFiles(plan, index.records, vector, index.graph, FILE_RESULTS).map(async hit => ({
+        path: hit.record.path,
+        name: hit.record.name,
+        folder: hit.record.folder,
+        kind: hit.record.kind,
+        mtime: hit.record.mtime,
+        why: hit.why,
+        preview: await this.previewOf(hit.record.path),
+      })),
+    );
+    return { plan: { kind: plan.kind, about: plan.about, names: plan.names, shape: plan.shape }, hits, indexed: index.records.length };
+  }
+
+  /** A small preview from the system's own thumbnailer (photos, PDFs and documents), or undefined when it has none. */
+  private async previewOf(path: string): Promise<string | undefined> {
+    try {
+      const image = await nativeImage.createThumbnailFromPath(path, { width: 160, height: 160 });
+      return image.isEmpty() ? undefined : image.toDataURL();
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Opens a search result, or shows it in Finder. Only a file that is in the index can be opened. */
+  openIndexedFile(path: unknown, reveal: boolean): void {
+    if (typeof path !== 'string' || !this.files?.byPath.has(path)) throw new Error('That file is not in the search index.');
+    if (reveal) shell.showItemInFolder(path);
+    else void shell.openPath(path);
   }
 
   /** The stored Discord messages, newest first, as items to search and answer from. */

@@ -57,3 +57,4 @@ export * from './operator/understand';
 export * from './recap';
 export * from './discord';
 export * from './ask';
+export * from './files';

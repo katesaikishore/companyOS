@@ -54,6 +54,9 @@ const STOP_ALL_SHORTCUT = 'Control+Alt+.';
 let runtime: TwinRuntime | undefined;
 let mainWindow: BrowserWindow | undefined;
 let trayWindow: BrowserWindow | undefined;
+/** The file search bar, opened with Ctrl+Space. */
+let searchWindow: BrowserWindow | undefined;
+const SEARCH_SHORTCUT = 'Control+Space';
 let tray: Tray | undefined;
 let quitting = false;
 
@@ -250,6 +253,13 @@ function registerIpc(): void {
     return requireRuntime().askDiscord(question.slice(0, 500));
   });
   handle(IPC.checkDiscord, () => requireRuntime().checkDiscord());
+  handle(IPC.searchFiles, query => {
+    if (typeof query !== 'string') throw new Error('Invalid search.');
+    return requireRuntime().searchFiles(query.slice(0, 300));
+  });
+  handle(IPC.openIndexedFile, (path, reveal) => requireRuntime().openIndexedFile(path, reveal === true));
+  handle(IPC.indexFiles, () => requireRuntime().indexFilesNow());
+  handle(IPC.hideSearch, () => searchWindow?.hide());
   handle(IPC.dayRecap, day => {
     if (day !== undefined && (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day))) throw new Error('Invalid day.');
     return requireRuntime().dayRecap(day);
@@ -541,6 +551,45 @@ function createTrayWindow(): void {
   trayWindow.loadURL(`${APP_ORIGIN}/tray.html`).catch(() => undefined);
 }
 
+/** The search bar: centred near the top of the screen with the pointer, above other windows, hidden when it loses focus. */
+function createSearchWindow(): void {
+  searchWindow = new BrowserWindow({
+    width: 680,
+    height: 480,
+    show: false,
+    frame: false,
+    resizable: false,
+    movable: true,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    backgroundColor: '#101214',
+    webPreferences: WEB_PREFERENCES,
+  });
+  searchWindow.on('blur', () => searchWindow?.hide());
+  // The search page holds the same bridge as the main window, so it gets the same guards: no new windows, no navigation.
+  searchWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  searchWindow.webContents.on('will-navigate', event => event.preventDefault());
+  searchWindow.loadURL(`${APP_ORIGIN}/search.html`).catch(() => undefined);
+}
+
+function toggleSearch(): void {
+  if (!searchWindow || searchWindow.isDestroyed()) createSearchWindow();
+  const window = searchWindow!;
+  if (window.isVisible() && window.isFocused()) {
+    window.hide();
+    return;
+  }
+  const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+  const size = window.getBounds();
+  window.setPosition(Math.round(area.x + (area.width - size.width) / 2), Math.round(area.y + area.height * 0.18));
+  window.show();
+  window.focus();
+  window.webContents.send(IPC.searchOpened);
+}
+
 function hideTray(): void {
   if (trayWindow && !trayWindow.isDestroyed() && trayWindow.isVisible()) trayWindow.hide();
 }
@@ -703,6 +752,11 @@ async function boot(): Promise<void> {
     globalShortcut.register(STOP_ALL_SHORTCUT, () => stopAllAutomations());
   } catch {
     // Another app may own the shortcut. The tray menu still stops everything.
+  }
+  try {
+    globalShortcut.register(SEARCH_SHORTCUT, () => toggleSearch());
+  } catch {
+    // Another app may own Ctrl+Space. The search is still in the command palette.
   }
 }
 

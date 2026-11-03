@@ -232,6 +232,40 @@ export interface TaskView {
 }
 
 /** The tasks of one local day, in time order. */
+/** One file search result, as the search window shows it. */
+export interface FileHitView {
+  path: string;
+  name: string;
+  folder: string;
+  kind: 'image' | 'document' | 'other';
+  mtime: number;
+  /** Why it matched, in a few words. */
+  why: string[];
+  /** A small preview as a data URL, when the system can make one. */
+  preview?: string;
+}
+
+/** A file search: the plan the local model made from the words, and the best matches. */
+export interface FileSearchView {
+  plan: { kind: string; about: string; names: string[]; shape: string };
+  hits: FileHitView[];
+  /** Files in the index when the search ran. */
+  indexed: number;
+}
+
+/** The file search index's state. */
+export interface FileIndexStatusView {
+  enabled: boolean;
+  running: boolean;
+  files: number;
+  images: number;
+  documents: number;
+  done: number;
+  total: number;
+  indexedAt?: number;
+  noEmbeddings?: boolean;
+}
+
 /** The Discord reader's state, and its last self-check. Counts and a score; the check's questions stay in memory only. */
 export interface DiscordStatusView {
   enabled: boolean;
@@ -421,6 +455,8 @@ export interface TwinStatus {
   cloudAccounts?: CloudAccountView[];
   /** Reading the Discord app, and how well the twin answers questions about it. Optional, so a status built without it still type-checks. */
   discord?: DiscordStatusView;
+  /** File and photo search. Optional, so a status built without it still type-checks. */
+  files?: FileIndexStatusView;
   /** The task operator's current task, if any. */
   operator: OperatorTaskView;
   /** The newest kept run of each write pipe, by pipe id. A pipe with no entry has no kept run. Holds no text. */
@@ -623,6 +659,16 @@ export interface TwinBridge {
   askDiscord(question: string): Promise<MemoryAnswer>;
   /** Runs the Discord self-check now. Its result shows in the status. */
   checkDiscord(): Promise<void>;
+  /** Searches the person's files with words in plain language. */
+  searchFiles(query: string): Promise<FileSearchView>;
+  /** Opens a file from the search index, or shows it in Finder. */
+  openIndexedFile(path: string, reveal: boolean): Promise<void>;
+  /** Runs a pass of the file index now. */
+  indexFiles(): Promise<void>;
+  /** Hides the search bar. */
+  hideSearch(): Promise<void>;
+  /** Calls the listener each time the search bar is opened. Returns a function that stops listening. */
+  onSearchOpened(listener: () => void): () => void;
   /** Starts a task. One task runs at a time. Steps that may send, share, delete or sign in wait for answerTaskStep. */
   startTask(request: OperatorTaskRequest): Promise<void>;
   /** Stops the running task. A step that waits for the person is declined. */

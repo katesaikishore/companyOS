@@ -232,6 +232,8 @@ export const TwinConfigSchema = z
     screenCaptureEnabled: z.boolean().default(false),
     /** Reading the Discord app's messages through its accessibility tree. Off until the person turns it on. Needs screen text. */
     discordReadingEnabled: z.boolean().default(false),
+    /** File and photo search: an index of Desktop, Documents, Downloads and Pictures, kept encrypted. Off until turned on. */
+    fileSearchEnabled: z.boolean().default(false),
     /** Microphone text. Off until the person turns it on, in settings or during setup. */
     audioCaptureEnabled: z.boolean().default(false),
     /** Whether the sound the computer plays is transcribed. Off until the person turns it on. */
@@ -304,6 +306,7 @@ export const DEFAULT_CONFIG: TwinConfig = {
   // Screen and microphone capture, and the local API, stay off until the person turns them on.
   screenCaptureEnabled: false,
   discordReadingEnabled: false,
+  fileSearchEnabled: false,
   audioCaptureEnabled: false,
   systemAudioCaptureEnabled: false,
   speakerIdentificationEnabled: false,

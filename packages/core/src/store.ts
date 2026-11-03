@@ -31,6 +31,8 @@ export const COLLECTIONS = [
   'keystrokeText',
   'connectorText',
   'pipeOutputs',
+  // The file search index: one record per indexed file, with its compressed vector and the names found in it. See files.ts.
+  'fileIndex',
 ] as const;
 export type Collection = (typeof COLLECTIONS)[number];
 
