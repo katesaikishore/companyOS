@@ -125,6 +125,13 @@ const KeyName = z
   .max(40)
   .refine(value => parseKeyName(value) === value, 'Use one key, with or without modifiers, such as return or cmd+v.');
 
+/**
+ * A folder a file step works in: an absolute path inside the person's home folder, given as "~/..." so a playbook is the
+ * same on every Mac. No parent segments, hidden segments, control characters or wildcards.
+ */
+export const HOME_FOLDER = /^~(\/[^/\u0000-\u001f\u007f*?"'`<>|.][^/\u0000-\u001f\u007f*?"'`<>|]{0,120}){1,6}$/u;
+const HomeFolder = z.string().max(400).regex(HOME_FOLDER, 'Use a folder inside your home folder, such as ~/Downloads.');
+
 /** What a check reads: the clipboard, or every piece of text shown in the window. */
 const CheckSource = z.enum(['clipboard', 'window']);
 /** The longest a check may keep reading for the expected text, and the longest a wait step may pause. */
@@ -193,6 +200,17 @@ export const StepSchema = z.discriminatedUnion('op', [
     })
     .strict(),
   z.object({ op: z.literal('wait'), app: TargetAppRef, ms: z.number().int().min(50).max(SETTLE_MAX_MS) }).strict(),
+  // Gathers duplicate files: every copy but the oldest moves into one review folder, with a manifest to undo the move.
+  // Nothing is deleted. The review folder is never scanned.
+  z
+    .object({
+      op: z.literal('gather_duplicates'),
+      app: TargetAppRef,
+      folders: z.array(HomeFolder).min(1).max(4),
+      into: HomeFolder,
+    })
+    .strict()
+    .refine(step => step.folders.every(folder => folder !== step.into && !step.into.startsWith(`${folder}/`) && !folder.startsWith(`${step.into}/`)), 'The review folder must be apart from the folders scanned.'),
 ]);
 
 /** The most steps one automation may hold. A desktop playbook strings many small steps together. */
@@ -460,6 +478,7 @@ export function resolveStep(step: Step, params: readonly Param[], values: Readon
     case 'set_field':
     case 'check_text':
     case 'wait':
+    case 'gather_duplicates':
       // Desktop steps take no parameters. The schema checked their text, names and keys when the automation loaded.
       return { ...step, app: targetAppName(app) };
   }
@@ -511,6 +530,8 @@ export function describeStep(step: Step): string {
       return `Check that ${step.source === 'clipboard' ? 'the clipboard' : describeWindow(step)} shows ${step.expect.length === 1 ? describeText(step.expect[0]) : `${step.expect.length} expected values`}?`;
     case 'wait':
       return `Wait ${step.ms} ms for "${step.app}"?`;
+    case 'gather_duplicates':
+      return `Move every extra copy of a duplicate file in ${step.folders.join(', ')} into ${step.into}, keeping the oldest copy where it is? Nothing is deleted.`;
   }
 }
 

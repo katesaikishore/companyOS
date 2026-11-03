@@ -403,6 +403,16 @@ export interface PlanRunView {
   runs: Array<{ automationId: string; result?: RunResult; error?: string }>;
 }
 
+/**
+ * A swarm: several automations started together, each under its own cursor. `allowed` says whether the person allowed
+ * every step of these runs when they started the swarm, or chose to be asked for each run.
+ */
+export interface SwarmRunView {
+  confirmed: boolean;
+  allowed: 'all' | 'each' | 'none';
+  runs: Array<{ automationId: string; result?: RunResult; error?: string }>;
+}
+
 /** One automation ranked by what Recall saw of its apps. Holds no text: only counts, a time and the routine's name. */
 export interface AssignedTaskView {
   automationId: string;
@@ -478,6 +488,11 @@ export interface TwinBridge {
    * then starts the chosen runs together. Each run still asks before any step that acts on an app.
    */
   planAndRun(): Promise<PlanRunView>;
+  /**
+   * Starts two to nine automations at level 3 or above together, as a swarm, each under its own cursor, after asking the
+   * person once. They share the desktop's input step by step, so no two actions ever overlap.
+   */
+  runSwarm(automationIds: string[]): Promise<SwarmRunView>;
   setLevel(automationId: string, level: AutonomyLevel): Promise<AutomationView>;
   promote(automationId: string): Promise<AutomationView>;
   dryRun(automationId: string): Promise<RunResult>;

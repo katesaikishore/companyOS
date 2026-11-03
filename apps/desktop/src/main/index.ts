@@ -223,6 +223,10 @@ function registerIpc(): void {
   handle(IPC.createPlaybook, input => requireRuntime().createPlaybook(input));
   // Takes no input: the plan is made from the automations at level 3 or above, and the person confirms it.
   handle(IPC.planAndRun, () => requireRuntime().planAndRun());
+  handle(IPC.runSwarm, ids => {
+    if (!Array.isArray(ids) || ids.length > 9) throw new Error('Invalid swarm.');
+    return requireRuntime().runSwarm(ids.map(automationId));
+  });
   handle(IPC.setLevel, (id, level) => requireRuntime().setLevel(automationId(id), AutonomyLevelSchema.parse(level)));
   handle(IPC.promote, id => requireRuntime().promote(automationId(id)));
   handle(IPC.dryRun, id => requireRuntime().dryRun(automationId(id)));
@@ -367,6 +371,26 @@ async function approveStep(automation: Automation, step: Step, decision: Decisio
   const parent = parentWindow();
   const result = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
   return result.response === 0 ? true : result.response === 1 ? 'run' : false;
+}
+
+/**
+ * Asks the person once before a swarm starts, naming each automation. "Run them, allowing their steps" starts every run
+ * approved for itself, so no question interrupts the swarm; each step still passes the policy. "Ask for each run" keeps
+ * one question per run. The default and cancel answer is Not now.
+ */
+async function confirmSwarm(names: string[]): Promise<'all' | 'each' | false> {
+  const options: MessageBoxOptions = {
+    type: 'question',
+    buttons: ['Run them, allowing their steps', 'Run them, asking for each run', 'Not now'],
+    defaultId: 2,
+    cancelId: 2,
+    title: 'companyOS swarm',
+    message: `Start these ${names.length} automations together?`,
+    detail: `${names.map(name => `• ${name}`).join('\n')}\n\nEach one moves its own cursor. They take turns at the keyboard and mouse, one step at a time.`,
+  };
+  const parent = parentWindow();
+  const result = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
+  return result.response === 0 ? 'all' : result.response === 1 ? 'each' : false;
 }
 
 /**
@@ -587,6 +611,7 @@ async function boot(): Promise<void> {
       laya: !app.isPackaged && process.env.COMPANYOS_TEST_LAYA_FIXTURE ? readLayaFixture(process.env.COMPANYOS_TEST_LAYA_FIXTURE) : undefined,
       approve: approveStep,
       confirmPlan,
+      confirmSwarm,
       // The test platform has no real input device, so idle time is pinned to zero for it.
       idleSeconds: () => (!app.isPackaged && process.env.COMPANYOS_TEST_FAKE_PLATFORM ? 0 : powerMonitor.getSystemIdleTime()),
       onBattery: () => powerMonitor.onBatteryPower,

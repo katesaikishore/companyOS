@@ -215,6 +215,29 @@ describe('the waits, retries and keys a playbook needs', () => {
   });
 });
 
+describe('the gather_duplicates step', () => {
+  const GATHER: Step = { op: 'gather_duplicates', app: 'Finder', folders: ['~/Downloads', '~/Desktop'], into: '~/companyOS Duplicates' };
+
+  it('takes folders inside home only, apart from the review folder, and refuses parents, hidden folders and absolute paths', () => {
+    expect(StepSchema.safeParse(GATHER).success).toBe(true);
+    for (const bad of ['/Users/x/Downloads', '~/../etc', '~/.ssh', '~', 'Downloads', '~/Down*']) {
+      expect(StepSchema.safeParse({ ...GATHER, folders: [bad] }).success).toBe(false);
+    }
+    expect(StepSchema.safeParse({ ...GATHER, into: '~/Downloads/Review' }).success).toBe(false);
+    expect(StepSchema.safeParse({ ...GATHER, folders: ['~/Downloads/inner'], into: '~/Downloads' }).success).toBe(false);
+  });
+
+  it('is an external effect that names the folders, says nothing is deleted, and reports what moved', async () => {
+    expect(effectOfOp('gather_duplicates', 'Finder')).toBe('external_effect');
+    expect(describeStep(GATHER)).toMatch(/~\/Downloads, ~\/Desktop into ~\/companyOS Duplicates.*Nothing is deleted/);
+    const exec = desktop('', { gatherDuplicates: async () => ({ moved: 3, bytes: 4_500_000 }) });
+    const result = await runAutomation(playbook([GATHER]), { mode: 'supervised', policy: POLICY, approve: async () => true }, exec);
+    expect(result.steps[0]).toMatchObject({ outcome: 'passed', reason: 'Done. 3 duplicate copies (4.5 MB) moved into ~/companyOS Duplicates, with a manifest to undo it.' });
+    const unattended = await runAutomation(playbook([GATHER]), { mode: 'unattended', policy: { ...POLICY, level: 4, unattended: true } }, exec);
+    expect(unattended.status).toBe('blocked');
+  });
+});
+
 describe('TwinAgent.createPlaybook', () => {
   it('stores a draft at level 2 with its effects, refuses an invalid playbook, and keeps its name out of the export', () => {
     const agent = temps.track(new TwinAgent({ dataDir: temps.folder('twin-playbook-'), dataKey: randomBytes(32), now: () => 1_800_000_000_000 }));

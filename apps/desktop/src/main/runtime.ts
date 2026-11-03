@@ -35,6 +35,7 @@ import {
   type LocalModelClient,
   type PlanCandidate,
   type PlanRunView,
+  type SwarmRunView,
   type PlanView,
   type RunPlan,
   type LocalApiState,
@@ -80,6 +81,7 @@ import { ModelManager, SharedModelClients, createRoutineNamer } from './models';
 import { InputLock } from './input-lock';
 import { browserCapturePaths, installNativeHost, isBrowserCaptureSupported, removeNativeHost } from './native-host-install';
 import { AgentDesktopSession, cursorFor, handsExecutor } from './agent-desktop';
+import { gatherDuplicates } from './file-actions';
 import { choosePlatform, executorFor, type Platform } from './platform';
 import { PipeScheduler, removeLegacyPipeFiles } from './pipes';
 import { LocalConnectorService } from './connectors-scheduler';
@@ -94,6 +96,11 @@ export interface RuntimeOptions {
    * Saying yes starts the runs; each one still asks before any step that acts on an app.
    */
   confirmPlan: (names: string[]) => Promise<boolean>;
+  /**
+   * Asks the person once whether to start a swarm, naming each automation: run them allowing all their steps, run them and
+   * ask for each run, or not now. The main process shows a native dialog.
+   */
+  confirmSwarm?: (names: string[]) => Promise<'all' | 'each' | false>;
   /** Seconds since the last keyboard or mouse input. */
   idleSeconds: () => number;
   /** True when the device runs on battery. Model work waits for AC power or idleness (plan §5.5). */
@@ -123,6 +130,8 @@ const NO_CONTROL: Executor = {
 };
 
 const DAY_MS = 86_400_000;
+/** The most automations one swarm starts together. Each draws its own cursor, and they share the input step by step. */
+export const SWARM_MAX = 9;
 /** How often the kind labeller looks for routines to label. A look reads the routines, so it is not more often. */
 const KIND_PASS_MS = 60_000;
 /** How long the Laya model stays loaded after labelling, before it is freed. */
@@ -614,6 +623,42 @@ export class TwinRuntime {
   }
 
   async supervisedRun(automationId: string): Promise<RunResult> {
+    return this.runSupervised(automationId, false);
+  }
+
+  /**
+   * Starts two to nine automations together as a swarm, each under its own named cursor, after one question naming them
+   * all. When the person allows all their steps, each run starts approved for itself; every step still passes the policy,
+   * so a denied step stops its run. They take the desktop's input in turns, one step at a time, so actions never overlap.
+   */
+  async runSwarm(automationIds: string[]): Promise<SwarmRunView> {
+    if (!this.agent.configuration.automationsEnabled) throw new Error('Automations are stopped. Resume them in settings first.');
+    if (!this.platform) throw new Error('App control is not available on this system yet.');
+    const ids = [...new Set(automationIds)];
+    if (ids.length !== automationIds.length) throw new Error('Each automation can be in a swarm once.');
+    if (ids.length < 2 || ids.length > SWARM_MAX) throw new Error(`A swarm runs 2 to ${SWARM_MAX} automations.`);
+    if (this.planning) throw new Error('A plan is waiting for your answer. Answer it, then start the swarm.');
+    const views = ids.map(id => this.agent.automations().find(view => view.automation.id === id));
+    if (views.some(view => !view)) throw new Error('Unknown automation.');
+    if (views.some(view => view!.state.level < 3)) throw new Error('Raise every automation in the swarm to level 3 first.');
+    const answer = this.options.confirmSwarm ? await this.options.confirmSwarm(views.map(view => view!.automation.name)) : false;
+    console.info(`[swarm] size=${ids.length} answer=${answer || 'no'}`);
+    if (!answer) return { confirmed: false, allowed: 'none', runs: [] };
+    const settled = await Promise.allSettled(ids.map(id => this.runSupervised(id, answer === 'all')));
+    return {
+      confirmed: true,
+      allowed: answer,
+      runs: settled.map((outcome, index) => ({
+        automationId: ids[index],
+        ...(outcome.status === 'fulfilled'
+          ? { result: outcome.value }
+          : { error: outcome.reason instanceof Error ? outcome.reason.message : 'The run could not start.' }),
+      })),
+    };
+  }
+
+  /** One supervised run. `allowed` is set only by a swarm the person allowed in full: the run then asks nothing more. */
+  private async runSupervised(automationId: string, allowed: boolean): Promise<RunResult> {
     return this.withRun(async () => {
       const platform = this.platform;
       if (!platform) throw new Error('App control is not available on this system yet.');
@@ -627,7 +672,9 @@ export class TwinRuntime {
             mode: 'supervised',
             // The dialog takes focus, so it has its own turn of the input: it never opens while another run's step acts,
             // and no step acts while it is open. The runner asks before the step's own turn, so the two never nest.
-            approve: (step, decision) => this.inputLock.run(owner, () => this.options.approve(automation, step, decision)),
+            approve: allowed
+              ? async () => 'run' as const
+              : (step, decision) => this.inputLock.run(owner, () => this.options.approve(automation, step, decision)),
           },
           this.runExecutor(platform, automation),
         ),
@@ -646,7 +693,8 @@ export class TwinRuntime {
     // Each step's action and its check take the desktop's input in turn, so overlapping runs cannot move focus under
     // each other. A step's turn starts after its approval, whose dialog had a turn of its own.
     const exclusive = <T>(work: () => Promise<T>): Promise<T> => this.inputLock.run(cursor?.agentId ?? 'run', work);
-    const native = executorFor(platform);
+    // Gathering duplicate files works on the person's folders, not the screen, so it needs no agent-desktop program.
+    const native = { ...executorFor(platform), gatherDuplicates: (folders: readonly string[], into: string) => gatherDuplicates(homedir(), folders, into) };
     const binary = this.agent.configuration.agentDesktopPath.trim();
     if (binary === '') return { ...native, exclusive };
     return {

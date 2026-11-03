@@ -77,6 +77,7 @@ function malformedReason(step: Step): string | undefined {
     case 'set_field':
     case 'check_text':
     case 'wait':
+    case 'gather_duplicates':
       return isShellApp(step.app) ? shellReason : undefined;
     default:
       return undefined;

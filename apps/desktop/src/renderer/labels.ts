@@ -110,6 +110,8 @@ export function stepTitle(step: Step, params: readonly Param[]): string {
       return `Check ${step.source === 'clipboard' ? 'the clipboard' : 'the window'} shows ${step.expect.length === 1 ? textLabel(step.expect[0]) : `${step.expect.length} values`}`;
     case 'wait':
       return `Wait ${step.ms} ms`;
+    case 'gather_duplicates':
+      return `Gather duplicate files into ${step.into}`;
   }
 }
 

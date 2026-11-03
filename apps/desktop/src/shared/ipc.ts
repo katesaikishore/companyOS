@@ -20,6 +20,7 @@ export const IPC = {
   createMenuAutomation: 'twin:create-menu-automation',
   createPlaybook: 'twin:create-playbook',
   planAndRun: 'twin:plan-and-run',
+  runSwarm: 'twin:run-swarm',
   setLevel: 'twin:set-level',
   promote: 'twin:promote',
   dryRun: 'twin:dry-run',

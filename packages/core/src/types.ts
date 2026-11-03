@@ -43,7 +43,8 @@ export type StepOp =
   | 'fill_field'
   | 'set_field'
   | 'check_text'
-  | 'wait';
+  | 'wait'
+  | 'gather_duplicates';
 
 /** 0 observe, 1 suggest, 2 draft, 3 one-click run, 4 unattended (local, reversible), 5 external (not in this version). */
 export type AutonomyLevel = 0 | 1 | 2 | 3 | 4 | 5;

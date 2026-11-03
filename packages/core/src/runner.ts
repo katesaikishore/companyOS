@@ -60,6 +60,12 @@ export interface Executor {
   pressKey?(app: string, window: string | undefined, key: string): Promise<boolean>;
   fillField?(app: string, window: string | undefined, target: Locator, text: string, submit: boolean): Promise<boolean>;
   setField?(app: string, window: string | undefined, target: Locator, text: string): Promise<boolean>;
+  /**
+   * Moves every copy of a duplicate file but the oldest from the folders into the review folder, writes a manifest there,
+   * and returns how many copies moved. True to its postcondition: each moved file is in the review folder and gone from
+   * where it was. Paths are "~/..." inside the home folder.
+   */
+  gatherDuplicates?(folders: readonly string[], into: string): Promise<{ moved: number; bytes: number }>;
   /** The text a check reads: the clipboard, or every piece of text shown in the window. Never kept by the runner. */
   readText?(app: string, window: string | undefined, source: 'clipboard' | 'window'): Promise<string>;
   /**
@@ -191,6 +197,7 @@ function unsupportedReason(step: Step, executor: Executor): string | undefined {
     const op = step.op as DesktopOp;
     if (!executor[EXECUTOR_METHOD[op]]) return MISSING_REASON[op];
   }
+  if (step.op === 'gather_duplicates' && !executor.gatherDuplicates) return 'This system cannot gather duplicate files yet.';
   if (step.op === 'open_url' && !executor.openUrl) return 'This system cannot open web addresses yet.';
   if (step.op === 'open_file' && !executor.openFile) return 'This system cannot open files yet.';
   if (step.op === 'press_shortcut' && !executor.pressShortcut) return 'This system cannot press shortcuts yet.';
@@ -484,6 +491,26 @@ export async function runAutomation(automation: Automation, request: RunRequest,
           ...(unwanted.length > 0 ? [`${unwanted.length} value${unwanted.length === 1 ? '' : 's'} that should be gone ${unwanted.length === 1 ? 'was' : 'were'} still shown.`] : []),
         ];
         record('check_failed', reasons.join(' '));
+        return 'failed';
+      }
+
+      if (step.op === 'gather_duplicates') {
+        try {
+          const gathered = await executor.gatherDuplicates?.(step.folders, step.into);
+          if (gathered) {
+            passed++;
+            const mb = (gathered.bytes / 1_000_000).toFixed(1);
+            record('passed', `Done. ${gathered.moved} duplicate cop${gathered.moved === 1 ? 'y' : 'ies'} (${mb} MB) moved into ${step.into}, with a manifest to undo it.`);
+            return undefined;
+          }
+        } catch (error) {
+          const refusal = refusalMessage(error);
+          if (refusal !== undefined) {
+            record('blocked', 'The duplicate files could not be gathered.', refusal);
+            return 'blocked';
+          }
+        }
+        record('failed', 'The duplicate files could not be gathered.');
         return 'failed';
       }
 
