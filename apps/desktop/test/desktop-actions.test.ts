@@ -35,7 +35,8 @@ const FAKE_PROGRAM = [
   "  let matches = table[role] || [];",
   "  if (require('node:fs').existsSync(process.env.FAKE_DESK_LOG + '.scrolled')) matches = matches.map(m => m.bounds && m.bounds.width === 1 ? { ...m, bounds: { ...m.bounds, width: 60 } } : m);",
   "  if (role === 'textfield' && process.env.FAKE_DESK_FIELD !== undefined) matches = matches.concat([{ ref_id: '@s1:e9', role, states: ['focused'], value: process.env.FAKE_DESK_FIELD }]);",
-  '  out({ ok: true, data: { matches } });',
+  "  if (args.includes('--first')) { const name = after('--name'); const m = matches.find(x => x.name === name); out({ ok: true, data: m ? { match: m } : {} }); }",
+  '  else out({ ok: true, data: { matches } });',
   "} else if (args[0] === 'scroll-to') { require('node:fs').writeFileSync(process.env.FAKE_DESK_LOG + '.scrolled', ''); out({ ok: true, data: {} }); }",
   'else out({ ok: true, data: {} });',
   '',
@@ -196,7 +197,8 @@ describe.runIf(STARTS_FAKE_PROGRAM)('the desktop steps through agent-desktop', (
     const hiddenTab = { ref_id: '@s1:e8', role: 'statictext', name: 'Scratch', bounds: { x: 887, y: 818, width: 1, height: 18 } };
     const calls = fake({ find: { statictext: [hiddenTab] } });
     await expect(clickWithAgentDesktop(options(), 'Google Chrome', 'Benchmark', { role: 'statictext', name: 'Scratch' }, 'right')).resolves.toBe(true);
-    expect(verbs(calls())).toEqual(['list-windows', 'find', 'scroll-to', 'find', 'focus-window', 'mouse-click']);
+    // Asked for by name first; out of view, so listed in full, scrolled into view, and looked for again.
+    expect(verbs(calls())).toEqual(['list-windows', 'find', 'find', 'scroll-to', 'find', 'focus-window', 'mouse-click']);
     expect(calls().at(-1)).toEqual(['mouse-click', '--xy', '917,827', '--button', 'right', '--headed']);
   });
 
@@ -205,6 +207,16 @@ describe.runIf(STARTS_FAKE_PROGRAM)('the desktop steps through agent-desktop', (
     const calls = fake({ find: { statictext: [tab] } });
     await clickWithAgentDesktop(options(), 'Google Chrome', 'Benchmark', { role: 'statictext', namePrefix: 'Sheet' }, 'left', 2);
     expect(calls().at(-1)).toEqual(['mouse-click', '--xy', '130,827', '--button', 'left', '--count', '2', '--headed']);
+  });
+
+  it('asks for an exactly named element directly, so a window too large to list still works', async () => {
+    const item = { ref_id: '@s1:e3', role: 'image', name: 'companyOS Duplicates' };
+    const calls = fake({ find: { image: [item] } });
+    await clickWithAgentDesktop(options(), 'Google Chrome', 'Benchmark', { role: 'image', name: 'companyOS Duplicates' }, 'left', 2);
+    expect(calls().filter(args => args[0] === 'find')).toEqual([
+      ['find', '--app', 'Google Chrome', '--window-id', 'w-1', '--role', 'image', '--name', 'companyOS Duplicates', '--first'],
+    ]);
+    expect(calls().at(-1)).toEqual(['double-click', '@s1:e3', '--headed']);
   });
 
   it('finds a nameless field by its value', async () => {

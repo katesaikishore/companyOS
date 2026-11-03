@@ -124,14 +124,29 @@ async function elements(options: HandsOptions, context: Context, app: string, wi
   );
   const envelope = parseEnvelope(found.output) as { ok?: unknown; data?: { matches?: unknown } } | undefined;
   const matches = envelope?.ok === true && Array.isArray(envelope.data?.matches) ? envelope.data.matches : [];
-  return (matches as Array<Record<string, unknown>>).map(match => ({
+  return (matches as Array<Record<string, unknown>>).map(toMatch);
+}
+
+/**
+ * The first element of a role with this name, asked for directly. A window with very many items, such as a home folder
+ * in Finder, cannot be listed in full before the program's deadline, but one named element can still be found.
+ */
+async function firstNamed(options: HandsOptions, context: Context, app: string, windowId: string, role: string, name: string): Promise<Match | undefined> {
+  const found = await call(options, context, ['find', '--app', app, '--window-id', windowId, '--role', role, '--name', name, '--first'], FIND_OUTPUT_BYTES);
+  const envelope = parseEnvelope(found.output) as { ok?: unknown; data?: { match?: unknown } } | undefined;
+  const match = envelope?.ok === true ? envelope.data?.match : undefined;
+  return match && typeof match === 'object' ? toMatch(match as Record<string, unknown>) : undefined;
+}
+
+function toMatch(match: Record<string, unknown>): Match {
+  return {
     ref: typeof match.ref_id === 'string' && REF.test(match.ref_id) ? match.ref_id : undefined,
     name: typeof match.name === 'string' ? match.name : undefined,
     value: typeof match.value === 'string' ? match.value : undefined,
     states: Array.isArray(match.states) ? match.states.filter((s): s is string => typeof s === 'string') : [],
     path: Array.isArray(match.path) ? match.path.filter((s): s is string => typeof s === 'string') : [],
     bounds: boundsOf(match.bounds),
-  }));
+  };
 }
 
 function boundsOf(value: unknown): Match['bounds'] {
@@ -162,6 +177,11 @@ function pick(matches: readonly Match[], target: Locator, inView = true): Match 
  * bar, is scrolled into view once and looked for again.
  */
 async function locate(options: HandsOptions, context: Context, app: string, windowId: string, target: Locator): Promise<Match | HandsResult> {
+  // An exact name is asked for directly first; the full listing is the fallback, and the only way for the other locators.
+  if (target.name !== undefined && !target.last) {
+    const direct = await firstNamed(options, context, app, windowId, target.role, target.name);
+    if (direct && pick([direct], target)) return direct;
+  }
   const matches = await elements(options, context, app, windowId, target.role);
   const found = pick(matches, target);
   if (found) return found;
