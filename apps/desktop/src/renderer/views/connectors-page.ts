@@ -1,9 +1,9 @@
-import type { CloudAccountView, TwinStatus } from '@companyos/twin-core';
+import type { CloudAccountView, DiscordStatusView, TwinStatus } from '@companyos/twin-core';
 import { h } from '../dom.js';
-import { button, pageHeader, panel, panelHead } from '../components/ui.js';
+import { button, pageHeader, panel, panelHead, toggleRow } from '../components/ui.js';
 import { formatWhen, plural } from '../format.js';
 import { LOCAL_CONNECTOR_KINDS, CONNECTORS_NOTE } from '../connectors-model.js';
-import { act, bridge, pending, setNotice } from '../store.js';
+import { act, bridge, pending, saveConfig, setNotice, state } from '../store.js';
 import { connectorAddButtons, connectorRow } from './settings.js';
 
 /** The cloud accounts the app can connect, in the order the page shows them. */
@@ -36,6 +36,7 @@ export function connectorsPageView(status: TwinStatus): HTMLElement {
         : h('div', null, ...sources.map(source => connectorRow(source, status, now))),
       connectorAddButtons(status.config.connectors.length),
     ),
+    discordPanel(status),
     panel(
       { testid: 'connectors-cloud' },
       panelHead('Cloud accounts', 'Read-only. You sign in through your browser, and the tokens are sealed on this device.'),
@@ -46,6 +47,139 @@ export function connectorsPageView(status: TwinStatus): HTMLElement {
         gmailRow(),
       ),
     ),
+  );
+}
+
+const DISCORD_QUESTION_KEY = 'discord:question';
+const DISCORD_PROBLEMS: Record<NonNullable<DiscordStatusView['problem']>, string> = {
+  not_set: 'Set the agent-desktop program path in Settings, so the twin can read Discord.',
+  not_running: 'Discord is not open. Messages are read while it is.',
+  unreadable: 'Discord’s window could not be read. Try again after Discord has finished loading.',
+};
+
+/**
+ * Discord, read from the app on this Mac. The twin reads what the Discord window shows, about once a minute, and never clicks
+ * or types in it. A self-check, run on its own as messages arrive, measures how well it answers questions about them.
+ */
+function discordPanel(status: TwinStatus): HTMLElement {
+  const discord = status.discord;
+  const screenOn = status.config.screenCaptureEnabled;
+  const enabled = status.config.discordReadingEnabled;
+  return panel(
+    { testid: 'connectors-discord' },
+    panelHead('Apps on this Mac', 'Read from the app’s window while it is open. Nothing is clicked or sent, and the messages stay encrypted here.'),
+    toggleRow({
+      testid: 'discord-toggle',
+      label: 'Read Discord',
+      note: screenOn ? 'Reads the messages Discord shows in the conversations you open.' : 'Turn on screen text in Settings first.',
+      checked: enabled,
+      disabled: (!screenOn && !enabled) || pending('discord-toggle'),
+      onChange: checked => void saveConfig('discord-toggle', { discordReadingEnabled: checked }),
+    }),
+    enabled && discord ? discordBody(discord) : undefined,
+  );
+}
+
+function discordBody(discord: DiscordStatusView): HTMLElement {
+  const check = discord.check;
+  const question = h('input', {
+    class: 'input',
+    type: 'text',
+    maxlength: 500,
+    placeholder: 'For example: what did Kala send me yesterday?',
+    'aria-label': 'Ask about your Discord',
+    'data-testid': 'discord-question',
+    oninput: () => {
+      state.discord.question = question.value;
+      state.dirty.add(DISCORD_QUESTION_KEY);
+    },
+    onblur: () => state.dirty.delete(DISCORD_QUESTION_KEY),
+  });
+  question.value = state.discord.question;
+  const answer = state.discord.answer;
+  return h(
+    'div',
+    { class: 'stack', 'data-testid': 'discord-body' },
+    h(
+      'p',
+      { class: 'muted small', 'data-testid': 'discord-counts' },
+      `${plural(discord.messages, 'message')} from ${plural(discord.conversations, 'conversation')}${discord.lastReadAt ? ` · last read ${formatWhen(discord.lastReadAt)}` : ''}`,
+    ),
+    discord.problem ? h('p', { class: 'muted small', 'data-testid': 'discord-problem' }, DISCORD_PROBLEMS[discord.problem]) : undefined,
+    h(
+      'div',
+      { class: 'settings-row', 'data-testid': 'discord-check' },
+      h(
+        'div',
+        { class: 'settings-model-main' },
+        h('span', { class: 'settings-row-title' }, 'How well it knows your Discord'),
+        h(
+          'span',
+          { class: 'settings-row-note', 'data-testid': 'discord-score' },
+          discord.checking
+            ? 'Checking now: writing questions from your messages and answering them…'
+            : check && check.asked > 0
+              ? `Answered ${check.correct} of ${check.asked} self-check questions right (${Math.round((check.correct / check.asked) * 100)}%). Found the right message for ${check.found} of ${check.asked}. Its own stated confidence: ${check.meanConfidence}%. Checked ${formatWhen(check.at)}.`
+              : discord.messages < 20
+                ? 'The self-check runs on its own once 20 messages have been read.'
+                : 'Not checked yet.',
+        ),
+      ),
+      button('Check now', {
+        testid: 'discord-check-now',
+        disabled: discord.checking || discord.messages === 0,
+        onClick: () => void act('discord-check', () => bridge().checkDiscord()),
+      }),
+    ),
+    check && check.results.length > 0
+      ? h(
+          'details',
+          { 'data-testid': 'discord-check-results' },
+          h('summary', { class: 'muted small' }, 'See the self-check questions'),
+          h(
+            'ul',
+            { class: 'ov-wait-list' },
+            ...check.results.map(result =>
+              h(
+                'li',
+                { class: 'ov-wait-row' },
+                h(
+                  'span',
+                  { class: 'ov-wait-copy' },
+                  h('span', { class: 'ov-wait-name' }, `${result.correct ? '✓' : '✗'} ${result.question}`),
+                  h('span', { class: 'ov-wait-meta' }, `Expected: ${result.expected}`),
+                  h('span', { class: 'ov-wait-meta' }, `Answered: ${result.answer} (${result.confidence}% sure)`),
+                ),
+              ),
+            ),
+          ),
+        )
+      : undefined,
+    h(
+      'div',
+      { class: 'actions' },
+      question,
+      button('Ask', {
+        variant: 'primary',
+        testid: 'discord-ask',
+        disabled: pending('discord-ask') || discord.messages === 0,
+        onClick: () =>
+          void act('discord-ask', async () => {
+            state.discord.answer = await bridge().askDiscord(state.discord.question);
+            state.dirty.delete(DISCORD_QUESTION_KEY);
+          }),
+      }),
+    ),
+    pending('discord-ask') ? h('p', { class: 'muted small' }, 'Looking through your messages…') : undefined,
+    answer
+      ? h(
+          'div',
+          { class: 'stack', 'data-testid': 'discord-answer' },
+          h('p', null, answer.answer),
+          h('p', { class: 'muted small mono' }, `${answer.confidence}% sure · from ${plural(answer.sources.length, 'message')}`),
+          ...answer.sources.map(source => h('p', { class: 'muted small' }, source.text)),
+        )
+      : undefined,
   );
 }
 

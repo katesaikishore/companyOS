@@ -245,6 +245,11 @@ function registerIpc(): void {
   handle(IPC.decideTask, decision => requireRuntime().decideTask(decision));
 
   handle(IPC.proposeTasks, () => requireRuntime().proposeTasks());
+  handle(IPC.askDiscord, question => {
+    if (typeof question !== 'string') throw new Error('Invalid question.');
+    return requireRuntime().askDiscord(question.slice(0, 500));
+  });
+  handle(IPC.checkDiscord, () => requireRuntime().checkDiscord());
   handle(IPC.dayRecap, day => {
     if (day !== undefined && (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day))) throw new Error('Invalid day.');
     return requireRuntime().dayRecap(day);

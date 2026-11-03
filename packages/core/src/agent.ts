@@ -501,6 +501,15 @@ export class TwinAgent {
   }
 
   /**
+   * The full text of an app's stored screen items, newest first. Nothing is returned for an app that is excluded now.
+   */
+  captureTexts(app: string, limit = 5000): Array<{ id: string; ts: number; text: string }> {
+    const name = normalizeAppName(app);
+    if (!name || isExcludedApp(name, this.config.excludedApps)) return [];
+    return this.store.captureTexts(name, 'screen', limit);
+  }
+
+  /**
    * Finds stored screen and microphone text, newest first. The words are matched as phrases, so search syntax is never
    * parsed. A hit for an app that is excluded now is left out, even before its text has been removed.
    */

@@ -59,6 +59,8 @@ import {
 } from '@companyos/twin-core';
 import { SPEAKER_MIN_SAMPLES, SPEAKER_MODEL_ID, WHISPER_MODEL_ID } from '@companyos/twin-core';
 import { discoverFromScreen, proposeTasks, recapBlocks, writeRecap, type DayRecap, type ProposedTask, type ScreenDiscovery } from '@companyos/twin-core';
+import { answerFromItems, closestItems, discordLine, selfCheck, type DiscordStatusView, type MemoryAnswer, type MemoryItem } from '@companyos/twin-core';
+import { DiscordReader } from './discord-reader';
 import { readSurface } from './app-surface';
 import { createOllamaChat, createOllamaEmbedder, createOllamaVision, visionModelReady } from './vision-ollama';
 import type { OperatorModel, OperatorTaskRequest } from '@companyos/twin-core';
@@ -187,6 +189,14 @@ type FindJobsRefusal = 'no_surface' | 'not_in_front' | 'not_allowed' | 'model_of
 const FIND_JOBS_GRAB_MS = 10_000;
 /** How far back the screen text that tasks are proposed from goes. */
 const UNDERSTAND_WINDOW_MS = 24 * 3_600_000;
+/** Discord messages are stored under their own app name, apart from whole-screen reads of the Discord window. */
+const DISCORD_MESSAGES_APP = 'Discord messages';
+/** The conversation at the start of a stored Discord line: "@Kala · Kala (2026-11-02 18:23): ...". */
+const DISCORD_CONVERSATION = /^(.*) · [^·]+? \(\d{4}-\d{2}-\d{2} \d{2}:\d{2}\): /;
+const DISCORD_CHECK_MIN_MESSAGES = 20;
+const DISCORD_CHECK_NEW_MESSAGES = 30;
+const DISCORD_CHECK_EVERY_MS = 3_600_000;
+const DISCORD_CHECK_QUESTIONS = 8;
 
 export class TwinRuntime {
   private readonly agent: TwinAgent;
@@ -241,6 +251,14 @@ export class TwinRuntime {
   private lastPlan: PlanView | undefined;
   /** Screen and microphone capture. Each starts only while its setting is on. */
   private readonly screen: ScreenCaptureService;
+  /** Reads the Discord app's messages while it is open, when the person has turned that on. */
+  private readonly discord: DiscordReader;
+  /** Embeddings of stored Discord messages by item id, kept in memory so a question embeds only new ones. */
+  private readonly discordVectors = new Map<string, number[]>();
+  private discordCheck: DiscordStatusView['check'];
+  private discordChecking: Promise<void> | undefined;
+  /** Stored Discord messages, counted after each read rather than on every status poll. */
+  private discordCounts = { messages: 0, conversations: 0 };
   private readonly audio: AudioCaptureService;
   private readonly systemAudio: AudioCaptureService;
   /** The speaker model's process. Started by the first segment when speaker identification is on, and stopped when idle. */
@@ -307,6 +325,16 @@ export class TwinRuntime {
       },
       detail,
     );
+    this.discord = new DiscordReader({
+      binary: () => this.agent.configuration.agentDesktopPath,
+      allowed: () => {
+        const config = this.agent.configuration;
+        return config.discordReadingEnabled && this.screenState() === 'on' && !isExcludedApp('discord', config.excludedApps);
+      },
+      store: message => this.agent.ingestScreen({ ts: message.ts, app: DISCORD_MESSAGES_APP, windowClass: 'chat', text: discordLine(message), mediaId: null }),
+      seenFile: join(options.userData, 'discord-seen.json'),
+      onRead: stored => this.afterDiscordRead(stored),
+    });
     this.screen = new ScreenCaptureService({
       source: { grab: () => this.grabFrame() },
       // Apple Vision, through the helper shipped in the app's resources. A development run uses the copy the build made.
@@ -361,7 +389,8 @@ export class TwinRuntime {
     });
     this.operator = new OperatorService({
       config: () => this.agent.configuration,
-      hands: binary => agentDesktopHands(binary),
+      // Each task's steps are drawn on screen by its own named cursor, in the session automations and swarms share.
+      hands: (binary, goal) => agentDesktopHands(binary, undefined, { session: this.handsSession, cursor: cursorFor('operator-task', cursorLabel('companyOS', goal)) }),
       model: (choice, modelOptions) => this.operatorModel(choice, modelOptions.sharesScreenText),
       memory: goal => this.memoryNotes(goal),
       hasChutesKey: () => hasChutesKey(options.userData),
@@ -458,6 +487,8 @@ export class TwinRuntime {
     });
     this.connectors.start();
     this.cloud.start();
+    this.countDiscord();
+    this.discord.start();
     this.startKindLabels();
     this.sweepTimer = setInterval(() => void this.sweepMedia(), DAY_MS);
     this.sweepTimer.unref();
@@ -476,6 +507,7 @@ export class TwinRuntime {
     this.pipeScheduler.stop();
     this.connectors.stop();
     this.cloud.stop();
+    this.discord.stop();
     this.stopKindLabels();
     void this.handsSession.end();
   }
@@ -571,6 +603,15 @@ export class TwinRuntime {
       connectorItems: this.agent.connectorCount(),
       connectorCounts: this.connectors.lastCounts(),
       cloudAccounts: this.cloud.accounts(),
+      discord: {
+        enabled: this.agent.configuration.discordReadingEnabled,
+        messages: this.discordCounts.messages,
+        conversations: this.discordCounts.conversations,
+        lastReadAt: this.discord.state.lastReadAt,
+        problem: this.discord.state.problem,
+        checking: this.discordChecking !== undefined,
+        check: this.discordCheck,
+      },
       pipeOutputs: this.pipeOutputSummaries(config.pipes),
       assignedTasks: this.agent.assignedTasks(),
       taskRuns: this.agent.taskRuns(),
@@ -672,6 +713,60 @@ export class TwinRuntime {
       model: createOllamaChat({ record }),
       excludedApps: this.agent.configuration.excludedApps,
     });
+  }
+
+  /** The stored Discord messages, newest first, as items to search and answer from. */
+  private discordItems(): MemoryItem[] {
+    return this.agent.captureTexts(DISCORD_MESSAGES_APP);
+  }
+
+  private countDiscord(): void {
+    const items = this.discordItems();
+    const conversations = new Set(items.map(item => DISCORD_CONVERSATION.exec(item.text)?.[1]).filter(Boolean));
+    this.discordCounts = { messages: items.length, conversations: conversations.size };
+  }
+
+  /**
+   * After each read: the counts are refreshed, and the self-check runs on its own once there is enough to check, again when
+   * enough new messages have arrived, and at most once an hour, so the model is not kept busy while the person works.
+   */
+  private afterDiscordRead(stored: number): void {
+    if (stored > 0) this.countDiscord();
+    const last = this.discordCheck;
+    const enough = this.discordCounts.messages >= DISCORD_CHECK_MIN_MESSAGES;
+    const due = !last || (this.discordCounts.messages - last.messages >= DISCORD_CHECK_NEW_MESSAGES && Date.now() - last.at >= DISCORD_CHECK_EVERY_MS);
+    if (enough && due && !this.discordChecking) void this.checkDiscord().catch(() => undefined);
+    if (stored > 0) this.options.onChange();
+  }
+
+  /** Answers a question about the person's Discord from the messages read so far, with the local models on this Mac. */
+  async askDiscord(question: string): Promise<MemoryAnswer> {
+    const text = question.trim();
+    if (text.length < 3 || text.length > 500) throw new Error('Ask in 3 to 500 characters.');
+    const record = (entry: NetworkEntry): void => this.agent.recordNetworkCall(entry);
+    const shown = await closestItems(text, this.discordItems(), createOllamaEmbedder({ record }), this.discordVectors);
+    return answerFromItems(text, shown, createOllamaChat({ record }));
+  }
+
+  /**
+   * The self-check: questions written from real Discord messages, answered by the same path a person's question takes, and
+   * graded. The result says how far the answers can be trusted. It is kept in memory only.
+   */
+  checkDiscord(): Promise<void> {
+    if (this.discordChecking) return this.discordChecking;
+    const record = (entry: NetworkEntry): void => this.agent.recordNetworkCall(entry);
+    const items = this.discordItems();
+    const job = selfCheck(items, { model: createOllamaChat({ record }), answer: question => this.askDiscord(question), count: DISCORD_CHECK_QUESTIONS })
+      .then(result => {
+        this.discordCheck = { ...result, messages: items.length, at: Date.now() };
+      })
+      .finally(() => {
+        this.discordChecking = undefined;
+        this.options.onChange();
+      });
+    this.discordChecking = job;
+    this.options.onChange();
+    return job;
   }
 
   /**
@@ -1285,6 +1380,10 @@ export class TwinRuntime {
   async deleteCapture(): Promise<void> {
     // A read in progress ends first, so nothing new is stored after the delete. The open piece of typed text is dropped too.
     this.keystrokes.discard();
+    // The read Discord messages go with the captured text, so they may be read and stored again.
+    this.discord.forget();
+    this.discordVectors.clear();
+    this.discordCheck = undefined;
     await this.stopCapture();
     try {
       await this.media.remove(this.agent.deleteAllCapture());

@@ -55,3 +55,5 @@ export * from './operator/actions';
 export * from './operator/loop';
 export * from './operator/understand';
 export * from './recap';
+export * from './discord';
+export * from './ask';

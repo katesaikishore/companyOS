@@ -39,6 +39,8 @@ export const IPC = {
   openPrivacySettings: 'twin:open-privacy-settings',
   proposeTasks: 'twin:propose-tasks',
   dayRecap: 'twin:day-recap',
+  askDiscord: 'twin:ask-discord',
+  checkDiscord: 'twin:check-discord',
   startTask: 'twin:start-task',
   stopTask: 'twin:stop-task',
   answerTaskStep: 'twin:answer-task-step',

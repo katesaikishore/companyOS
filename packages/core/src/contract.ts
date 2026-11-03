@@ -9,6 +9,7 @@ import type { RunResult } from './runner';
 import type { TaskDecision } from './tasks';
 import type { ProposedTask } from './operator/understand';
 import type { DayRecap } from './recap';
+import type { MemoryAnswer, SelfCheck } from './ask';
 
 /**
  * The contract between the desktop main process and its pages (the app and the tray).
@@ -231,6 +232,19 @@ export interface TaskView {
 }
 
 /** The tasks of one local day, in time order. */
+/** The Discord reader's state, and its last self-check. Counts and a score; the check's questions stay in memory only. */
+export interface DiscordStatusView {
+  enabled: boolean;
+  /** Discord messages stored, and the conversations they came from. */
+  messages: number;
+  conversations: number;
+  lastReadAt?: number;
+  problem?: 'not_set' | 'not_running' | 'unreadable';
+  checking: boolean;
+  /** The last self-check, with how many messages there were when it ran. */
+  check?: SelfCheck & { messages: number; at: number };
+}
+
 export interface DayTasksView {
   /** The local calendar day, as YYYY-MM-DD. */
   day: string;
@@ -405,6 +419,8 @@ export interface TwinStatus {
   connectorCounts?: Record<string, number>;
   /** The cloud accounts the app can connect, read-only: Google Calendar and GitHub. Optional, so a status built without it still type-checks. */
   cloudAccounts?: CloudAccountView[];
+  /** Reading the Discord app, and how well the twin answers questions about it. Optional, so a status built without it still type-checks. */
+  discord?: DiscordStatusView;
   /** The task operator's current task, if any. */
   operator: OperatorTaskView;
   /** The newest kept run of each write pipe, by pipe id. A pipe with no entry has no kept run. Holds no text. */
@@ -603,6 +619,10 @@ export interface TwinBridge {
   proposeTasks(): Promise<ProposedTask[]>;
   /** The recap of a day (YYYY-MM-DD, today when absent), written by the local model from that day's tasks, screen text and speech. */
   dayRecap(day?: string): Promise<DayRecap>;
+  /** Answers a question about the person's Discord, from the messages read so far, with the local models. */
+  askDiscord(question: string): Promise<MemoryAnswer>;
+  /** Runs the Discord self-check now. Its result shows in the status. */
+  checkDiscord(): Promise<void>;
   /** Starts a task. One task runs at a time. Steps that may send, share, delete or sign in wait for answerTaskStep. */
   startTask(request: OperatorTaskRequest): Promise<void>;
   /** Stops the running task. A step that waits for the person is declined. */
