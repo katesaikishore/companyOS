@@ -407,7 +407,7 @@ export interface PlanRunView {
 export interface AssignedTaskView {
   automationId: string;
   name: string;
-  /** Stored screen and audio observations of the routine's apps in the window. */
+  /** Stored screen and audio observations of the routine's apps in the window. Audio counts for the app read just before it. */
   observations: number;
   /** The newest of those observations, in ms. */
   latest: number;

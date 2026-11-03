@@ -24,7 +24,7 @@ export function tasksView(status: TwinStatus): HTMLElement {
       tasks.length === 0
         ? emptyState(
             'No tasks assigned yet.',
-            'A task appears when Recall has seen the apps of one of your automations in the last seven days. Screen or audio capture must be on for Recall to see anything.',
+            'A task appears when Recall has seen the apps of one of your automations in the last seven days. Screen capture must be on, and microphone text counts for the app that was in front.',
             h('div', { class: 'actions' }, button('Open Settings', { onClick: () => go('#/settings') })),
           )
         : h('ul', { class: 'ov-wait-list', 'data-testid': 'tasks-list' }, ...tasks.map((task, index) => taskRow(task, index + 1))),
