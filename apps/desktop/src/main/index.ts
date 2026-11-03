@@ -83,9 +83,9 @@ function text(value: unknown, pattern: RegExp, message: string): string {
   return value;
 }
 
-/** An accepted routine's id (auto_ and 12 hex) or a hand-made menu automation's id (menu- and 32 hex). */
+/** An accepted routine's id (auto_ and 12 hex), or a hand-made menu automation's or playbook's id (menu- or playbook- and 32 hex). */
 const automationId = (value: unknown) =>
-  text(value, /^(?:auto_[a-f0-9]{12}|menu-[a-f0-9]{32})$/, 'Invalid automation id.');
+  text(value, /^(?:auto_[a-f0-9]{12}|(?:menu|playbook)-[a-f0-9]{32})$/, 'Invalid automation id.');
 const routineId = (value: unknown) => text(value, /^[a-f0-9]{12}$/, 'Invalid routine id.');
 const modelId = (value: unknown) => text(value, /^[a-z0-9.-]{1,80}$/, 'Invalid model id.');
 const mediaId = (value: unknown) => text(value, /^[0-9a-f]{32}$/, 'Invalid image id.');

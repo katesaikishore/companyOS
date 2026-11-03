@@ -202,6 +202,14 @@ describe('the waits, retries and keys a playbook needs', () => {
     const never = await runAutomation(playbook([{ ...step, withinMs: 0 }]), { mode: 'supervised', policy: POLICY }, desktop('Loading…'));
     expect(never.status).toBe('failed');
   });
+
+  it('fails a check when a value that should be gone is still shown, ignoring case', async () => {
+    const step: Step = { op: 'check_text', ...SHEETS, source: 'window', expect: ['Cash on Delivery'], absent: ['cod'] };
+    const clean = await runAutomation(playbook([step]), { mode: 'supervised', policy: POLICY }, desktop('Cash on Delivery: 171'));
+    expect(clean.status).toBe('completed');
+    const left = await runAutomation(playbook([step]), { mode: 'supervised', policy: POLICY }, desktop('Cash on Delivery: 171, COD: 4'));
+    expect(left.steps[0]).toMatchObject({ outcome: 'check_failed', reason: '1 value that should be gone was still shown.' });
+  });
 });
 
 describe('TwinAgent.createPlaybook', () => {

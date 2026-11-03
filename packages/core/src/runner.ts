@@ -163,6 +163,13 @@ const EXECUTOR_METHOD = {
   check_text: 'readText',
 } as const;
 
+/** The values that must not be shown but are, ignoring case and runs of spaces and line breaks. */
+export function presentText(text: string, absent: readonly string[]): string[] {
+  const flat = (value: string): string => value.replace(/\s+/g, ' ').trim().toLowerCase();
+  const haystack = flat(text);
+  return absent.filter(value => haystack.includes(flat(value)));
+}
+
 /** The expected values a check could not find in the text it read. Matching ignores runs of spaces and line breaks. */
 export function missingText(text: string, expect: readonly string[]): string[] {
   const flat = (value: string): string => value.replace(/\s+/g, ' ').trim();
@@ -445,6 +452,7 @@ export async function runAutomation(automation: Automation, request: RunRequest,
         // and dropped; only how many values were missing is kept.
         const deadline = Date.now() + (step.withinMs ?? 0);
         let missing: string[] = step.expect;
+        let unwanted: string[] = [];
         for (;;) {
           let text: string | undefined;
           try {
@@ -461,16 +469,21 @@ export async function runAutomation(automation: Automation, request: RunRequest,
             return 'failed';
           }
           missing = missingText(text, step.expect);
-          if (missing.length === 0 || Date.now() >= deadline || request.shouldStop?.()) break;
+          unwanted = presentText(text, step.absent ?? []);
+          if ((missing.length === 0 && unwanted.length === 0) || Date.now() >= deadline || request.shouldStop?.()) break;
           await new Promise(resolve => setTimeout(resolve, CHECK_POLL_MS));
         }
-        if (missing.length === 0) {
+        if (missing.length === 0 && unwanted.length === 0) {
           passed++;
           record('passed', `Shown: all ${step.expect.length} expected value${step.expect.length === 1 ? '' : 's'}.`);
           return undefined;
         }
         failed++;
-        record('check_failed', `${missing.length} of ${step.expect.length} expected values were not shown.`);
+        const reasons = [
+          ...(missing.length > 0 ? [`${missing.length} of ${step.expect.length} expected values were not shown.`] : []),
+          ...(unwanted.length > 0 ? [`${unwanted.length} value${unwanted.length === 1 ? '' : 's'} that should be gone ${unwanted.length === 1 ? 'was' : 'were'} still shown.`] : []),
+        ];
+        record('check_failed', reasons.join(' '));
         return 'failed';
       }
 

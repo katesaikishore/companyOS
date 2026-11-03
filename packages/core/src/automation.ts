@@ -184,6 +184,8 @@ export const StepSchema = z.discriminatedUnion('op', [
       window: UiLabel.optional(),
       source: CheckSource,
       expect: z.array(z.string().min(1).max(400).regex(ENTERED_TEXT)).min(1).max(40),
+      /** Values that must not be shown, such as a word a find and replace should have removed. Matching ignores case. */
+      absent: z.array(z.string().min(1).max(400).regex(ENTERED_TEXT)).max(20).optional(),
       /** Keep reading the window for up to this long until every value is shown, for a page that is still loading. */
       withinMs: z.number().int().min(0).max(SETTLE_MAX_MS).optional(),
     })
