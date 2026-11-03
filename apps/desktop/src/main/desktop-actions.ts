@@ -420,10 +420,11 @@ export async function readTextWithAgentDesktop(options: HandsOptions, app: strin
     const context = await contextFor(options);
     const windowId = await windowFor(options, context, app, window);
     if (isResult(windowId)) return windowId;
-    // Shown text, the names of items such as files in a folder, and the contents of text areas such as a document.
+    // Shown text, the names of items such as files in a folder, and the contents of text areas and fields, such as a
+    // document's body in TextEdit.
     const texts = await elements(options, context, app, windowId, 'statictext');
     const items = await elements(options, context, app, windowId, 'image');
-    const areas = await elements(options, context, app, windowId, 'textarea');
+    const areas = [...(await elements(options, context, app, windowId, 'textarea')), ...(await elements(options, context, app, windowId, 'textfield'))];
     text = [
       ...texts.filter(match => !match.path.includes('column')).map(match => match.name),
       ...items.map(match => match.name),
