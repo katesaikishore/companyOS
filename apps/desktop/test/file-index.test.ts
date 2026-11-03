@@ -27,6 +27,7 @@ describe('walkFolders', () => {
       'Documents/notes.md': 'x',
       'Documents/.secret/key.txt': 'x',
       'Documents/Tool.app/Contents/Info.plist': 'x',
+      'Pictures/Photos Library.photoslibrary/originals/A/1.heic': 'x',
       'Desktop/project/package.json': '{}',
       'Desktop/project/src/index.ts': 'x',
       'Desktop/repo/.git/HEAD': 'x',

@@ -77,7 +77,9 @@ export function walkFolders(home = homedir(), folders: readonly string[] = INDEX
     if (depth > 0 && (names.includes('.git') || names.includes('package.json'))) return;
     for (const name of names) {
       if (found.length >= MAX_FILES) return;
-      if (name.startsWith('.') || SKIPPED_FOLDERS.has(name) || name.endsWith('.app')) continue;
+      // App bundles, and libraries that other apps manage (Photos, Music, iMovie), are not the person's own files. Reading
+      // inside a Photos library also makes macOS ask for Photos access.
+      if (name.startsWith('.') || SKIPPED_FOLDERS.has(name) || /\.(app|photoslibrary|musiclibrary|imovielibrary|tvlibrary|fcpbundle)$/i.test(name)) continue;
       const path = join(folder, name);
       let stats;
       try {
