@@ -377,8 +377,9 @@ async function fillOnce(
 }
 
 /**
- * Clears a native field and types the text into it with real key events. Some fields, such as Finder's Name field in Get
- * Info, ignore a pasted string but take typed keys.
+ * Types the text over what a native field holds, with real key events: the field is focused, its text selected, then
+ * typed over, so it is never left empty. Some fields, such as Finder's Name field in Get Info, ignore a pasted string but
+ * take typed keys, and an emptied Name field makes Finder try a rename to nothing.
  */
 export async function setFieldWithAgentDesktop(options: HandsOptions, app: string, window: string | undefined, target: Locator, text: string): Promise<boolean> {
   return outcome(
@@ -393,8 +394,10 @@ export async function setFieldWithAgentDesktop(options: HandsOptions, app: strin
       if (!match.ref) return refused('not_found', MESSAGES.notFound);
       // The text is an argument here, unlike a paste, so a leading dash would read as a flag.
       if (text.startsWith('-')) return refused('invalid_input', MESSAGES.typedText);
-      const cleared = await call(options, context, ['clear', match.ref, '--headed']);
-      if (!cleared.result.ok) return cleared.result;
+      const focused = await call(options, context, ['click', match.ref, '--headed']);
+      if (!focused.result.ok) return focused.result;
+      const selected = await press(options, context, windowId, 'cmd+a');
+      if (!selected.ok) return selected;
       return (await call(options, context, ['type', match.ref, text, '--headed'])).result;
     }),
   );

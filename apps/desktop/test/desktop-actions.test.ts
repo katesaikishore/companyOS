@@ -157,10 +157,13 @@ describe.runIf(STARTS_FAKE_PROGRAM)('the desktop steps through agent-desktop', (
     const field = { ref_id: '@s1:e5', role: 'textfield', name: 'Name', value: 'untitled folder' };
     const calls = fake({ windows: [{ ...WINDOW, title: 'untitled folder Info' }], find: { textfield: [field] } });
     await expect(setFieldWithAgentDesktop(options(), 'Finder', 'untitled folder Info', { role: 'textfield', name: 'Name' }, 'Finance')).resolves.toBe(true);
-    expect(calls().slice(-2)).toEqual([
-      ['clear', '@s1:e5', '--headed'],
+    // Focused, its text selected, then typed over: never left empty on the way.
+    expect(calls().slice(-3)).toEqual([
+      ['click', '@s1:e5', '--headed'],
+      ['press', 'cmd+a', '--window-id', 'w-1', '--headed'],
       ['type', '@s1:e5', 'Finance', '--headed'],
     ]);
+    expect(verbs(calls())).not.toContain('clear');
     fake({ windows: [{ ...WINDOW, title: 'untitled folder Info' }], find: { textfield: [field] } });
     await expect(setFieldWithAgentDesktop(options(), 'Finder', 'untitled folder Info', { role: 'textfield', name: 'Name' }, '--help')).rejects.toThrow(/dash/);
   });
