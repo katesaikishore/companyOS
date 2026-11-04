@@ -31,6 +31,8 @@ export const COLLECTIONS = [
   'keystrokeText',
   'connectorText',
   'pipeOutputs',
+  // The file search index: one record per indexed file, with its compressed vector and the names found in it. See files.ts.
+  'fileIndex',
 ] as const;
 export type Collection = (typeof COLLECTIONS)[number];
 
@@ -248,6 +250,19 @@ export class EncryptedStore {
          WHERE app IS NOT NULL AND (kind = 'screen' OR ts - readTs <= ?) GROUP BY app`,
       )
       .all(sinceTs, recentSinceTs, AUDIO_APP_WINDOW_MS) as Array<{ app: string; count: number; recent: number; latest: number }>;
+  }
+
+  /**
+   * The full text of the stored items of one app and kind, newest first, up to the limit. For reading an app's own history
+   * back, such as the Discord messages the twin has read, where search's cut snippets would lose the text.
+   */
+  captureTexts(app: string, kind: CaptureKind, limit: number): Array<{ id: string; ts: number; text: string }> {
+    return this.guard(() => {
+      if (!this.hasCaptureIndex()) return [];
+      return this.conn()
+        .prepare('SELECT recordId AS id, ts, text FROM capture_fts WHERE app = ? AND kind = ? ORDER BY ts DESC, rowid DESC LIMIT ?')
+        .all(app, kind, limit) as Array<{ id: string; ts: number; text: string }>;
+    });
   }
 
   /**

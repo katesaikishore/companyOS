@@ -1,0 +1,211 @@
+/* The Ctrl+Space search bar. */
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg, #101214);
+  color: var(--ink, #e8eaed);
+  font: 14px/1.4 -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+  overflow: hidden;
+}
+
+.search-frame {
+  height: 100%;
+  padding: 12px;
+  box-sizing: border-box;
+}
+
+.search-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+}
+
+.search-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  font-size: 18px;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  outline: none;
+}
+
+.search-input:focus {
+  border-color: rgba(120, 170, 255, 0.6);
+}
+
+.search-note {
+  margin: 0 4px;
+  font-size: 12px;
+  color: var(--muted, #9aa0a6);
+}
+
+.search-hits {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.search-hit {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 8px;
+  border-radius: 8px;
+  cursor: default;
+}
+
+.search-hit.is-selected {
+  background: rgba(120, 170, 255, 0.16);
+}
+
+.search-preview {
+  width: 48px;
+  height: 48px;
+  flex: none;
+  object-fit: cover;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.search-icon {
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted, #9aa0a6);
+}
+
+.search-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.search-name {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-meta,
+.search-why {
+  font-size: 12px;
+  color: var(--muted, #9aa0a6);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-why {
+  color: rgba(120, 200, 160, 0.9);
+}
+
+.search-modes {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.search-mode {
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--muted, #9aa0a6);
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  cursor: default;
+}
+
+.search-mode.is-on {
+  color: inherit;
+  background: rgba(120, 170, 255, 0.16);
+  border-color: rgba(120, 170, 255, 0.5);
+}
+
+.task-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  flex: 1;
+  /* Without this a flex child grows past the card instead of scrolling. */
+  min-height: 0;
+}
+
+.task-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.task-pending,
+.task-result,
+.task-head {
+  flex-shrink: 0;
+}
+
+.task-steps {
+  margin: 0 4px 0 22px;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.task-done {
+  color: var(--muted, #9aa0a6);
+}
+
+.task-pending {
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 200, 120, 0.45);
+  border-radius: 10px;
+  background: rgba(255, 200, 120, 0.08);
+}
+
+.task-pending p {
+  margin: 0 0 6px;
+}
+
+.task-detail {
+  margin: 0 0 6px;
+  padding: 8px;
+  font-size: 12px;
+  white-space: pre-wrap;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+}
+
+.task-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.task-allow,
+.task-deny {
+  padding: 6px 12px;
+  font-size: 13px;
+  color: inherit;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+  cursor: default;
+}
+
+.task-allow {
+  background: rgba(120, 170, 255, 0.3);
+  border-color: rgba(120, 170, 255, 0.6);
+}
+
+.task-result {
+  margin: 0 4px;
+  font-size: 14px;
+}

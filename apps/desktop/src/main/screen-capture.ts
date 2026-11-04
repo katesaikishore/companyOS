@@ -7,9 +7,8 @@ import {
   type ScreenRead,
   type ScreenState,
 } from '@companyos/twin-core';
-import { desktopCapturer, nativeImage, screen, utilityProcess, type UtilityProcess } from 'electron';
+import { desktopCapturer, nativeImage, screen } from 'electron';
 import type { MediaStore } from './media-store';
-import type { OcrRequest, OcrResponse } from './ocr-worker';
 
 /**
  * Takes still frames of every display, one at a time, while screen capture is on. A frame passes the policy, is skipped when it
@@ -29,7 +28,6 @@ const OCR_WIDTH = 2_000;
 const KEEP_WIDTH = 1_280;
 const KEEP_QUALITY = 60;
 /** A read that takes this long is treated as stuck. The worker is restarted and the frame is dropped. */
-const OCR_TIMEOUT_MS = 60_000;
 const PRIMARY_DISPLAY = 'primary';
 const OCR_FAILED = 'The frame could not be read.';
 
@@ -382,66 +380,6 @@ export function electronFrameSource(): FrameSource {
       // Without screen recording permission the thumbnail comes back empty, and an empty frame is never kept.
       if (size.width < 1 || size.height < 1) return null;
       return { display: String(display.id), width: size.width, height: size.height, bgra: thumbnail.toBitmap(), png: thumbnail.toPNG() };
-    },
-  };
-}
-
-interface Waiting {
-  resolve: (text: string) => void;
-  reject: (error: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
-}
-
-/**
- * Runs OCR in an Electron utility process, so reading a frame never blocks the main thread. One request is in flight at
- * a time. A request that takes too long ends the worker, and the next frame starts a fresh one.
- */
-export function forkOcrWorker(workerPath: string): OcrEngine {
-  let child: UtilityProcess | undefined;
-  let nextId = 1;
-  const waiting = new Map<number, Waiting>();
-
-  const settle = (id: number, result: { text: string } | { error: Error }): void => {
-    const entry = waiting.get(id);
-    if (!entry) return;
-    waiting.delete(id);
-    clearTimeout(entry.timer);
-    if ('text' in result) entry.resolve(result.text);
-    else entry.reject(result.error);
-  };
-
-  const ensureChild = (): UtilityProcess => {
-    if (child) return child;
-    const started = utilityProcess.fork(workerPath, [], {
-      serviceName: 'companyOS screen text',
-      // The worker's output is dropped on purpose. It must never reach a log, because it can describe the screen.
-      stdio: ['ignore', 'ignore', 'ignore'],
-    });
-    started.on('message', (message: OcrResponse) => {
-      if (message.type === 'text') settle(message.id, { text: message.text });
-      else settle(message.id, { error: new Error(OCR_FAILED) });
-    });
-    started.once('exit', () => {
-      if (child === started) child = undefined;
-      for (const id of [...waiting.keys()]) settle(id, { error: new Error(OCR_FAILED) });
-    });
-    child = started;
-    return started;
-  };
-
-  return {
-    recognise(png: Buffer): Promise<string> {
-      return new Promise<string>((resolve, reject) => {
-        const id = nextId++;
-        const worker = ensureChild();
-        const timer = setTimeout(() => {
-          settle(id, { error: new Error(OCR_FAILED) });
-          worker.kill();
-        }, OCR_TIMEOUT_MS);
-        waiting.set(id, { resolve, reject, timer });
-        const request: OcrRequest = { type: 'recognise', id, png };
-        worker.postMessage(request);
-      });
     },
   };
 }

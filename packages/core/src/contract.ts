@@ -9,6 +9,7 @@ import type { RunResult } from './runner';
 import type { TaskDecision } from './tasks';
 import type { ProposedTask } from './operator/understand';
 import type { DayRecap } from './recap';
+import type { MemoryAnswer, SelfCheck } from './ask';
 
 /**
  * The contract between the desktop main process and its pages (the app and the tray).
@@ -231,6 +232,56 @@ export interface TaskView {
 }
 
 /** The tasks of one local day, in time order. */
+/** One file search result, as the search window shows it. */
+export interface FileHitView {
+  path: string;
+  name: string;
+  folder: string;
+  kind: 'image' | 'document' | 'other';
+  mtime: number;
+  /** Why it matched, in a few words. */
+  why: string[];
+}
+
+/** A file search: the plan the local model made from the words, and the best matches. */
+export interface FileSearchView {
+  /** What the question was read as. mine is set when it asked for the person's own files; me is who that is, when known. */
+  plan: { kind: string; about: string; names: string[]; shape: string; mine?: boolean; me?: string };
+  hits: FileHitView[];
+  /** Files in the index when the search ran. */
+  indexed: number;
+  /** How long the search took in the app, in milliseconds. */
+  ms: number;
+  /** False when the embedding model did not answer in time, so the order comes from names, text and the graph only. */
+  meaning: boolean;
+}
+
+/** The file search index's state. */
+export interface FileIndexStatusView {
+  enabled: boolean;
+  running: boolean;
+  files: number;
+  images: number;
+  documents: number;
+  done: number;
+  total: number;
+  indexedAt?: number;
+  noEmbeddings?: boolean;
+}
+
+/** The Discord reader's state, and its last self-check. Counts and a score; the check's questions stay in memory only. */
+export interface DiscordStatusView {
+  enabled: boolean;
+  /** Discord messages stored, and the conversations they came from. */
+  messages: number;
+  conversations: number;
+  lastReadAt?: number;
+  problem?: 'not_set' | 'not_running' | 'unreadable';
+  checking: boolean;
+  /** The last self-check, with how many messages there were when it ran. */
+  check?: SelfCheck & { messages: number; at: number };
+}
+
 export interface DayTasksView {
   /** The local calendar day, as YYYY-MM-DD. */
   day: string;
@@ -330,13 +381,20 @@ export interface OperatorTaskView {
   state: 'idle' | 'running' | 'waiting';
   goal?: string;
   app?: string;
-  model: 'local' | 'chutes';
+  model: 'local' | 'chutes' | 'anthropic' | 'deepseek';
   steps: OperatorStepView[];
   /** The step that waits for the person. Answer it with answerTaskStep. */
   pending?: { id: string; text: string; why: string; detail?: string };
   result?: { status: 'done' | 'failed' | 'refused' | 'declined' | 'stopped' | 'step_limit'; summary?: string };
   /** Whether a task can start: the agent-desktop path is set, and a Chutes key is saved when Chutes is chosen. */
-  ready: { agentDesktop: boolean; chutesKey: boolean };
+  ready: { agentDesktop: boolean; chutesKey: boolean; anthropicKey: boolean; deepseekKey: boolean };
+}
+
+/** What the bar's planner made of a task: the app it starts in and its steps. planned is false when the model gave no plan. */
+export interface TaskPlanView {
+  app: string;
+  steps: string[];
+  planned: boolean;
 }
 
 /** A task the person types: what to do, and the app to start in. */
@@ -345,6 +403,8 @@ export interface OperatorTaskRequest {
   app: string;
   /** Lets memory notes from captured text go to Chutes with the task. Notes always go to a model on this Mac. */
   shareMemory?: boolean;
+  /** The planner's steps, when the task came from the bar. */
+  plan?: string[];
 }
 
 export interface TwinStatus {
@@ -405,6 +465,10 @@ export interface TwinStatus {
   connectorCounts?: Record<string, number>;
   /** The cloud accounts the app can connect, read-only: Google Calendar and GitHub. Optional, so a status built without it still type-checks. */
   cloudAccounts?: CloudAccountView[];
+  /** Reading the Discord app, and how well the twin answers questions about it. Optional, so a status built without it still type-checks. */
+  discord?: DiscordStatusView;
+  /** File and photo search. Optional, so a status built without it still type-checks. */
+  files?: FileIndexStatusView;
   /** The task operator's current task, if any. */
   operator: OperatorTaskView;
   /** The newest kept run of each write pipe, by pipe id. A pipe with no entry has no kept run. Holds no text. */
@@ -603,6 +667,25 @@ export interface TwinBridge {
   proposeTasks(): Promise<ProposedTask[]>;
   /** The recap of a day (YYYY-MM-DD, today when absent), written by the local model from that day's tasks, screen text and speech. */
   dayRecap(day?: string): Promise<DayRecap>;
+  /** Answers a question about the person's Discord, from the messages read so far, with the local models. */
+  askDiscord(question: string): Promise<MemoryAnswer>;
+  /** Runs the Discord self-check now. Its result shows in the status. */
+  checkDiscord(): Promise<void>;
+  /** Searches the person's files with words in plain language. */
+  searchFiles(query: string): Promise<FileSearchView>;
+  /** Small previews for search results, by path, made after the results show. */
+  filePreviews(paths: string[]): Promise<Record<string, string>>;
+  /** Opens a file from the search index, or shows it in Finder. */
+  openIndexedFile(path: string, reveal: boolean): Promise<void>;
+  /** Runs a pass of the file index now. */
+  indexFiles(): Promise<void>;
+  /** Hides the search bar. */
+  hideSearch(): Promise<void>;
+  /** Calls the listener each time the search bar is opened. Returns a function that stops listening. */
+  /** The bar opened, to find files or to do a task: by the person with a shortcut, or by a task that waits or ended. */
+  onSearchOpened(listener: (mode: 'find' | 'do', reason: 'shortcut' | 'task') => void): () => void;
+  /** Plans a task typed in the bar with the local model, then starts it. */
+  runPrompt(prompt: string): Promise<TaskPlanView>;
   /** Starts a task. One task runs at a time. Steps that may send, share, delete or sign in wait for answerTaskStep. */
   startTask(request: OperatorTaskRequest): Promise<void>;
   /** Stops the running task. A step that waits for the person is declined. */
@@ -612,6 +695,12 @@ export interface TwinBridge {
   /** Saves the Chutes key in the OS keychain. The key never returns to the page. */
   setChutesKey(key: string): Promise<void>;
   clearChutesKey(): Promise<void>;
+  /** Saves the Anthropic API key for tasks, sealed by the system keychain. It is never sent back to a page. */
+  setAnthropicKey(key: string): Promise<void>;
+  clearAnthropicKey(): Promise<void>;
+  /** Saves the DeepSeek API key for tasks, sealed by the system keychain. It is never sent back to a page. */
+  setDeepSeekKey(key: string): Promise<void>;
+  clearDeepSeekKey(): Promise<void>;
 
   exportData(): Promise<string>;
   deleteAll(): Promise<void>;

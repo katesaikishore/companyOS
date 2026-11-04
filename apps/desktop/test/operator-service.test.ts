@@ -5,7 +5,7 @@ import { OperatorService, describeAction, type OperatorModelChoice } from '../sr
 const slack: Observation = { app: 'Slack', controls: [{ ref: '@s:e1', role: 'button', name: 'Send now' }] };
 const textEdit: Observation = { app: 'TextEdit', controls: [{ ref: '@t:e1', role: 'button', name: 'New Document' }] };
 
-function setup(options: { model?: OperatorModelChoice; replies?: unknown[]; observation?: Observation; path?: string; key?: boolean; brokenHands?: boolean; slowModel?: Promise<void>; modelError?: string } = {}) {
+function setup(options: { model?: OperatorModelChoice; replies?: unknown[]; observation?: Observation; path?: string; key?: boolean; brokenHands?: boolean; slowModel?: Promise<void>; modelError?: string; ask?: boolean } = {}) {
   const prompts: string[] = [];
   const acted: string[] = [];
   let i = 0;
@@ -28,7 +28,7 @@ function setup(options: { model?: OperatorModelChoice; replies?: unknown[]; obse
   let changes = 0;
   const shares: boolean[] = [];
   const service = new OperatorService({
-    config: () => ({ excludedApps: DEFAULT_CONFIG.excludedApps, agentDesktopPath: options.path ?? '/opt/homebrew/bin/agent-desktop', operatorModel: options.model ?? 'local' }),
+    config: () => ({ excludedApps: DEFAULT_CONFIG.excludedApps, agentDesktopPath: options.path ?? '/opt/homebrew/bin/agent-desktop', operatorModel: options.model ?? 'local', askBeforeSteps: options.ask ?? true }),
     hands: () => {
       if (options.brokenHands) throw new Error('The agent-desktop program path must be absolute.');
       return hands;
@@ -41,6 +41,8 @@ function setup(options: { model?: OperatorModelChoice; replies?: unknown[]; obse
     ownApps: ['companyOS Twin', 'companyOS', 'Electron'],
     memory: () => ['TextEdit, today: Tue client presentation, final draft due'],
     hasChutesKey: () => options.key !== false,
+    hasAnthropicKey: () => options.key !== false,
+    hasDeepSeekKey: () => options.key !== false,
     onChange: () => {
       changes += 1;
     },
@@ -77,6 +79,15 @@ describe('OperatorService', () => {
     expect(acted).toHaveLength(0);
     service.answer(waiting.id, true);
     await until(() => service.view().state === 'idle');
+    expect(acted).toEqual(['click']);
+    expect(service.view().result?.status).toBe('done');
+  });
+
+  it('runs every step without waiting when approvals are off', async () => {
+    const { service, acted } = setup({ ask: false, observation: slack, replies: [{ action: 'click', ref: '@s:e1', name: '', reason: 'send' }, { action: 'done', ref: '', name: '', reason: 'Sent.' }] });
+    await service.start({ goal: 'Reply to Jordan', app: 'Slack' });
+    await until(() => service.view().state === 'idle');
+    expect(service.view().pending).toBeUndefined();
     expect(acted).toEqual(['click']);
     expect(service.view().result?.status).toBe('done');
   });
@@ -118,6 +129,15 @@ describe('OperatorService', () => {
     await shared.service.start({ goal: 'Write the week', app: 'TextEdit', shareMemory: true });
     await until(() => shared.prompts.length > 0);
     expect(shared.prompts[0]).toContain('final draft due');
+  });
+
+  it('gives the model the plan from the bar, at most eight steps of plain text', async () => {
+    const { service, prompts } = setup();
+    await service.start({ goal: 'Make a slide', app: 'TextEdit', plan: ['Open a new document', 7 as unknown as string, ...Array.from({ length: 10 }, (_, i) => `Step ${i}`)] });
+    await until(() => prompts.length > 0);
+    expect(prompts[0]).toContain('1. "Open a new document"');
+    expect(prompts[0]).toContain('8. "Step 6"');
+    expect(prompts[0]).not.toContain('Step 7');
   });
 
   it('is never left running when the hands cannot be built', async () => {

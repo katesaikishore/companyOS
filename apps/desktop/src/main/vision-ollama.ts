@@ -132,6 +132,9 @@ export async function visionModelReady(
   return names.includes(model) ? 'ready' : 'model_missing';
 }
 
+/** How long Ollama keeps the embedding model loaded after a call. */
+const EMBED_KEEP_ALIVE = '30m';
+
 /** The embedding model for understanding screen text: all-MiniLM-L6, 46 MB, 384 numbers per text. */
 export const EMBED_MODEL = 'all-minilm';
 
@@ -148,7 +151,9 @@ export function createOllamaEmbedder(options: OllamaVisionOptions): TextEmbedder
   return {
     async embed(texts, signal) {
       const ts = now();
-      const body = JSON.stringify({ model, input: texts });
+      // The model is small (46 MB), and every caller keeps it loaded for half an hour, so a search never waits for it to
+      // load and no caller resets the time another set.
+      const body = JSON.stringify({ model, input: texts, keep_alive: options.keepAlive ?? EMBED_KEEP_ALIVE });
       const log = (outcome: NetworkEntry['outcome'], status?: number): void =>
         options.record({ ts, purpose: 'local_model', host: url.hostname, path: url.pathname, bytes: Buffer.byteLength(body), outcome, ...(status === undefined ? {} : { status }) });
       let response: Response;

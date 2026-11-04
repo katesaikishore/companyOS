@@ -21,6 +21,7 @@ import {
   type SaveDialogOptions,
 } from 'electron';
 import { isMicrophoneCaptureUrl, isSystemCaptureUrl } from './capture-source';
+import { PULSE_MS, taskIndicator, type IndicatedTask } from './task-indicator';
 import { writeFileSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -32,6 +33,7 @@ import {
   type CapturePermission,
   type CaptureSearchRequest,
   type Decision,
+  type OperatorTaskView,
   type PendingRunView,
   type Step,
 } from '@companyos/twin-core';
@@ -54,6 +56,11 @@ const STOP_ALL_SHORTCUT = 'Control+Alt+.';
 let runtime: TwinRuntime | undefined;
 let mainWindow: BrowserWindow | undefined;
 let trayWindow: BrowserWindow | undefined;
+/** The file search bar, opened with Ctrl+Space. */
+let searchWindow: BrowserWindow | undefined;
+const SEARCH_SHORTCUT = 'Control+Space';
+/** Opens the bar to give the agent a task. */
+const TASK_SHORTCUT = 'Control+Shift+Space';
 let tray: Tray | undefined;
 let quitting = false;
 
@@ -245,6 +252,34 @@ function registerIpc(): void {
   handle(IPC.decideTask, decision => requireRuntime().decideTask(decision));
 
   handle(IPC.proposeTasks, () => requireRuntime().proposeTasks());
+  handle(IPC.askDiscord, question => {
+    if (typeof question !== 'string') throw new Error('Invalid question.');
+    return requireRuntime().askDiscord(question.slice(0, 500));
+  });
+  handle(IPC.checkDiscord, () => requireRuntime().checkDiscord());
+  handle(IPC.searchFiles, query => {
+    if (typeof query !== 'string') throw new Error('Invalid search.');
+    return requireRuntime().searchFiles(query.slice(0, 300));
+  });
+  handle(IPC.filePreviews, paths => requireRuntime().filePreviews(paths));
+  handle(IPC.openIndexedFile, (path, reveal) => requireRuntime().openIndexedFile(path, reveal === true));
+  handle(IPC.indexFiles, () => requireRuntime().indexFilesNow());
+  handle(IPC.hideSearch, () => searchWindow?.hide());
+  handle(IPC.runPrompt, async prompt => {
+    barTask = true;
+    // The menu bar shows the task from Enter on, while the plan is made, not only once its steps run.
+    planningGoal = typeof prompt === 'string' ? prompt : '';
+    refreshTaskIndicator();
+    try {
+      return await requireRuntime().runPrompt(prompt);
+    } catch (error) {
+      barTask = false;
+      throw error;
+    } finally {
+      planningGoal = undefined;
+      refreshTaskIndicator();
+    }
+  });
   handle(IPC.dayRecap, day => {
     if (day !== undefined && (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day))) throw new Error('Invalid day.');
     return requireRuntime().dayRecap(day);
@@ -269,6 +304,14 @@ function registerIpc(): void {
     requireRuntime().setChutesKey(text(key, /^cpk_[A-Za-z0-9._-]{10,200}$/, 'That is not a Chutes key. A Chutes key starts with cpk_.')),
   );
   handle(IPC.clearChutesKey, () => requireRuntime().clearChutesKey());
+  handle(IPC.setAnthropicKey, key =>
+    requireRuntime().setAnthropicKey(text(key, /^sk-ant-[A-Za-z0-9_-]{20,300}$/, 'That is not an Anthropic key. An Anthropic key starts with sk-ant-.')),
+  );
+  handle(IPC.clearAnthropicKey, () => requireRuntime().clearAnthropicKey());
+  handle(IPC.setDeepSeekKey, key =>
+    requireRuntime().setDeepSeekKey(text(key, /^sk-[A-Za-z0-9]{20,100}$/, 'That is not a DeepSeek key. A DeepSeek key starts with sk- and has letters and digits after it.')),
+  );
+  handle(IPC.clearDeepSeekKey, () => requireRuntime().clearDeepSeekKey());
 
   // The engine checks the search's shape, and refuses anything it does not accept, so only the object's form is checked here.
   handle(IPC.searchCapture, request => {
@@ -536,6 +579,141 @@ function createTrayWindow(): void {
   trayWindow.loadURL(`${APP_ORIGIN}/tray.html`).catch(() => undefined);
 }
 
+/** The mode the bar was last opened in. */
+let barMode: 'find' | 'do' = 'find';
+/** Who opened the bar last: the person, with a shortcut, or a task that waits for them or ended. */
+let barReason: 'shortcut' | 'task' = 'shortcut';
+/** True while a task started from the bar runs. A task from the Tasks page shows its steps there instead. */
+let barTask = false;
+let shownTaskStep: string | undefined;
+let taskWasRunning = false;
+
+/**
+ * Brings the bar back for a task started from it: when a step waits for the person's answer, and when the task ends. The
+ * bar hides while the task works, so the operator's app stays in front.
+ */
+function noticeTask(task: OperatorTaskView): void {
+  showTaskIndicator(task);
+  if (!barTask) return;
+  const pending = task.pending?.id;
+  if (pending && pending !== shownTaskStep) {
+    shownTaskStep = pending;
+    showBar('do', 'task');
+  }
+  if (!pending) shownTaskStep = undefined;
+  const running = task.state !== 'idle';
+  if (taskWasRunning && !running && task.result) {
+    barTask = false;
+    showBar('do', 'task');
+  }
+  taskWasRunning = running;
+}
+
+let indicatorTask: OperatorTaskView | undefined;
+/** The words given in the bar while its planner works, before the operator has the task. */
+let planningGoal: string | undefined;
+let indicatorTick = 0;
+let indicatorTimer: ReturnType<typeof setInterval> | undefined;
+
+function showTaskIndicator(task: OperatorTaskView): void {
+  indicatorTask = task;
+  refreshTaskIndicator();
+}
+
+/** The task the menu bar shows: the operator's while it has one, otherwise the bar's while it plans. */
+function indicatedTask(): IndicatedTask | undefined {
+  if (indicatorTask && indicatorTask.state !== 'idle') return indicatorTask;
+  if (planningGoal !== undefined) return { state: 'planning', goal: planningGoal, steps: [] };
+  return indicatorTask;
+}
+
+/**
+ * A dot beside the menu bar icon while a task works, from the bar or the Tasks page, so the person sees it from any app.
+ * It pulses while the task is planned and runs, and goes when the task ends.
+ */
+function refreshTaskIndicator(): void {
+  const state = indicatedTask()?.state;
+  const running = state === 'running' || state === 'planning';
+  if (running && !indicatorTimer) {
+    indicatorTimer = setInterval(() => {
+      indicatorTick += 1;
+      paintTaskIndicator();
+    }, PULSE_MS);
+  } else if (!running && indicatorTimer) {
+    clearInterval(indicatorTimer);
+    indicatorTimer = undefined;
+    indicatorTick = 0;
+  }
+  paintTaskIndicator();
+}
+
+function paintTaskIndicator(): void {
+  const task = indicatedTask();
+  if (!tray || tray.isDestroyed() || !task) return;
+  const { title, tooltip } = taskIndicator(task, indicatorTick);
+  if (process.platform === 'darwin') tray.setTitle(title);
+  tray.setToolTip(tooltip);
+}
+
+/** The search bar: centred near the top of the screen with the pointer, above other windows, hidden when it loses focus. */
+function createSearchWindow(): void {
+  searchWindow = new BrowserWindow({
+    width: 680,
+    height: 480,
+    // On macOS the bar is a floating panel, as Spotlight is, so it can open over an app in full screen.
+    ...(process.platform === 'darwin' ? { type: 'panel' } : {}),
+    show: false,
+    frame: false,
+    resizable: false,
+    movable: true,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    backgroundColor: '#101214',
+    webPreferences: WEB_PREFERENCES,
+  });
+  // The bar opens over an app in full screen too, such as a video, instead of on another desktop where no one sees it
+  // while the typing goes to the full-screen app.
+  searchWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+  searchWindow.setAlwaysOnTop(true, 'pop-up-menu');
+  searchWindow.on('blur', () => searchWindow?.hide());
+  // The search page holds the same bridge as the main window, so it gets the same guards: no new windows, no navigation.
+  searchWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  searchWindow.webContents.on('will-navigate', event => event.preventDefault());
+  // The first time the bar opens, the page is still loading when it is told the mode, so it is told again once it loads.
+  searchWindow.webContents.on('did-finish-load', () => {
+    if (searchWindow?.isVisible()) searchWindow.webContents.send(IPC.searchOpened, barMode, barReason);
+  });
+  searchWindow.loadURL(`${APP_ORIGIN}/search.html`).catch(() => undefined);
+}
+
+function toggleSearch(mode: 'find' | 'do' = 'find'): void {
+  if (!searchWindow || searchWindow.isDestroyed()) createSearchWindow();
+  const window = searchWindow!;
+  if (window.isVisible() && window.isFocused()) {
+    window.hide();
+    return;
+  }
+  showBar(mode, 'shortcut');
+}
+
+/** Shows the bar near the top of the screen with the pointer. A task from it starts in the app that was in front. */
+function showBar(mode: 'find' | 'do', reason: 'shortcut' | 'task'): void {
+  barMode = mode;
+  barReason = reason;
+  if (!searchWindow || searchWindow.isDestroyed()) createSearchWindow();
+  const window = searchWindow!;
+  if (!window.isVisible()) void runtime?.rememberFrontApp();
+  const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+  const size = window.getBounds();
+  window.setPosition(Math.round(area.x + (area.width - size.width) / 2), Math.round(area.y + area.height * 0.18));
+  window.show();
+  window.focus();
+  window.webContents.send(IPC.searchOpened, mode, reason);
+}
+
 function hideTray(): void {
   if (trayWindow && !trayWindow.isDestroyed() && trayWindow.isVisible()) trayWindow.hide();
 }
@@ -646,6 +824,7 @@ async function boot(): Promise<void> {
       onBattery: () => powerMonitor.onBatteryPower,
       screenLocked: screenLockedNow,
       onChange: () => undefined,
+      onTaskChange: noticeTask,
       onOffer: showOffer,
       onUnattendedRun: result => {
         if (!Notification.isSupported()) return;
@@ -698,6 +877,12 @@ async function boot(): Promise<void> {
     globalShortcut.register(STOP_ALL_SHORTCUT, () => stopAllAutomations());
   } catch {
     // Another app may own the shortcut. The tray menu still stops everything.
+  }
+  try {
+    globalShortcut.register(SEARCH_SHORTCUT, () => toggleSearch());
+    globalShortcut.register(TASK_SHORTCUT, () => toggleSearch('do'));
+  } catch {
+    // Another app may own Ctrl+Space. The search is still in the command palette.
   }
 }
 

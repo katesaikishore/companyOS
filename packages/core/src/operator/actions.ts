@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { riskOf } from '../apps/capabilities';
+import { isAllowedMenuPath } from '../automation';
 import { isExcludedApp, isShellApp, normalizeAppName } from '../classify';
 
 /**
@@ -44,10 +45,12 @@ export type OperatorAction =
   | { type: 'scroll'; ref: string; direction: 'up' | 'down'; reason: string }
   | { type: 'launch'; app: string; reason: string }
   | { type: 'focus_app'; app: string; reason: string }
+  /** A menu bar item, any submenus, then the item, such as ["View", "Sort By", "Kind"]. It reaches what the controls do not show. */
+  | { type: 'menu'; path: string[]; reason: string }
   | { type: 'done'; summary: string }
   | { type: 'fail'; reason: string };
 
-export const ACTION_NAMES = ['click', 'type', 'press', 'scroll', 'launch', 'focus_app', 'done', 'fail'] as const;
+export const ACTION_NAMES = ['click', 'type', 'press', 'scroll', 'launch', 'focus_app', 'menu', 'done', 'fail'] as const;
 
 /** The JSON shape the model fills. It is flat, so a grammar or a tool schema can hold it. */
 export const ACTION_SCHEMA = {
@@ -59,11 +62,13 @@ export const ACTION_SCHEMA = {
     text: { type: 'string' },
     keys: { type: 'string' },
     app: { type: 'string' },
+    menu: { type: 'string' },
     direction: { type: 'string', enum: ['up', 'down'] },
     reason: { type: 'string' },
   },
-  // ref, name and text are always present, empty when unused, so a small model cannot leave the target or the text out.
-  required: ['action', 'ref', 'name', 'text', 'reason'],
+  // ref, name, text and menu are always present, empty when unused, so a model cannot leave the target, the text or the
+  // menu path out. A model held to a schema tends to skip a field that is optional.
+  required: ['action', 'ref', 'name', 'text', 'menu', 'reason'],
 } as const;
 
 /** The apps the operator may act in without asking each step: local editors where a step cannot send anything. */
@@ -74,6 +79,16 @@ const APP_NAME = /^[\p{L}\p{N}][\p{L}\p{N} .\-()]{0,79}$/u;
 const BUNDLE_ID = /^[a-z0-9-]+(?:\.[a-z0-9-]+){2,}$/i;
 const KEYS = /^[a-z0-9]+(?:\+[a-z0-9]+){0,3}$/;
 const MAX_TEXT = 2000;
+const MENU_SEPARATOR = /\s*(?:>|→|›|▸|»)\s*/;
+
+/**
+ * A menu path the model wrote, such as "View > Use Stacks", as its labels. Three dots become the ellipsis the menus show,
+ * so "Save As..." finds "Save As…". Undefined when it is not a path of allowed labels.
+ */
+export function parseMenuPath(raw: string): string[] | undefined {
+  const labels = raw.split(MENU_SEPARATOR).map(label => label.trim().replace(/\.\.\.$/, '…')).filter(Boolean);
+  return isAllowedMenuPath(labels) ? labels : undefined;
+}
 
 /**
  * A target field that is too long to name anything is treated as left empty. Small models fill every field, for example
@@ -92,6 +107,7 @@ const Reply = z.object({
   text: z.string().max(MAX_TEXT).optional(),
   keys: target(40),
   app: target(80),
+  menu: target(200),
   direction: z.enum(['up', 'down']).optional(),
   reason: z.string().trim().min(1).max(300),
 });
@@ -135,15 +151,16 @@ export function normalizeKeys(raw: string): string | undefined {
 export function parseAction(reply: unknown, observation: Observation): { action: OperatorAction } | { invalid: string } {
   const parsed = Reply.safeParse(reply);
   if (!parsed.success) return { invalid: 'The reply does not match the action shape.' };
-  const { action, ref, name, text, keys, app, direction, reason } = parsed.data;
+  const { action, ref, name, text, keys, app, menu, direction, reason } = parsed.data;
   const refs = new Set(observation.controls.map(control => control.ref));
-  // A ref from this turn wins. Otherwise a control name counts only when exactly one control on the screen has that name.
+  // A name counts only when exactly one control on the screen has it. A ref is a long code that differs from its neighbour's
+  // by one character, so when a ref from this turn names one control and the name another, the name is what the model meant.
   const needsRef = (): string | undefined => {
-    if (ref && refs.has(ref)) return ref;
     const wanted = name?.trim().toLowerCase();
-    if (!wanted) return undefined;
-    const matches = observation.controls.filter(control => control.name.trim().toLowerCase() === wanted);
-    return matches.length === 1 ? matches[0].ref : undefined;
+    const matches = wanted ? observation.controls.filter(control => control.name.trim().toLowerCase() === wanted) : [];
+    const named = matches.length === 1 ? matches[0].ref : undefined;
+    if (ref && refs.has(ref)) return named ?? ref;
+    return named;
   };
   switch (action) {
     case 'click': {
@@ -172,6 +189,18 @@ export function parseAction(reply: unknown, observation: Observation): { action:
       const appName = (app || name)?.trim();
       if (!appName || !APP_NAME.test(appName) || BUNDLE_ID.test(appName)) return { invalid: 'The application name is not allowed.' };
       return { action: { type: action, app: appName, reason } };
+    }
+    case 'menu': {
+      // Models also put the path in "name" or "text", fields every reply fills. Either counts only when it is a path.
+      const isPath = (value: string | undefined): value is string => value !== undefined && MENU_SEPARATOR.test(value);
+      const raw = [menu, name, text].find(isPath) ?? menu;
+      const path = raw ? parseMenuPath(raw) : undefined;
+      if (!path) {
+        // The model sees what it wrote, so it can correct the path rather than send the same one again.
+        const given = raw ? ` ${JSON.stringify(raw.slice(0, 80))} is not one.` : ' None was given.';
+        return { invalid: `Put a menu path in "menu", such as "View > Sort By > Kind", with the labels as the app shows them.${given}` };
+      }
+      return { action: { type: 'menu', path, reason } };
     }
     case 'done':
       return { action: { type: 'done', summary: reason } };
@@ -238,6 +267,12 @@ export function judge(action: OperatorAction, observation: Observation, options:
     }
     case 'type':
       return RISKY_TEXT.test(action.text) ? { verdict: 'ask', why: 'The text has characters that may submit or move focus.' } : { verdict: 'allow' };
+    case 'menu': {
+      const label = action.path.join(' > ');
+      if (DESTRUCTIVE_WORDS.test(label) || riskOf(label, 'read_only') === 'destructive') return { verdict: 'ask', why: `"${label}" may delete or lose work.` };
+      if (OUTBOUND_WORDS.test(label) || riskOf(label, 'read_only') === 'outbound') return { verdict: 'ask', why: `"${label}" may send or share something.` };
+      return { verdict: 'allow' };
+    }
     case 'press':
       return SAFE_KEYS.has(action.keys) ? { verdict: 'allow' } : { verdict: 'ask', why: `${action.keys} may quit, close, delete or send.` };
   }

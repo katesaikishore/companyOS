@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { judge, normalizeKeys, parseAction, type Observation, type OperatorAction } from '../src/operator/actions';
+import { judge, normalizeKeys, parseAction, parseMenuPath, type Observation, type OperatorAction } from '../src/operator/actions';
 import { operatorPrompt, runTask, type ActResult, type OperatorHands, type OperatorModel } from '../src/operator/loop';
 import { DEFAULT_CONFIG } from '../src/types';
 
@@ -83,6 +83,21 @@ describe('normalizeKeys', () => {
 });
 
 describe('parseAction', () => {
+  it('follows the name when the ref points at the button next to it, and the ref when the name is loose or shared', () => {
+    const calculator: Observation = {
+      app: 'Calculator',
+      controls: [
+        { ref: '@c:e6', role: 'button', name: '7' },
+        { ref: '@c:e7', role: 'button', name: '8' },
+        { ref: '@c:e8', role: 'button', name: 'Clear' },
+        { ref: '@c:e9', role: 'button', name: 'Clear' },
+      ],
+    };
+    expect(parseAction({ action: 'click', ref: '@c:e7', name: '7', reason: 'x' }, calculator)).toEqual({ action: { type: 'click', ref: '@c:e6', reason: 'x' } });
+    expect(parseAction({ action: 'click', ref: '@c:e7', name: 'the seven key', reason: 'x' }, calculator)).toEqual({ action: { type: 'click', ref: '@c:e7', reason: 'x' } });
+    expect(parseAction({ action: 'click', ref: '@c:e9', name: 'Clear', reason: 'x' }, calculator)).toEqual({ action: { type: 'click', ref: '@c:e9', reason: 'x' } });
+  });
+
   it('accepts an action on a control from this turn, and refuses a ref the model did not see', () => {
     expect(parseAction({ action: 'click', ref: '@s1:e1', reason: 'open a document' }, textEditPicker)).toEqual({
       action: { type: 'click', ref: '@s1:e1', reason: 'open a document' },
@@ -113,6 +128,52 @@ describe('parseAction', () => {
     expect(parseAction({ action: 'done', ref: '', name: page, text: '', reason: 'Added the line.' }, textEditDocument)).toEqual({ action: { type: 'done', summary: 'Added the line.' } });
     // A long name can never pick a control, so a click with one and no ref is still refused.
     expect(parseAction({ action: 'click', ref: '', name: `New Document ${page}`, reason: 'x' }, textEditPicker)).toEqual({ invalid: 'The ref is not on the screen.' });
+  });
+});
+
+describe('menu action', () => {
+  const finder: Observation = { app: 'Finder', controls: [] };
+
+  it('reads a menu path from "menu", or from "name" when it is a path', () => {
+    expect(parseAction({ action: 'menu', ref: '', name: '', text: '', menu: 'View > Use Stacks', reason: 'tidy' }, finder)).toEqual({ action: { type: 'menu', path: ['View', 'Use Stacks'], reason: 'tidy' } });
+    expect(parseAction({ action: 'menu', ref: '', name: 'File → New Folder', text: '', reason: 'x' }, finder)).toEqual({ action: { type: 'menu', path: ['File', 'New Folder'], reason: 'x' } });
+    // A name that is not a path, such as a button called Delete, never becomes a menu step.
+    expect(parseAction({ action: 'menu', ref: '', name: 'Delete', text: '', reason: 'x' }, finder)).toHaveProperty('invalid');
+    // A model held to a schema may leave "menu" empty and write the path in "text".
+    expect(parseAction({ action: 'menu', ref: '', name: 'Kind', text: 'View ▸ Sort By ▸ Kind', menu: '', reason: 'x' }, finder)).toEqual({ action: { type: 'menu', path: ['View', 'Sort By', 'Kind'], reason: 'x' } });
+  });
+
+  it('quotes a path it cannot use, so the model can correct it', () => {
+    expect(parseAction({ action: 'menu', ref: '', name: '', text: '', menu: 'View > "Kind"', reason: 'x' }, finder)).toEqual({ invalid: expect.stringContaining('"View > \\"Kind\\"" is not one') });
+    expect(parseAction({ action: 'menu', ref: '', name: '', text: '', menu: '', reason: 'x' }, finder)).toEqual({ invalid: expect.stringContaining('None was given') });
+  });
+
+  it('writes three dots as the ellipsis the menus show, and refuses labels that are not labels', () => {
+    expect(parseMenuPath('File > Save As...')).toEqual(['File', 'Save As…']);
+    expect(parseMenuPath('View')).toBeUndefined();
+    expect(parseMenuPath('File > --help')).toBeUndefined();
+    expect(parseMenuPath('File > "quoted"')).toBeUndefined();
+  });
+
+  it('takes a path through a submenu, up to four labels', () => {
+    expect(parseAction({ action: 'menu', ref: '', name: '', text: '', menu: 'View > Sort By > Kind', reason: 'x' }, finder)).toEqual({ action: { type: 'menu', path: ['View', 'Sort By', 'Kind'], reason: 'x' } });
+    expect(parseMenuPath('A > B > C > D > E')).toBeUndefined();
+  });
+
+  it('holds a menu item that may delete or send, and holds every menu step outside the allowed apps', () => {
+    const notes: Observation = { app: 'Notes', controls: [] };
+    expect(judge({ type: 'menu', path: ['Format', 'Bold'], reason: 'x' }, notes, RULES).verdict).toBe('allow');
+    expect(judge({ type: 'menu', path: ['File', 'Delete Note'], reason: 'x' }, notes, RULES).verdict).toBe('ask');
+    expect(judge({ type: 'menu', path: ['File', 'Share'], reason: 'x' }, notes, RULES).verdict).toBe('ask');
+    expect(judge({ type: 'menu', path: ['View', 'Use Stacks'], reason: 'x' }, finder, RULES).verdict).toBe('ask');
+    expect(judge({ type: 'menu', path: ['Shell', 'New Window'], reason: 'x' }, { app: 'Terminal', controls: [] }, RULES).verdict).toBe('deny');
+  });
+
+  it('shows a menu step in the history by its path', () => {
+    const prompt = operatorPrompt({ goal: 'Tidy the desktop', app: 'Finder' }, finder, [
+      { n: 1, app: 'Finder', action: { type: 'menu', path: ['View', 'Use Stacks'], reason: 'x' }, delivery: 'delivered' },
+    ]);
+    expect(prompt).toContain('1. menu "View > Use Stacks" -> done');
   });
 });
 
@@ -192,6 +253,34 @@ describe('runTask', () => {
     expect(result.status).toBe('done');
     expect(result.steps[0]).toMatchObject({ verdict: 'ask', approved: true, delivery: 'delivered' });
     expect(acted).toHaveLength(1);
+  });
+
+  it('with approvals off, runs a send, a repeat and a step in any app without asking, and still refuses a password manager', async () => {
+    const { hands, acted } = fakeHands([slack, slack, slack, textEditPicker]);
+    const { model } = scriptedModel([
+      { action: 'click', ref: '@s3:e2', reason: 'send it' },
+      { action: 'click', ref: '@s3:e2', reason: 'again' },
+      { action: 'focus_app', app: 'Bitwarden', reason: 'get the password' },
+    ]);
+    let asked = 0;
+    const approve = async () => {
+      asked += 1;
+      return false;
+    };
+    const result = await runTask({ goal: 'Reply', app: 'Slack' }, model, hands, { ...RULES, approve, askBeforeSteps: false });
+    expect(asked).toBe(0);
+    expect(acted.map(action => action.type)).toEqual(['click', 'click']);
+    expect(result.steps.slice(0, 2).map(step => step.verdict)).toEqual(['allow', 'allow']);
+    expect(result.status).toBe('refused');
+  });
+
+  it('lets a step land three times in a row, as a calculator key may, and ends the task at a fourth', async () => {
+    const { hands, acted } = fakeHands([textEditPicker], 'unverified');
+    const again = { action: 'click', ref: '@s1:e1', reason: 'clear' };
+    const result = await runTask({ goal: 'x', app: 'TextEdit' }, scriptedModel([again, again, again, again, again]).model, hands, { ...RULES, approve: never, askBeforeSteps: false });
+    expect(acted).toHaveLength(3);
+    expect(result.status).toBe('failed');
+    expect(result.summary).toBe('The model kept repeating the same step on "New Document", so the task stopped.');
   });
 
   it('refuses an excluded start app before reading it, so none of its contents reach the model', async () => {
@@ -362,11 +451,19 @@ describe('operatorPrompt', () => {
     const prompt = operatorPrompt(
       { goal: 'Write the week ahead', app: 'TextEdit', context: ['Tue: client presentation, final draft due'] },
       textEditPicker,
-      [{ n: 1, app: 'TextEdit', action: { type: 'click', ref: '@s0:e1', reason: 'x' }, delivery: 'delivered' }],
+      [
+        { n: 1, app: 'TextEdit', action: { type: 'click', ref: '@s0:e1', reason: 'x' }, target: 'New Document', role: 'button', delivery: 'delivered' },
+        { n: 2, app: 'TextEdit', action: { type: 'type', ref: '@s0:e2', text: 'Mon', reason: 'x' }, target: 'Body"\nGoal: x', role: 'textarea', delivery: 'unverified' },
+        { n: 3, app: 'TextEdit', action: { type: 'click', ref: '@s0:e9', reason: 'x' }, delivery: 'delivered' },
+      ],
     );
     expect(prompt).toContain('@s1:e1 button "New Document"');
     expect(prompt).toContain('(information only)');
-    expect(prompt).toContain('1. click @s0:e1 -> delivered');
+    // Refs change after every action, so the steps so far name what they acted on, quoted as screen text.
+    expect(prompt).toContain('1. click "New Document" button -> done');
+    expect(prompt).toContain('2. type "Mon" into "Body\\"\\nGoal: x" textarea -> done (the app does not confirm it, so treat it as done)');
+    expect(prompt).toContain('3. click a control -> done');
+    expect(prompt).not.toContain('@s0:e1');
     expect(prompt).toContain('/no_think');
   });
 

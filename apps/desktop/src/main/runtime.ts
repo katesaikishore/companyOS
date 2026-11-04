@@ -56,20 +56,31 @@ import {
   type RoutineNamingJob,
   type WindowClass,
   normalizeAppName,
+  type Identity,
 } from '@companyos/twin-core';
-import { SPEAKER_MIN_SAMPLES, SPEAKER_MODEL_ID, WHISPER_MODEL_ID } from '@companyos/twin-core';
+import { BGE_MODEL_ID, BGE_QUERY_PREFIX, SPEAKER_MIN_SAMPLES, SPEAKER_MODEL_ID, WHISPER_MODEL_ID } from '@companyos/twin-core';
 import { discoverFromScreen, proposeTasks, recapBlocks, writeRecap, type DayRecap, type ProposedTask, type ScreenDiscovery } from '@companyos/twin-core';
+import { answerFromItems, closestItems, discordLine, selfCheck, type DiscordStatusView, type MemoryAnswer, type MemoryItem } from '@companyos/twin-core';
+import { DiscordReader } from './discord-reader';
+import { FileSearchIndex, parseQuery, type FileHitView, type FileSearchView } from '@companyos/twin-core';
+import { accountIdentity, indexFiles, QueryVectors, type FileIndexProgress } from './file-index';
 import { readSurface } from './app-surface';
-import { createOllamaChat, createOllamaEmbedder, createOllamaVision, visionModelReady } from './vision-ollama';
-import type { OperatorModel, OperatorTaskRequest } from '@companyos/twin-core';
-import { OperatorService, type OperatorModelChoice } from './operator-service';
-import { agentDesktopHands } from './operator-hands';
+import { createOllamaChat, createOllamaVision, visionModelReady } from './vision-ollama';
+import { BgeEmbedder } from './bge-embedder';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { planTask, type OperatorModel, type OperatorTaskRequest, type OperatorTaskView, type TaskPlan, type TaskPlanView } from '@companyos/twin-core';
+import { OperatorService, missingKey, type OperatorModelChoice } from './operator-service';
+import { agentDesktopHands, menuChooser, menuDelivery } from './operator-hands';
+import { agentDesktopServer, mcpHands } from './agent-desktop-mcp';
 import { createChutesChat, validChutesKey } from './remote-model';
-import { app, clipboard, desktopCapturer, shell, systemPreferences } from 'electron';
+import { createAnthropicChat, validAnthropicKey } from './anthropic-model';
+import { createDeepSeekChat, validDeepSeekKey } from './deepseek-model';
+import { app, clipboard, desktopCapturer, nativeImage, shell, systemPreferences } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { rmSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { CLOUD_TOKEN_FOLDER, createCloudTokenStore } from './connectors-cloud/seal';
 import { BROWSER_APP_NAMES, startBrowserBridge, type BrowserBridge, type BrowserVisit } from './browser-bridge';
 import { CaptureService } from './capture';
@@ -78,19 +89,28 @@ import { KeystrokeService } from './keystroke-service';
 import { AudioCaptureService, WhisperTranscriber, microphoneGranted, type SpeakerIdentifier } from './audio-capture';
 import { SpeakerEmbedder } from './speaker-embedder';
 import {
+  clearAnthropicKey as removeAnthropicKey,
   clearChutesKey as removeChutesKey,
+  clearDeepSeekKey as removeDeepSeekKey,
   destroyStoredSecrets,
+  hasAnthropicKey,
   hasChutesKey,
+  hasDeepSeekKey,
+  loadAnthropicKey,
   loadChutesKey,
+  loadDeepSeekKey,
   loadOrCreateApiToken,
   loadOrCreateDataKey,
   rotateApiToken as replaceApiToken,
+  saveAnthropicKey,
   saveChutesKey,
+  saveDeepSeekKey,
 } from './keys';
+import { spawnNativeOcr } from './native-ocr';
 import { LOCAL_API_HOST, LOCAL_API_PORT, createLocalApi, withheldFromLocalApi, type LocalApi } from './local-api';
 import { MediaStore } from './media-store';
 import { readAccessibleText } from './accessibility';
-import { electronFrameSource, forkOcrWorker, ScreenCaptureService, type Frame, type ScreenContext } from './screen-capture';
+import { electronFrameSource, ScreenCaptureService, type Frame, type ScreenContext } from './screen-capture';
 import { secureInputState } from './secure-input';
 import { detectHardware } from './hardware';
 import { LayaBundleManager, type LayaTestOptions } from './laya';
@@ -98,7 +118,7 @@ import { LayaDecisionModel } from './decision-laya';
 import { ModelManager, SharedModelClients, createRoutineNamer } from './models';
 import { InputLock } from './input-lock';
 import { browserCapturePaths, installNativeHost, isBrowserCaptureSupported, removeNativeHost } from './native-host-install';
-import { AgentDesktopSession, CURSOR_COLOURS, cursorFor, cursorLabel, handsExecutor, type HandsCursor } from './agent-desktop';
+import { AgentDesktopSession, CURSOR_COLOURS, chooseMenuWithAgentDesktop, cursorFor, cursorLabel, handsExecutor, type HandsCursor } from './agent-desktop';
 import { gatherDuplicates } from './file-actions';
 import { choosePlatform, executorFor, type Platform } from './platform';
 import { PipeScheduler, removeLegacyPipeFiles } from './pipes';
@@ -130,6 +150,8 @@ interface RuntimeOptions {
   screenLocked?: () => boolean | undefined;
   /** Called when model downloads change, so open pages refresh. */
   onChange: () => void;
+  /** Called when the task operator's state changes, so the bar can come back when a step waits for the person or a task ends. */
+  onTaskChange?: (task: OperatorTaskView) => void;
   /** Called when a routine is offered. The main process shows the tray and a notification. */
   onOffer: (offer: PendingRunView) => void;
   /** Called after a level 4 run so the owner can see that it ran or stopped. */
@@ -186,6 +208,28 @@ type FindJobsRefusal = 'no_surface' | 'not_in_front' | 'not_allowed' | 'model_of
 const FIND_JOBS_GRAB_MS = 10_000;
 /** How far back the screen text that tasks are proposed from goes. */
 const UNDERSTAND_WINDOW_MS = 24 * 3_600_000;
+/** Discord messages are stored under their own app name, apart from whole-screen reads of the Discord window. */
+const DISCORD_MESSAGES_APP = 'Discord messages';
+/** The conversation at the start of a stored Discord line: "@Kala · Kala (2026-11-02 18:23): ...". */
+const DISCORD_CONVERSATION = /^(.*) · [^·]+? \(\d{4}-\d{2}-\d{2} \d{2}:\d{2}\): /;
+const DISCORD_CHECK_MIN_MESSAGES = 20;
+const DISCORD_CHECK_NEW_MESSAGES = 30;
+const DISCORD_CHECK_EVERY_MS = 3_600_000;
+const DISCORD_CHECK_QUESTIONS = 8;
+const FILE_INDEX_FIRST_MS = 60_000;
+const FILE_INDEX_EVERY_MS = 6 * 3_600_000;
+const FILE_RESULTS = 12;
+/** The longest a search waits for its query embedding before ranking without meaning. */
+const QUERY_EMBED_TIMEOUT_MS = 400;
+const execFileAsync = promisify(execFile);
+/** The longest the bar waits for the plan. */
+/** Room for each of the three Chutes models to be tried in turn when one is stuck. */
+const PLAN_TIMEOUT_MS = 100_000;
+/** The twin's own app names. The operator never reads or acts in its own window. */
+const OWN_APPS = ['companyOS Twin', 'companyOS', 'Electron'];
+/** Files that would run when opened: apps, scripts, installers and shortcuts. */
+const RUNNABLE = /\.(app|command|sh|bash|zsh|tool|terminal|workflow|scpt|applescript|pkg|mpkg|dmg|jar|py|rb|pl|js|exe|bat|cmd|ps1|webloc|inetloc|url|fileloc)$/i;
+const PREVIEW_CACHE = 300;
 
 export class TwinRuntime {
   private readonly agent: TwinAgent;
@@ -240,6 +284,32 @@ export class TwinRuntime {
   private lastPlan: PlanView | undefined;
   /** Screen and microphone capture. Each starts only while its setting is on. */
   private readonly screen: ScreenCaptureService;
+  /** Reads the Discord app's messages while it is open, when the person has turned that on. */
+  private readonly discord: DiscordReader;
+  /** Embeddings of stored Discord messages by item id, kept in memory so a question embeds only new ones. */
+  private readonly discordVectors = new Map<string, number[]>();
+  private discordCheck: DiscordStatusView['check'];
+  private discordChecking: Promise<void> | undefined;
+  /** Stored Discord messages, counted after each read rather than on every status poll. */
+  private discordCounts = { messages: 0, conversations: 0 };
+  /** The file search index in memory, with its knowledge graph, rebuilt after each pass. */
+  private files: FileSearchIndex | undefined;
+  /** Whether BGE was installed when the models last changed, so its arrival starts a pass. */
+  private embeddingWasInstalled: boolean | undefined;
+  /** The app in front when the bar last opened. */
+  private barFrontApp: string | undefined;
+  /** Who uses this computer, read from the account once, for questions that say "my". */
+  private identity: Identity | undefined;
+  /** Query embeddings by their words, so a repeated query does not wait for the model. */
+  // A search question carries BGE's retrieval instruction; the files it is compared with are embedded as they are.
+  private readonly queryVectors = new QueryVectors({ embed: (texts, signal) => this.textEmbedder.embed(texts.map(text => `${BGE_QUERY_PREFIX}${text}`), signal) });
+  /** BGE base on this Mac: the meaning behind file search, Discord recall and tasks from the screen. */
+  private readonly textEmbedder: BgeEmbedder;
+  /** Result previews by path, newest last. */
+  private readonly previews = new Map<string, string>();
+  private fileProgress: FileIndexProgress = { running: false, files: 0, images: 0, documents: 0, done: 0, total: 0 };
+  private fileIndexing: Promise<void> | undefined;
+  private fileTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly audio: AudioCaptureService;
   private readonly systemAudio: AudioCaptureService;
   /** The speaker model's process. Started by the first segment when speaker identification is on, and stopped when idle. */
@@ -306,9 +376,24 @@ export class TwinRuntime {
       },
       detail,
     );
+    this.discord = new DiscordReader({
+      binary: () => this.agent.configuration.agentDesktopPath,
+      // Screen text must be on and allowed, and capture must not be paused or locked. Being idle does not stop it: the window
+      // shows the same messages whether the person is at the desk or not, and the reader only reads what is shown.
+      allowed: () => {
+        const config = this.agent.configuration;
+        const { locked, paused } = this.captureFlags();
+        const screen = this.screenState();
+        return config.discordReadingEnabled && (screen === 'on' || screen === 'paused') && !locked && !paused && !isExcludedApp('discord', config.excludedApps);
+      },
+      store: message => this.agent.ingestScreen({ ts: message.ts, app: DISCORD_MESSAGES_APP, windowClass: 'chat', text: discordLine(message), mediaId: null }),
+      seenFile: join(options.userData, 'discord-seen.json'),
+      onRead: stored => this.afterDiscordRead(stored),
+    });
     this.screen = new ScreenCaptureService({
       source: { grab: () => this.grabFrame() },
-      ocr: forkOcrWorker(join(__dirname, 'ocr-worker.js')),
+      // Apple Vision, through the helper shipped in the app's resources. A development run uses the copy the build made.
+      ocr: spawnNativeOcr(app.isPackaged ? join(process.resourcesPath, 'companyos-ocr') : join(app.getAppPath(), 'native-bin', 'companyos-ocr')),
       media: { write: (mediaId, jpeg) => this.writeFrame(mediaId, jpeg), remove: mediaIds => this.media.remove(mediaIds) },
       sink: { ingestScreen: read => this.keepScreenRead(read) },
       now: () => Date.now(),
@@ -325,6 +410,18 @@ export class TwinRuntime {
       modelsDir: join(options.userData, 'models'),
     });
     // Voices are compared in a process of their own, and only while the person has turned speaker identification on.
+    this.textEmbedder = new BgeEmbedder({
+      workerPath: join(__dirname, 'bge-worker.js'),
+      modelsDir: join(options.userData, 'models'),
+      installed: () => this.agent.configuration.installedModels.some(model => model.id === BGE_MODEL_ID),
+      install: () => {
+        try {
+          this.models.install(BGE_MODEL_ID);
+        } catch {
+          // The models folder is being deleted. The next request asks again.
+        }
+      },
+    });
     this.speakerEmbedder = new SpeakerEmbedder({
       workerPath: join(__dirname, 'speaker-worker.js'),
       modelsDir: join(options.userData, 'models'),
@@ -353,19 +450,45 @@ export class TwinRuntime {
       onChange: () => {
         // A speech model that is installed or removed changes whether the microphone may run.
         this.noteSpeechModel();
+        this.noteEmbeddingModel();
         options.onChange();
       },
       fetchImpl: options.fetchImpl,
     });
     this.operator = new OperatorService({
-      config: () => this.agent.configuration,
-      hands: binary => agentDesktopHands(binary),
+      // Tasks are worked out on Chutes, or on Anthropic or DeepSeek when the person picks one. The local model is no longer offered for them.
+      config: () => ({ ...this.agent.configuration, operatorModel: this.taskModel() }),
+      // The operator reaches agent-desktop through MCP: its hands are a client of an agent-desktop MCP server, joined in
+      // memory. Each task's steps are drawn on screen by its own named cursor, in the session automations and swarms share.
+      hands: (binary, goal) => {
+        const cursor = cursorFor('operator-task', cursorLabel('companyOS', goal));
+        // A menu step goes through agent-desktop's menu helper, which checks that each click opened what it should.
+        const viaAgentDesktop = async (app: string, path: readonly string[]) =>
+          menuDelivery(await chooseMenuWithAgentDesktop({ binary, session: this.handsSession, cursor }, app, path));
+        // The system's menu access reaches what agent-desktop cannot: a submenu, or an app with no window open. The app is
+        // brought forward first, as an app turns off menu items that act on its own content while another app is in front:
+        // Finder's View items for the desktop are off while a browser is.
+        const platform = this.platform;
+        const viaSystem = platform?.chooseMenu
+          ? async (app: string, path: readonly string[]) => {
+              await platform.focus(app).catch(() => false);
+              return platform.chooseMenu?.(app, path) ?? false;
+            }
+          : undefined;
+        const chooseMenu = menuChooser(viaAgentDesktop, viaSystem);
+        return mcpHands(() => agentDesktopServer(agentDesktopHands(binary, undefined, { session: this.handsSession, cursor }, chooseMenu), () => this.runningApps()));
+      },
       model: (choice, modelOptions) => this.operatorModel(choice, modelOptions.sharesScreenText),
       memory: goal => this.memoryNotes(goal),
       hasChutesKey: () => hasChutesKey(options.userData),
+      hasAnthropicKey: () => hasAnthropicKey(options.userData),
+      hasDeepSeekKey: () => hasDeepSeekKey(options.userData),
       // The twin never operates its own window: its pages show captured text and the approvals themselves.
-      ownApps: ['companyOS Twin', 'companyOS', 'Electron'],
-      onChange: () => options.onChange(),
+      ownApps: OWN_APPS,
+      onChange: () => {
+        options.onChange();
+        options.onTaskChange?.(this.operator.view());
+      },
     });
     // Inside the models folder, so wiping that folder removes the bundle with it.
     this.laya = new LayaBundleManager({
@@ -456,6 +579,11 @@ export class TwinRuntime {
     });
     this.connectors.start();
     this.cloud.start();
+    this.countDiscord();
+    this.discord.start();
+    this.loadFileIndex();
+    // The first pass waits a minute, so it does not compete with the app starting; then it runs every six hours.
+    this.fileTimer = setTimeout(() => this.scheduleFiles(), FILE_INDEX_FIRST_MS);
     this.startKindLabels();
     this.sweepTimer = setInterval(() => void this.sweepMedia(), DAY_MS);
     this.sweepTimer.unref();
@@ -474,6 +602,8 @@ export class TwinRuntime {
     this.pipeScheduler.stop();
     this.connectors.stop();
     this.cloud.stop();
+    this.discord.stop();
+    clearTimeout(this.fileTimer);
     this.stopKindLabels();
     void this.handsSession.end();
   }
@@ -569,6 +699,16 @@ export class TwinRuntime {
       connectorItems: this.agent.connectorCount(),
       connectorCounts: this.connectors.lastCounts(),
       cloudAccounts: this.cloud.accounts(),
+      files: { enabled: this.agent.configuration.fileSearchEnabled, ...this.fileProgress },
+      discord: {
+        enabled: this.agent.configuration.discordReadingEnabled,
+        messages: this.discordCounts.messages,
+        conversations: this.discordCounts.conversations,
+        lastReadAt: this.discord.state.lastReadAt,
+        problem: this.discord.state.problem,
+        checking: this.discordChecking !== undefined,
+        check: this.discordCheck,
+      },
       pipeOutputs: this.pipeOutputSummaries(config.pipes),
       assignedTasks: this.agent.assignedTasks(),
       taskRuns: this.agent.taskRuns(),
@@ -620,6 +760,8 @@ export class TwinRuntime {
     if (changed.frameRetentionDays !== undefined) void this.sweepMedia();
     this.refreshCapture();
     if (changed.localApiEnabled !== undefined) await this.setLocalApi(saved.localApiEnabled);
+    // Turning file search off deletes the index, its previews and its remembered queries, so nothing of it is kept.
+    if (changed.fileSearchEnabled === false) this.clearFileIndex();
     return saved;
   }
 
@@ -664,12 +806,200 @@ export class TwinRuntime {
     const hits = this.agent.searchCapture({ text: '', kind: 'screen', from: to - UNDERSTAND_WINDOW_MS, to });
     const record = (entry: NetworkEntry): void => this.agent.recordNetworkCall(entry);
     return proposeTasks(hits, {
-      embedder: createOllamaEmbedder({ record }),
+      embedder: this.textEmbedder,
       // Screen text is text, and the 4B planner understood it far better than the 2B vision model on the same documents.
       // Using one model for both stages also keeps a single model in memory.
       model: createOllamaChat({ record }),
       excludedApps: this.agent.configuration.excludedApps,
     });
+  }
+
+  private loadFileIndex(): void {
+    const records = this.agent.fileIndex();
+    this.identity ??= accountIdentity();
+    this.files = new FileSearchIndex(records, this.identity);
+    // The previews of files that changed may be stale, so they are made again.
+    this.previews.clear();
+    // The embedding model is loaded now, so the first search does not wait for it.
+    if (this.agent.configuration.fileSearchEnabled && records.length > 0) void this.queryVectors.get('warm up', 0);
+    this.fileProgress = {
+      ...this.fileProgress,
+      files: records.length,
+      images: records.filter(record => record.kind === 'image').length,
+      documents: records.filter(record => record.kind === 'document').length,
+    };
+  }
+
+  private clearFileIndex(): void {
+    this.agent.saveFileIndex([]);
+    this.files = undefined;
+    this.previews.clear();
+    this.queryVectors.clear();
+    this.fileProgress = { running: false, files: 0, images: 0, documents: 0, done: 0, total: 0 };
+    this.options.onChange();
+  }
+
+  /** Refuses file search while it is off, so the search bar and its previews show nothing. */
+  private requireFileSearch(): FileSearchIndex {
+    if (!this.agent.configuration.fileSearchEnabled) throw new Error('File search is off. Turn it on in Connectors.');
+    return this.files ?? new FileSearchIndex([]);
+  }
+
+  private scheduleFiles(): void {
+    void this.indexFilesNow().catch(() => undefined);
+    this.fileTimer = setTimeout(() => this.scheduleFiles(), FILE_INDEX_EVERY_MS);
+  }
+
+  /** One pass of the file index, when file search is on and capture is not paused. One pass runs at a time. */
+  indexFilesNow(): Promise<void> {
+    if (this.fileIndexing) return this.fileIndexing;
+    if (!this.agent.configuration.fileSearchEnabled || this.agent.configuration.capturePaused) return Promise.resolve();
+    const job = indexFiles({
+      helper: app.isPackaged ? join(process.resourcesPath, 'companyos-ocr') : join(app.getAppPath(), 'native-bin', 'companyos-ocr'),
+      embedder: this.textEmbedder,
+      vectorModel: BGE_MODEL_ID,
+      previous: () => [...(this.files?.records ?? this.agent.fileIndex())],
+      // A pass that finishes after file search was turned off, or after a pause, keeps nothing.
+      save: records => {
+        if (this.agent.configuration.fileSearchEnabled && !this.agent.configuration.capturePaused) this.agent.saveFileIndex(records);
+      },
+      onProgress: progress => {
+        this.fileProgress = progress;
+        this.options.onChange();
+      },
+    })
+      .then(done => {
+        if (!this.agent.configuration.fileSearchEnabled) return;
+        this.fileProgress = done;
+        this.loadFileIndex();
+      })
+      .finally(() => {
+        this.fileIndexing = undefined;
+        this.options.onChange();
+      });
+    this.fileIndexing = job;
+    return job;
+  }
+
+  /**
+   * Searches the file index with a question in plain words, in milliseconds: the words are read by rules, the query is
+   * embedded by the small model (kept loaded, and remembered for repeated queries), and the prebuilt index ranks every file
+   * in one pass. Previews are not made here: the search bar asks for them after the results show.
+   */
+  async searchFiles(query: string): Promise<FileSearchView> {
+    const started = performance.now();
+    const text = query.trim();
+    if (text.length < 2 || text.length > 300) throw new Error('Search with 2 to 300 characters.');
+    const index = this.requireFileSearch();
+    const plan = parseQuery(text);
+    const vector = await this.queryVectors.get(plan.about, QUERY_EMBED_TIMEOUT_MS);
+    const hits: FileHitView[] = index.search(plan, vector, FILE_RESULTS).map(hit => ({
+      path: hit.record.path,
+      name: hit.record.name,
+      folder: hit.record.folder,
+      kind: hit.record.kind,
+      mtime: hit.record.mtime,
+      why: hit.why,
+    }));
+    return {
+      plan: { kind: plan.kind, about: plan.about, names: plan.names, shape: plan.shape, ...(plan.mine ? { mine: true, ...(index.me ? { me: index.me } : {}) } : {}) },
+      hits,
+      indexed: index.records.length,
+      ms: Math.round(performance.now() - started),
+      meaning: vector !== undefined,
+    };
+  }
+
+  /** Small previews for search results, from the system's own thumbnailer, made after the results show and remembered. */
+  async filePreviews(paths: unknown): Promise<Record<string, string>> {
+    if (!Array.isArray(paths)) throw new Error('Invalid previews request.');
+    const index = this.requireFileSearch();
+    const previews: Record<string, string> = {};
+    await Promise.all(
+      paths.slice(0, FILE_RESULTS).map(async path => {
+        // A file only in iCloud is not previewed: making its thumbnail would download it.
+        if (typeof path !== 'string' || !index.has(path) || index.get(path)?.cloudOnly) return;
+        const preview = this.previews.get(path) ?? (await this.previewOf(path));
+        if (!preview) return;
+        this.previews.set(path, preview);
+        if (this.previews.size > PREVIEW_CACHE) this.previews.delete(this.previews.keys().next().value as string);
+        previews[path] = preview;
+      }),
+    );
+    return previews;
+  }
+
+  /** A small preview from the system's own thumbnailer (photos, PDFs and documents), or undefined when it has none. */
+  private async previewOf(path: string): Promise<string | undefined> {
+    try {
+      const image = await nativeImage.createThumbnailFromPath(path, { width: 160, height: 160 });
+      return image.isEmpty() ? undefined : image.toDataURL();
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Opens a search result, or shows it in Finder. Only a file that is in the index can be opened. */
+  openIndexedFile(path: unknown, reveal: boolean): void {
+    const index = this.requireFileSearch();
+    if (typeof path !== 'string' || !index.has(path)) throw new Error('That file is not in the search index.');
+    // A program or script is shown in Finder, never run: opening it from the search bar would execute it.
+    if (reveal || RUNNABLE.test(path)) shell.showItemInFolder(path);
+    else void shell.openPath(path);
+  }
+
+  /** The stored Discord messages, newest first, as items to search and answer from. */
+  private discordItems(): MemoryItem[] {
+    return this.agent.captureTexts(DISCORD_MESSAGES_APP);
+  }
+
+  private countDiscord(): void {
+    const items = this.discordItems();
+    const conversations = new Set(items.map(item => DISCORD_CONVERSATION.exec(item.text)?.[1]).filter(Boolean));
+    this.discordCounts = { messages: items.length, conversations: conversations.size };
+  }
+
+  /**
+   * After each read: the counts are refreshed, and the self-check runs on its own once there is enough to check, again when
+   * enough new messages have arrived, and at most once an hour, so the model is not kept busy while the person works.
+   */
+  private afterDiscordRead(stored: number): void {
+    if (stored > 0) this.countDiscord();
+    const last = this.discordCheck;
+    const enough = this.discordCounts.messages >= DISCORD_CHECK_MIN_MESSAGES;
+    const due = !last || (this.discordCounts.messages - last.messages >= DISCORD_CHECK_NEW_MESSAGES && Date.now() - last.at >= DISCORD_CHECK_EVERY_MS);
+    if (enough && due && !this.discordChecking) void this.checkDiscord().catch(() => undefined);
+    if (stored > 0) this.options.onChange();
+  }
+
+  /** Answers a question about the person's Discord from the messages read so far, with the local models on this Mac. */
+  async askDiscord(question: string): Promise<MemoryAnswer> {
+    const text = question.trim();
+    if (text.length < 3 || text.length > 500) throw new Error('Ask in 3 to 500 characters.');
+    const record = (entry: NetworkEntry): void => this.agent.recordNetworkCall(entry);
+    const shown = await closestItems(text, this.discordItems(), this.textEmbedder, this.discordVectors);
+    return answerFromItems(text, shown, createOllamaChat({ record }));
+  }
+
+  /**
+   * The self-check: questions written from real Discord messages, answered by the same path a person's question takes, and
+   * graded. The result says how far the answers can be trusted. It is kept in memory only.
+   */
+  checkDiscord(): Promise<void> {
+    if (this.discordChecking) return this.discordChecking;
+    const record = (entry: NetworkEntry): void => this.agent.recordNetworkCall(entry);
+    const items = this.discordItems();
+    const job = selfCheck(items, { model: createOllamaChat({ record }), answer: question => this.askDiscord(question), count: DISCORD_CHECK_QUESTIONS })
+      .then(result => {
+        this.discordCheck = { ...result, messages: items.length, at: Date.now() };
+      })
+      .finally(() => {
+        this.discordChecking = undefined;
+        this.options.onChange();
+      });
+    this.discordChecking = job;
+    this.options.onChange();
+    return job;
   }
 
   /**
@@ -699,6 +1029,54 @@ export class TwinRuntime {
     return job;
   }
 
+  /** Remembers the app in front as the bar opens, so a task from the bar starts where the person was. */
+  async rememberFrontApp(): Promise<void> {
+    this.barFrontApp = await (this.platform?.frontmost().catch(() => undefined) ?? Promise.resolve(undefined));
+  }
+
+  /**
+   * Runs a task typed in the bar. The model picked for tasks plans it from the words, the apps that are running and the app that was
+   * in front: the app to start in and a few steps. Then the operator does it as it does a task from the Tasks page, every
+   * step checked and the risky ones asked about. Without a plan, the task starts in the app that was in front.
+   */
+  async runPrompt(prompt: unknown): Promise<TaskPlanView> {
+    const goal = typeof prompt === 'string' ? prompt.trim() : '';
+    if (goal.length === 0 || goal.length > 500) throw new Error('Describe the task in 1 to 500 characters.');
+    // The twin's own window and the excluded apps are never planned into, as the operator never acts in them.
+    const off = new Set([...this.agent.configuration.excludedApps, ...OWN_APPS].map(name => name.toLowerCase()));
+    const front = this.barFrontApp && !off.has(this.barFrontApp.toLowerCase()) ? this.barFrontApp : undefined;
+    const running = (await this.runningApps()).filter(name => !off.has(name.toLowerCase()));
+    // The plan is made by the model picked for tasks, from the goal and app names only, never screen text.
+    const planner = await this.operatorModel(this.taskModel(), false);
+    if (!planner) throw new Error(missingKey(this.taskModel()));
+    let plan: TaskPlan | undefined;
+    let failure: string | undefined;
+    try {
+      plan = await planTask(goal, { running, ...(front ? { front } : {}) }, planner, AbortSignal.timeout(PLAN_TIMEOUT_MS));
+    } catch (error) {
+      // The model clients' errors are fixed sentences, such as a busy Chutes, so they can be shown as they are.
+      failure = error instanceof Error && error.name === 'TimeoutError' ? `The model did not answer within ${PLAN_TIMEOUT_MS / 1000} seconds.` : error instanceof Error ? error.message.slice(0, 200) : undefined;
+    }
+    // Without a plan nothing starts: the app in front may be any app, and steps run without asking.
+    if (!plan) throw new Error(`The task could not be planned. ${failure ?? 'The model gave no plan; try again.'}`);
+    if (off.has(plan.app.toLowerCase())) throw new Error(`The plan starts in ${plan.app}, which the twin does not operate.`);
+    await this.operator.start({ goal, app: plan.app, plan: plan.steps });
+    return { app: plan.app, steps: plan.steps, planned: true };
+  }
+
+  /** The apps with windows the person works in, by name, as agent-desktop lists them. Empty when it cannot. */
+  private async runningApps(): Promise<string[]> {
+    const binary = this.agent.configuration.agentDesktopPath.trim();
+    if (!isAbsolute(binary)) return [];
+    try {
+      const { stdout } = await execFileAsync(binary, ['list-apps'], { timeout: 5_000, maxBuffer: 2 * 1024 * 1024 });
+      const apps = (JSON.parse(stdout) as { data?: { apps?: Array<{ name?: unknown; presentation?: unknown }> } }).data?.apps ?? [];
+      return [...new Set(apps.filter(app => app.presentation === 'foreground' && typeof app.name === 'string').map(app => app.name as string))];
+    } catch {
+      return [];
+    }
+  }
+
   /** Starts a task from the Tasks page. The operator checks every step; this only passes the request on. */
   startTask(request: OperatorTaskRequest): Promise<void> {
     return this.operator.start(request);
@@ -724,10 +1102,48 @@ export class TwinRuntime {
     this.options.onChange();
   }
 
-  /** The model the operator uses. Chutes needs a saved key; without one there is no model, and the task does not start. */
+  /** The model tasks use: Anthropic or DeepSeek when the person picked one, otherwise Chutes. A setting left at the local model counts as Chutes. */
+  private taskModel(): OperatorModelChoice {
+    const choice = this.agent.configuration.operatorModel;
+    return choice === 'anthropic' || choice === 'deepseek' ? choice : 'chutes';
+  }
+
+  /** Saves the DeepSeek key for tasks in the keychain. It is never sent back to a page. */
+  async setDeepSeekKey(key: string): Promise<void> {
+    if (!validDeepSeekKey(key)) throw new Error('That is not a DeepSeek key. A DeepSeek key starts with sk- and has letters and digits after it.');
+    await saveDeepSeekKey(this.options.userData, key);
+    this.options.onChange();
+  }
+
+  clearDeepSeekKey(): void {
+    removeDeepSeekKey(this.options.userData);
+    this.options.onChange();
+  }
+
+  /** Saves the Anthropic key for tasks in the keychain. It is never sent back to a page. */
+  async setAnthropicKey(key: string): Promise<void> {
+    if (!validAnthropicKey(key)) throw new Error('That is not an Anthropic key. An Anthropic key starts with sk-ant-.');
+    await saveAnthropicKey(this.options.userData, key);
+    this.options.onChange();
+  }
+
+  clearAnthropicKey(): void {
+    removeAnthropicKey(this.options.userData);
+    this.options.onChange();
+  }
+
+  /** The model the operator uses. A remote model needs a saved key; without one there is no model, and the task does not start. */
   private async operatorModel(choice: OperatorModelChoice, sharesScreenText: boolean): Promise<OperatorModel | undefined> {
     const record = (entry: NetworkEntry): void => this.agent.recordNetworkCall(entry);
     if (choice === 'local') return createOllamaChat({ record });
+    if (choice === 'anthropic') {
+      const key = await loadAnthropicKey(this.options.userData);
+      return key && validAnthropicKey(key) ? createAnthropicChat({ apiKey: key, sharesScreenText, record }) : undefined;
+    }
+    if (choice === 'deepseek') {
+      const key = await loadDeepSeekKey(this.options.userData);
+      return key && validDeepSeekKey(key) ? createDeepSeekChat({ apiKey: key, sharesScreenText, record }) : undefined;
+    }
     const key = await loadChutesKey(this.options.userData);
     return key && validChutesKey(key) ? createChutesChat({ apiKey: key, sharesScreenText, record }) : undefined;
   }
@@ -1283,6 +1699,10 @@ export class TwinRuntime {
   async deleteCapture(): Promise<void> {
     // A read in progress ends first, so nothing new is stored after the delete. The open piece of typed text is dropped too.
     this.keystrokes.discard();
+    // The read Discord messages go with the captured text, so they may be read and stored again.
+    this.discord.forget();
+    this.discordVectors.clear();
+    this.discordCheck = undefined;
     await this.stopCapture();
     try {
       await this.media.remove(this.agent.deleteAllCapture());
@@ -1424,10 +1844,23 @@ export class TwinRuntime {
   /** Deletes every speaker profile and forgets the session speakers. The speaker process is stopped first, so nothing is matched after it. */
   forgetSpeakers(): void {
     this.speakerEmbedder.stop();
+    this.textEmbedder.stop();
     this.agent.forgetSpeakers();
   }
 
   /** Restarts the microphone decision when the speech model is installed or removed, and does nothing otherwise. */
+  /**
+   * When BGE has just been installed, a pass of the file index runs at once, so every file gets its meaning from what the
+   * index already holds instead of at the next pass hours later. Only a change counts: the first look only remembers.
+   */
+  private noteEmbeddingModel(): void {
+    const installed = this.agent.configuration.installedModels.some(model => model.id === BGE_MODEL_ID);
+    const before = this.embeddingWasInstalled;
+    this.embeddingWasInstalled = installed;
+    if (before === undefined || installed === before) return;
+    if (installed && this.agent.configuration.fileSearchEnabled) void this.indexFilesNow().catch(() => undefined);
+  }
+
   private noteSpeechModel(): void {
     const installed = this.speechInstalled();
     if (installed === this.speechWasInstalled) return;
@@ -1543,6 +1976,7 @@ export class TwinRuntime {
     this.audio.stop();
     this.systemAudio.stop();
     this.speakerEmbedder.stop();
+    this.textEmbedder.stop();
     return this.screen.stop();
   }
 

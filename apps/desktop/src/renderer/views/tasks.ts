@@ -1,5 +1,5 @@
 import type { AssignedTaskView, OperatorStepView, OperatorTaskView, ProposedTask, TwinStatus } from '@companyos/twin-core';
-import { h, type Child } from '../dom.js';
+import { h } from '../dom.js';
 import { button, chip, emptyState, pageHeader, panel, panelHead, type ChipTone } from '../components/ui.js';
 import { formatWhen, plural } from '../format.js';
 import { levelLabel } from '../labels.js';
@@ -50,7 +50,7 @@ export function tasksView(status: TwinStatus): HTMLElement {
     operator.state === 'idle' && operator.result ? resultPanel(operator) : undefined,
     assignedPanel(status),
     modelPanel(status),
-    rulesPanel(),
+    rulesPanel(status),
   );
 }
 
@@ -84,7 +84,9 @@ function approvalPanel(waiting: NonNullable<OperatorTaskView['pending']>): HTMLE
 function taskForm(status: TwinStatus): HTMLElement {
   const form = state.task;
   const ready = status.operator.ready;
-  const chutes = status.config.operatorModel === 'chutes';
+  // Tasks run off this Mac, on Chutes, Anthropic or DeepSeek, so the box for screen text always shows.
+  const chutes = true;
+  const keyReady = keyReadyFor(status);
   const goal = h('textarea', {
     class: 'input task-goal',
     rows: 3,
@@ -123,8 +125,8 @@ function taskForm(status: TwinStatus): HTMLElement {
 
   const blocked = !ready.agentDesktop
     ? 'Set the agent-desktop program path in Settings first.'
-    : chutes && !ready.chutesKey
-      ? 'Save a Chutes key below, or switch the model to this Mac.'
+    : !keyReady
+      ? `Save ${MODELS[taskModelOf(status)].article} key below first.`
       : undefined;
   return panel(
     { testid: 'task-form' },
@@ -191,7 +193,7 @@ function proposalsPanel(status: TwinStatus): HTMLElement {
 }
 
 function proposalRow(task: ProposedTask, status: TwinStatus): HTMLElement {
-  const blocked = !status.operator.ready.agentDesktop || (status.config.operatorModel === 'chutes' && !status.operator.ready.chutesKey);
+  const blocked = !status.operator.ready.agentDesktop || !keyReadyFor(status);
   return h(
     'li',
     { class: 'ov-wait-row', 'data-testid': 'task-proposal' },
@@ -270,10 +272,39 @@ function resultPanel(operator: OperatorTaskView): HTMLElement {
   );
 }
 
+type TaskModel = 'chutes' | 'anthropic' | 'deepseek';
+
+/** The model tasks use: Anthropic or DeepSeek when picked, otherwise Chutes, as the app decides. */
+function taskModelOf(status: TwinStatus): TaskModel {
+  const choice = status.operator.state !== 'idle' ? status.operator.model : status.config.operatorModel;
+  return choice === 'anthropic' || choice === 'deepseek' ? choice : 'chutes';
+}
+
+/** Whether the key for a model is saved: the chosen model's when none is named. */
+function keyReadyFor(status: TwinStatus, choice: TaskModel = taskModelOf(status)): boolean {
+  const ready = status.operator.ready;
+  return choice === 'anthropic' ? ready.anthropicKey : choice === 'deepseek' ? ready.deepseekKey : ready.chutesKey;
+}
+
+const MODEL_NOTES: Record<TaskModel, string> = {
+  chutes:
+    'Tasks are planned and worked out on Chutes, by Qwen3.5 397B, or DeepSeek V3.2 or Kimi K2.6 when it is busy, all run in trusted execution environments; they reach the app through agent-desktop. Each step sends the task’s goal, the window title and the app’s control names to llm.chutes.ai. A task from the bar is planned there too, from its goal and the names of the apps that are running. The text in the app’s fields and memory notes from your screen go only when you tick the box for a task. Every call shows in the network ledger, with whether it carried screen text.',
+  anthropic:
+    'Tasks are planned and worked out by Claude Opus 5.5 on Anthropic, which reaches the app through agent-desktop. Each step sends the task’s goal, the window title and the app’s control names to api.anthropic.com. A task from the bar is planned there too, from its goal and the names of the apps that are running. The text in the app’s fields and memory notes from your screen go only when you tick the box for a task. Every call shows in the network ledger, with whether it carried screen text. Get a key at console.anthropic.com.',
+  deepseek:
+    'Tasks are planned and worked out by DeepSeek V4.1 Flash on DeepSeek, with thinking off, which reaches the app through agent-desktop. Each step sends the task’s goal, the window title and the app’s control names to api.deepseek.com. A task from the bar is planned there too, from its goal and the names of the apps that are running. The text in the app’s fields and memory notes from your screen go only when you tick the box for a task. Every call shows in the network ledger, with whether it carried screen text. Get a key at platform.deepseek.com.',
+};
+
+/** How each model is offered, and how its key is asked for and saved. */
+const MODELS: Record<TaskModel, { option: string; article: string; placeholder: string; label: string; save: (key: string) => Promise<void>; clear: () => Promise<void> }> = {
+  chutes: { option: 'Chutes (Qwen3.5 397B, off this Mac)', article: 'a Chutes', placeholder: 'cpk_…', label: 'Chutes API key', save: key => bridge().setChutesKey(key), clear: () => bridge().clearChutesKey() },
+  anthropic: { option: 'Anthropic (Claude Opus 5.5, off this Mac)', article: 'an Anthropic', placeholder: 'sk-ant-…', label: 'Anthropic API key', save: key => bridge().setAnthropicKey(key), clear: () => bridge().clearAnthropicKey() },
+  deepseek: { option: 'DeepSeek (V4.1 Flash, off this Mac)', article: 'a DeepSeek', placeholder: 'sk-…', label: 'DeepSeek API key', save: key => bridge().setDeepSeekKey(key), clear: () => bridge().clearDeepSeekKey() },
+};
+
 function modelPanel(status: TwinStatus): HTMLElement {
   const running = status.operator.state !== 'idle';
-  const choice = running ? status.operator.model : status.config.operatorModel;
-  const chutes = choice === 'chutes';
+  const choice = taskModelOf(status);
   const select = h(
     'select',
     {
@@ -283,40 +314,24 @@ function modelPanel(status: TwinStatus): HTMLElement {
       disabled: running || pending('task-model'),
       onchange: () => {
         state.task.shareMemory = false;
-        void act('task-model', async () => void (await bridge().updateConfig({ operatorModel: select.value === 'chutes' ? 'chutes' : 'local' })));
+        const value = select.value;
+        void act('task-model', async () => void (await bridge().updateConfig({ operatorModel: value === 'anthropic' || value === 'deepseek' ? value : 'chutes' })));
       },
     },
-    h('option', { value: 'local' }, 'On this Mac (Ollama)'),
-    h('option', { value: 'chutes' }, 'Chutes (a large model, off this Mac)'),
+    ...(Object.keys(MODELS) as TaskModel[]).map(model => h('option', { value: model }, MODELS[model].option)),
   );
   select.value = choice;
-
-  const parts: Child[] = [
+  const saved = keyReadyFor(status, choice);
+  return panel(
+    { testid: 'task-model-panel' },
     panelHead('Model for tasks'),
     h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Who picks each step'), select),
-  ];
-  if (!chutes) {
-    parts.push(
-      h(
-        'p',
-        { class: 'muted small' },
-        'Runs with Ollama on this Mac, so nothing leaves the device. Tasks are worked out and planned by Qwen3 4B (2.5 GB): ollama pull qwen3:4b-instruct-2507-q4_K_M. Tasks from your screen also need all-minilm (46 MB).',
-      ),
-    );
-  } else {
-    parts.push(
-      h(
-        'p',
-        { class: 'muted small', 'data-testid': 'task-chutes-note' },
-        'Each step sends the task’s goal, the window title and the app’s control names to llm.chutes.ai. The text in the app’s fields and memory notes from your screen go only when you tick the box for a task. Every call shows in the network ledger, with whether it carried screen text.',
-      ),
-      status.operator.ready.chutesKey ? keySaved(running) : keyForm(),
-    );
-  }
-  return panel({ testid: 'task-model-panel' }, ...parts);
+    h('p', { class: 'muted small', 'data-testid': `task-${choice}-note` }, MODEL_NOTES[choice]),
+    saved ? keySaved(choice, running) : keyForm(choice),
+  );
 }
 
-function keySaved(running: boolean): HTMLElement {
+function keySaved(choice: TaskModel, running: boolean): HTMLElement {
   return h(
     'div',
     { class: 'actions' },
@@ -324,19 +339,19 @@ function keySaved(running: boolean): HTMLElement {
     button('Remove key', {
       testid: 'task-key-remove',
       disabled: running || pending('task-key'),
-      onClick: () => void act('task-key', () => bridge().clearChutesKey()),
+      onClick: () => void act('task-key', () => MODELS[choice].clear()),
     }),
   );
 }
 
-function keyForm(): HTMLElement {
+function keyForm(choice: TaskModel): HTMLElement {
   const input = h('input', {
     class: 'input',
     type: 'password',
     autocomplete: 'off',
     spellcheck: false,
-    placeholder: 'cpk_…',
-    'aria-label': 'Chutes API key',
+    placeholder: MODELS[choice].placeholder,
+    'aria-label': MODELS[choice].label,
     'data-testid': 'task-key-input',
     oninput: () => state.dirty.add(KEY_KEY),
     onblur: () => state.dirty.delete(KEY_KEY),
@@ -353,21 +368,31 @@ function keyForm(): HTMLElement {
           const key = input.value.trim();
           input.value = '';
           state.dirty.delete(KEY_KEY);
-          await bridge().setChutesKey(key);
+          await MODELS[choice].save(key);
         }),
     }),
   );
 }
 
-function rulesPanel(): HTMLElement {
+function rulesPanel(status: TwinStatus): HTMLElement {
+  const asks = status.config.askBeforeSteps;
+  const box = h('input', {
+    type: 'checkbox',
+    checked: asks,
+    'data-testid': 'task-ask',
+    disabled: pending('task-ask'),
+    onchange: () => void act('task-ask', async () => void (await bridge().updateConfig({ askBeforeSteps: box.checked }))),
+  });
   return panel(
     { testid: 'task-rules' },
     panelHead('What the twin may do on its own'),
+    h('label', { class: 'field-inline' }, box, h('span', null, ' Ask me before steps that may send, delete or act outside TextEdit, Notes and Stickies')),
     h(
       'ul',
       { class: 'muted small' },
-      h('li', null, 'In TextEdit, Notes and Stickies, steps run on their own unless they may send, share, delete or sign in.'),
-      h('li', null, 'In every other app, each step waits for you.'),
+      asks
+        ? h('li', null, 'In TextEdit, Notes and Stickies, steps run on their own unless they may send, share, delete or sign in. In every other app, each step waits for you.')
+        : h('li', null, 'Every step runs on its own, in every app, including ones that may send, share or delete. A change applies from the next task.'),
       h('li', null, 'Password managers, terminals and script tools are never used, and passwords are never typed.'),
       h('li', null, 'Stop task, or Stop all automations, ends a task at once.'),
     ),

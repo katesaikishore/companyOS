@@ -1,3 +1,4 @@
+import type { FileRecord } from './files';
 import { z } from 'zod';
 import {
   AutomationSchema,
@@ -498,6 +499,25 @@ export class TwinAgent {
       body: { ts, windowClass },
     });
     return true;
+  }
+
+  /** The file search index, as the last pass left it. */
+  fileIndex(): FileRecord[] {
+    return this.store.readAll<FileRecord>('fileIndex');
+  }
+
+  /** Replaces the file search index with one pass's records, in one transaction. */
+  saveFileIndex(records: readonly FileRecord[]): void {
+    this.store.replaceAll('fileIndex', records);
+  }
+
+  /**
+   * The full text of an app's stored screen items, newest first. Nothing is returned for an app that is excluded now.
+   */
+  captureTexts(app: string, limit = 5000): Array<{ id: string; ts: number; text: string }> {
+    const name = normalizeAppName(app);
+    if (!name || isExcludedApp(name, this.config.excludedApps)) return [];
+    return this.store.captureTexts(name, 'screen', limit);
   }
 
   /**
