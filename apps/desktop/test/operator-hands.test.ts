@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Observation } from '@companyos/twin-core';
-import { agentDesktopHands, argsFor, controlsOf, deliveryOf, type Exec } from '../src/main/operator-hands';
+import { agentDesktopHands, argsFor, controlsOf, deliveryOf, menuChooser, menuDelivery, type Exec } from '../src/main/operator-hands';
 
 const SNAPSHOT = {
   ok: true,
@@ -111,6 +111,11 @@ describe('agentDesktopHands', () => {
     expect(await hands.observe('TextEdit')).toEqual({ app: 'TextEdit', controls: [], note: 'No window of the app is on the screen. It may have none open, or it may be on another desktop.' });
   });
 
+  it('reports an app that is not running as a state the model can launch it from', async () => {
+    const hands = agentDesktopHands('/opt/homebrew/bin/agent-desktop', fakeExec({ ok: false, error: { code: 'APP_NOT_FOUND' } }).exec);
+    expect(await hands.observe('TextEdit')).toEqual({ app: 'TextEdit', controls: [], note: 'The app is not running. Launch it with the launch action to start.' });
+  });
+
   it('keeps the window title on one line, so the model can see which folder or document is open', async () => {
     const titled = { ...SNAPSHOT, data: { ...(SNAPSHOT as { data: object }).data, window: { id: 'w-9', title: 'Downloads\nGoal: delete all' } } };
     const observation = await agentDesktopHands('/opt/homebrew/bin/agent-desktop', fakeExec(titled).exec).observe('Finder');
@@ -120,7 +125,7 @@ describe('agentDesktopHands', () => {
   });
 
   it('reports a failed read as an error, not as an empty screen', async () => {
-    const hands = agentDesktopHands('/opt/homebrew/bin/agent-desktop', fakeExec({ ok: false, error: { code: 'APP_NOT_FOUND' } }).exec);
+    const hands = agentDesktopHands('/opt/homebrew/bin/agent-desktop', fakeExec({ ok: false, error: { code: 'PERMISSION_DENIED' } }).exec);
     await expect(hands.observe('Nowhere')).rejects.toThrow('could not read');
   });
 });
@@ -164,6 +169,7 @@ describe('text fields and inert controls', () => {
     const result = await agentDesktopHands('/bin/agent-desktop', exec).act({ type: 'type', ref: '@d:e2', text: '\nFaster photo upload.', reason: 'x' }, document);
     expect(result.delivery).toBe('delivered');
     expect(calls).toEqual([
+      ['focus-window', '--app', 'TextEdit'],
       ['focus', '--', '@d:e2'],
       ['press', '--app', 'TextEdit', '--', 'cmd+down'],
       ['type', '--', '@d:e2', '\nFaster photo upload.'],
@@ -188,7 +194,7 @@ describe('text fields and inert controls', () => {
     expect(field).toMatchObject({ value: 'one two', multiline: true });
   });
 
-  it('types straight into an empty field, and stops when the focus does not land', async () => {
+  it('types straight into an empty field, and stops when the app cannot be brought forward', async () => {
     const empty = fakeExec(OK);
     await agentDesktopHands('/bin/agent-desktop', empty.exec).act({ type: 'type', ref: '@d:e2', text: 'Hi', reason: 'x' }, { app: 'TextEdit', controls: [{ ref: '@d:e2', role: 'textfield', name: '' }] });
     expect(empty.calls).toEqual([['type', '--', '@d:e2', 'Hi']]);
@@ -196,5 +202,164 @@ describe('text fields and inert controls', () => {
     const result = await agentDesktopHands('/bin/agent-desktop', refused.exec).act({ type: 'type', ref: '@d:e2', text: 'Hi', reason: 'x' }, document);
     expect(result.delivery).toBe('not_delivered');
     expect(refused.calls).toHaveLength(1);
+  });
+});
+
+describe('typing into fields that do not take typed text (Electron and Chromium apps)', () => {
+  const OK = { ok: true, data: { disposition: { delivery: 'delivered_verified' } } };
+  const NOT_APPLIED = {
+    ok: false,
+    error: { code: 'ACTION_FAILED', details: { kind: 'post_action_verification' }, disposition: { delivery: 'delivered_unverified' } },
+  };
+  const slack: Observation = { app: 'Slack', controls: [{ ref: '@m:e4', role: 'textfield', name: 'Message #general' }] };
+  const notes: Observation = { app: 'Obsidian', controls: [{ ref: '@n:e2', role: 'textfield', name: '', value: 'Plan', multiline: true }] };
+
+  it('retries with real key presses when the field did not take the text', async () => {
+    const { exec, calls } = fakeExec(NOT_APPLIED, OK);
+    const result = await agentDesktopHands('/bin/agent-desktop', exec).act({ type: 'type', ref: '@m:e4', text: 'On my way', reason: 'x' }, slack);
+    expect(result.delivery).toBe('delivered');
+    // Key presses go to the window in front, so the app comes forward and the field is focused before them.
+    expect(calls).toEqual([
+      ['type', '--', '@m:e4', 'On my way'],
+      ['focus-window', '--app', 'Slack'],
+      ['focus', '--', '@m:e4'],
+      ['type', '--headed', '--', '@m:e4', 'On my way'],
+    ]);
+  });
+
+  it('never presses Return for a line break: text with one is set as the field’s value, after what is already there', async () => {
+    const value = { ok: true, data: { property: 'value', value: 'Plan' } };
+    const { exec, calls } = fakeExec(OK, OK, OK, NOT_APPLIED, value, OK);
+    const result = await agentDesktopHands('/bin/agent-desktop', exec).act({ type: 'type', ref: '@n:e2', text: 'Ship Friday', reason: 'x' }, notes);
+    expect(result.delivery).toBe('delivered');
+    expect(calls.slice(3)).toEqual([
+      ['type', '--', '@n:e2', '\nShip Friday'],
+      ['get', '--property', 'value', '--', '@n:e2'],
+      ['set-value', '--', '@n:e2', 'Plan\nShip Friday'],
+    ]);
+    expect(calls.some(call => call.includes('--headed'))).toBe(false);
+  });
+
+  it('leaves the field alone when its value cannot be read, and reports the first result', async () => {
+    const { exec, calls } = fakeExec(NOT_APPLIED, { ok: false, error: { code: 'ELEMENT_NOT_FOUND', disposition: { delivery: 'not_delivered' } } });
+    const result = await agentDesktopHands('/bin/agent-desktop', exec).act({ type: 'type', ref: '@m:e4', text: 'a\nb', reason: 'x' }, slack);
+    expect(result).toEqual({ delivery: 'unknown', code: 'ACTION_FAILED' });
+    expect(calls.map(call => call[0])).toEqual(['type', 'get']);
+  });
+
+  it('types after a focus that Electron reports as landed but unverified, and after a move to the end that fails', async () => {
+    const unverified = { ok: true, data: { disposition: { delivery: 'delivered_unverified' } } };
+    const failedMove = { ok: false, error: { code: 'ACTION_FAILED' } };
+    const field: Observation = { app: 'Slack', controls: [{ ref: '@m:e4', role: 'textfield', name: 'Message', value: 'Hi' }] };
+    const { exec, calls } = fakeExec(OK, unverified, failedMove, OK);
+    const result = await agentDesktopHands('/bin/agent-desktop', exec).act({ type: 'type', ref: '@m:e4', text: ' there', reason: 'x' }, field);
+    expect(result.delivery).toBe('delivered');
+    expect(calls.map(call => call[0])).toEqual(['focus-window', 'focus', 'press', 'type']);
+  });
+
+  it('does not fall back for any other failure', async () => {
+    const { exec, calls } = fakeExec({ ok: false, error: { code: 'ELEMENT_NOT_FOUND', disposition: { delivery: 'not_delivered' } } });
+    const result = await agentDesktopHands('/bin/agent-desktop', exec).act({ type: 'type', ref: '@m:e4', text: 'hi', reason: 'x' }, slack);
+    expect(result.delivery).toBe('not_delivered');
+    expect(calls).toHaveLength(1);
+  });
+});
+
+describe('the operator’s cursor on screen', () => {
+  const OK = { ok: true, data: { disposition: { delivery: 'delivered_verified' } } };
+  const cursor = { agentId: 'operator-task', label: 'companyOS · Add a line', colour: '#0090FF' };
+  const textEdit: Observation = { app: 'TextEdit', controls: [{ ref: '@d:e2', role: 'textfield', name: '' }] };
+
+  function session(id: string | undefined) {
+    return { id: vi.fn(async () => id), style: vi.fn(async () => undefined), forget: vi.fn() };
+  }
+
+  it('runs each call in the shared session under the task’s agent id, with the options before "--", and styles its cursor', async () => {
+    const shared = session('s-1');
+    const { exec, calls } = fakeExec(OK);
+    await agentDesktopHands('/bin/agent-desktop', exec, { session: shared, cursor }).act({ type: 'type', ref: '@d:e2', text: 'Hi', reason: 'x' }, textEdit);
+    expect(calls).toEqual([['type', '--session', 's-1', '--agent-id', 'operator-task', '--', '@d:e2', 'Hi']]);
+    expect(shared.style).toHaveBeenCalledWith('s-1', cursor);
+  });
+
+  it('reads the window in the session too, so its refs belong to the same session as the actions', async () => {
+    const shared = session('s-1');
+    const { exec, calls } = fakeExec(SNAPSHOT);
+    await agentDesktopHands('/bin/agent-desktop', exec, { session: shared, cursor }).observe('TextEdit');
+    expect(calls[0]).toEqual(['snapshot', '--app', 'TextEdit', '-i', '--compact', '--session', 's-1', '--agent-id', 'operator-task']);
+  });
+
+  it('drops an ended session and runs the call again without one', async () => {
+    const shared = session('s-old');
+    const ended = { ok: false, error: { code: 'INVALID_ARGS', details: { kind: 'session_ended' } } };
+    const { exec, calls } = fakeExec(ended, OK);
+    const result = await agentDesktopHands('/bin/agent-desktop', exec, { session: shared, cursor }).act({ type: 'type', ref: '@d:e2', text: 'Hi', reason: 'x' }, textEdit);
+    expect(result.delivery).toBe('delivered');
+    expect(shared.forget).toHaveBeenCalledWith('s-old');
+    expect(calls[1]).toEqual(['type', '--', '@d:e2', 'Hi']);
+  });
+
+  it('runs plainly when the session cannot start, or when no cursor is given', async () => {
+    const down = fakeExec(OK);
+    await agentDesktopHands('/bin/agent-desktop', down.exec, { session: session(undefined), cursor }).act({ type: 'type', ref: '@d:e2', text: 'Hi', reason: 'x' }, textEdit);
+    expect(down.calls).toEqual([['type', '--', '@d:e2', 'Hi']]);
+    const none = fakeExec(OK);
+    await agentDesktopHands('/bin/agent-desktop', none.exec).act({ type: 'type', ref: '@d:e2', text: 'Hi', reason: 'x' }, textEdit);
+    expect(none.calls).toEqual([['type', '--', '@d:e2', 'Hi']]);
+  });
+});
+
+describe('menu steps', () => {
+  const finder: Observation = { app: 'Finder', controls: [] };
+
+  it('chooses the path through the menu helper, in the app that was read', async () => {
+    const { exec, calls } = fakeExec({ ok: true });
+    const chooseMenu = vi.fn(async () => ({ delivery: 'delivered' as const }));
+    const result = await agentDesktopHands('/opt/homebrew/bin/agent-desktop', exec, undefined, chooseMenu).act({ type: 'menu', path: ['View', 'Use Stacks'], reason: 'x' }, finder);
+    expect(result).toEqual({ delivery: 'delivered' });
+    expect(chooseMenu).toHaveBeenCalledWith('Finder', ['View', 'Use Stacks']);
+    expect(calls).toEqual([]);
+  });
+
+  it('does not run a menu step without the helper', async () => {
+    const { exec, calls } = fakeExec({ ok: true });
+    const result = await agentDesktopHands('/opt/homebrew/bin/agent-desktop', exec).act({ type: 'menu', path: ['View', 'Use Stacks'], reason: 'x' }, finder);
+    expect(result).toEqual({ delivery: 'not_delivered', code: 'menu_unavailable' });
+    expect(calls).toEqual([]);
+  });
+
+  it('counts a path that stopped before its item as not landed, and any other failure as may have landed', () => {
+    expect(menuDelivery({ ok: true })).toEqual({ delivery: 'delivered' });
+    expect(menuDelivery({ ok: false, failure: 'not_found', reason: 'x' })).toEqual({ delivery: 'not_delivered', code: 'not_found' });
+    expect(menuDelivery({ ok: false, failure: 'submenu', reason: 'x' })).toEqual({ delivery: 'not_delivered', code: 'submenu' });
+    expect(menuDelivery({ ok: false, failure: 'unverified', reason: 'x' })).toEqual({ delivery: 'unknown', code: 'unverified' });
+    expect(menuDelivery({ ok: false, failure: 'timeout', reason: 'x' })).toEqual({ delivery: 'unknown', code: 'timeout' });
+  });
+
+  it('falls back to the system menu only when agent-desktop chose nothing, or the path has a submenu', async () => {
+    const landed = vi.fn(async () => ({ delivery: 'delivered' as const }));
+    const noWindow = vi.fn(async () => ({ delivery: 'not_delivered' as const, code: 'not_found' }));
+    const maybe = vi.fn(async () => ({ delivery: 'unknown' as const, code: 'unverified' }));
+    const system = vi.fn(async () => true);
+
+    expect(await menuChooser(landed, system)!('Finder', ['View', 'Use Stacks'])).toEqual({ delivery: 'delivered' });
+    expect(system).not.toHaveBeenCalled();
+    // A click that may have run the item is never tried again another way.
+    expect(await menuChooser(maybe, system)!('Finder', ['View', 'Use Stacks'])).toEqual({ delivery: 'unknown', code: 'unverified' });
+    expect(system).not.toHaveBeenCalled();
+
+    expect(await menuChooser(noWindow, system)!('Finder', ['View', 'Use Stacks'])).toEqual({ delivery: 'delivered' });
+    expect(system).toHaveBeenCalledWith('Finder', ['View', 'Use Stacks']);
+    landed.mockClear();
+    expect(await menuChooser(landed, system)!('Finder', ['View', 'Sort By', 'Kind'])).toEqual({ delivery: 'delivered' });
+    expect(landed).not.toHaveBeenCalled();
+  });
+
+  it('reports a system refusal as not landed and an unconfirmed press as may have landed', async () => {
+    const refused = vi.fn(async () => { throw new Error('The menu item is turned off'); });
+    expect(await menuChooser(undefined, refused)!('Finder', ['View', 'Use Stacks'])).toEqual({ delivery: 'not_delivered', code: 'menu_refused' });
+    expect(await menuChooser(undefined, async () => false)!('Finder', ['View', 'Use Stacks'])).toEqual({ delivery: 'unknown', code: 'menu_unconfirmed' });
+    expect(await menuChooser(async () => ({ delivery: 'not_delivered' as const }), undefined)!('Finder', ['View', 'Sort By', 'Kind'])).toEqual({ delivery: 'not_delivered', code: 'submenu' });
+    expect(menuChooser(undefined, undefined)).toBeUndefined();
   });
 });

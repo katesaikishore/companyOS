@@ -95,8 +95,8 @@ export function ledgerView(status: TwinStatus): HTMLElement {
       'section',
       { class: 'tiles ledger-summary', 'aria-label': 'Ledger summary' },
       tile('count', 'Calls so far', String(entries.length), 'Model downloads, update checks, Google calls and model calls'),
-      tile('hosts', 'Allowed hosts', 'huggingface.co · *.hf.co · 127.0.0.1 (this Mac)', 'Google hosts only when you connect Gmail, the update feed when one is set, and llm.chutes.ai only when you pick Chutes for tasks'),
-      tile('clear', 'Personal data sent', entries.some(isRemoteCall) ? 'Task steps to Chutes, when you chose it' : 'Nothing in model calls', 'Model and update calls are GET requests with no body. The local vision model gets a picture of the whole screen and control names, on this Mac only. Chutes, when you pick it, gets the goal of a task and the control names of the app. Google calls send your sign-in token and your mail search. Hosts see your IP address, which this ledger does not record.'),
+      tile('hosts', 'Allowed hosts', 'huggingface.co · *.hf.co · 127.0.0.1 (this Mac)', 'Google hosts only when you connect Gmail, the update feed when one is set, and llm.chutes.ai, api.anthropic.com or api.deepseek.com for tasks, whichever you pick'),
+      tile('clear', 'Personal data sent', entries.some(isRemoteCall) ? 'Task steps to the model you picked' : 'Nothing in model calls', 'Model and update calls are GET requests with no body. The local vision model gets a picture of the whole screen and control names, on this Mac only. Chutes, Anthropic or DeepSeek, whichever you pick for tasks, gets the goal of a task, the names of the running apps and the control names of the app, and field text only when you tick the box for a task. Google calls send your sign-in token and your mail search. Hosts see your IP address, which this ledger does not record.'),
     ),
     selected
       ? h('div', { class: 'ledger-split' }, requestsPanel(entries, selected), detailPanel(selected))

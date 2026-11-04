@@ -92,9 +92,49 @@ export function hasChutesKey(userData: string): boolean {
   return existsSync(join(userData, CHUTES_KEY_FILE));
 }
 
+const ANTHROPIC_KEY_FILE = 'anthropic-key.bin';
+
+/** The Anthropic API key the person saved for tasks, sealed like the data key. Undefined when none is saved. */
+export async function loadAnthropicKey(userData: string): Promise<string | undefined> {
+  return (await readSealed(join(userData, ANTHROPIC_KEY_FILE)))?.toString('utf8');
+}
+
+export async function saveAnthropicKey(userData: string, key: string): Promise<void> {
+  await writeSealed(join(userData, ANTHROPIC_KEY_FILE), Buffer.from(key, 'utf8'));
+}
+
+export function clearAnthropicKey(userData: string): void {
+  rmSync(join(userData, ANTHROPIC_KEY_FILE), { force: true });
+}
+
+export function hasAnthropicKey(userData: string): boolean {
+  return existsSync(join(userData, ANTHROPIC_KEY_FILE));
+}
+
+const DEEPSEEK_KEY_FILE = 'deepseek-key.bin';
+
+/** The DeepSeek API key the person saved for tasks, sealed like the data key. Undefined when none is saved. */
+export async function loadDeepSeekKey(userData: string): Promise<string | undefined> {
+  return (await readSealed(join(userData, DEEPSEEK_KEY_FILE)))?.toString('utf8');
+}
+
+export async function saveDeepSeekKey(userData: string, key: string): Promise<void> {
+  await writeSealed(join(userData, DEEPSEEK_KEY_FILE), Buffer.from(key, 'utf8'));
+}
+
+export function clearDeepSeekKey(userData: string): void {
+  rmSync(join(userData, DEEPSEEK_KEY_FILE), { force: true });
+}
+
+export function hasDeepSeekKey(userData: string): boolean {
+  return existsSync(join(userData, DEEPSEEK_KEY_FILE));
+}
+
 /** Removes every sealed secret. Without the data key the stored records are unreadable. */
 export function destroyStoredSecrets(userData: string): void {
   rmSync(join(userData, 'data-key.bin'), { force: true });
   rmSync(join(userData, 'api-key.bin'), { force: true });
   rmSync(join(userData, CHUTES_KEY_FILE), { force: true });
+  rmSync(join(userData, ANTHROPIC_KEY_FILE), { force: true });
+  rmSync(join(userData, DEEPSEEK_KEY_FILE), { force: true });
 }

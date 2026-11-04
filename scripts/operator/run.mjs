@@ -23,6 +23,7 @@ const { runTask } = await load('../../packages/core/dist/operator/loop.js');
 const { judge } = await load('../../packages/core/dist/operator/actions.js');
 const { DEFAULT_CONFIG } = await load('../../packages/core/dist/types.js');
 const { agentDesktopHands } = await load('../../apps/desktop/dist/main/operator-hands.js');
+const { AgentDesktopSession, cursorFor, cursorLabel } = await load('../../apps/desktop/dist/main/agent-desktop.js');
 
 /** A model on the Ollama server on this Mac, with hidden reasoning off. Nothing leaves the device. */
 function ollamaModel(model) {
@@ -72,7 +73,9 @@ const model =
 // The start app is checked before it is opened, so an excluded app or a shell is never launched or read.
 const start = judge({ type: 'focus_app', app, reason: 'start' }, { app, controls: [] }, { excludedApps: DEFAULT_CONFIG.excludedApps });
 if (start.verdict === 'deny') throw new Error(start.why);
-const hands = agentDesktopHands(binary);
+// The task's named cursor is drawn on screen, as in the app.
+const session = new AgentDesktopSession(() => ({ binary }));
+const hands = agentDesktopHands(binary, undefined, { session, cursor: cursorFor('operator-task', cursorLabel('companyOS', goal)) });
 // The task starts with the app open. A launch is a local step that sends nothing.
 await hands.act({ type: 'launch', app, reason: 'open the app for the task' }, { app, controls: [] });
 
@@ -90,6 +93,8 @@ const result = await runTask({ goal, app }, model, hands, {
     console.error(`  ${step.n}. ${action?.type ?? 'invalid'}${detail} -> ${step.error ?? step.delivery ?? step.verdict ?? ''}${step.code ? ` (${step.code})` : ''}`);
   },
 });
+// Ending the session takes the cursor off the screen.
+await session.end();
 const seconds = Math.round((Date.now() - started) / 1000);
 console.log(JSON.stringify({ provider, status: result.status, summary: result.summary, steps: result.steps.length, seconds }));
 if (out) writeFileSync(out, JSON.stringify({ goal, app, provider, seconds, ...result }, null, 2));

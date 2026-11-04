@@ -212,7 +212,9 @@ export const TwinConfigSchema = z
     /** Optional agent-desktop program for the focus and key steps. Blank keeps the built-in adapters. The app does not bundle it. */
     agentDesktopPath: z.string().trim().max(512).default(''),
     /** The model that picks the task operator's steps. local stays on this Mac. chutes sends the goal and control names to Chutes. */
-    operatorModel: z.enum(['local', 'chutes']).default('local'),
+    operatorModel: z.enum(['local', 'chutes', 'anthropic', 'deepseek']).default('chutes'),
+    /** Whether a task step that may send, delete or act outside the editors waits for the person. Off: every step runs. */
+    askBeforeSteps: z.boolean().default(false),
     /** The step keys of each dismissed routine, joined with '>'. A near copy of a dismissed routine is hidden too. */
     dismissedRoutineSignatures: z.array(z.string().min(1).max(MAX_SIGNATURE_CHARS)).max(500).default([]),
     /** When each routine was last declined or dismissed, and how many times in a row. Kept so a restart keeps the wait. */
@@ -230,6 +232,10 @@ export const TwinConfigSchema = z
       .default([]),
     /** Screen text from the primary display. Off until the person turns it on, in settings or during setup. */
     screenCaptureEnabled: z.boolean().default(false),
+    /** Reading the Discord app's messages through its accessibility tree. Off until the person turns it on. Needs screen text. */
+    discordReadingEnabled: z.boolean().default(false),
+    /** File and photo search: an index of Desktop, Documents, Downloads and Pictures, kept encrypted. Off until turned on. */
+    fileSearchEnabled: z.boolean().default(false),
     /** Microphone text. Off until the person turns it on, in settings or during setup. */
     audioCaptureEnabled: z.boolean().default(false),
     /** Whether the sound the computer plays is transcribed. Off until the person turns it on. */
@@ -296,11 +302,14 @@ export const DEFAULT_CONFIG: TwinConfig = {
   installedModels: [],
   dismissedRoutineIds: [],
   agentDesktopPath: '',
-  operatorModel: 'local',
+  operatorModel: 'chutes',
+  askBeforeSteps: false,
   dismissedRoutineSignatures: [],
   declinedRoutines: [],
   // Screen and microphone capture, and the local API, stay off until the person turns them on.
   screenCaptureEnabled: false,
+  discordReadingEnabled: false,
+  fileSearchEnabled: false,
   audioCaptureEnabled: false,
   systemAudioCaptureEnabled: false,
   speakerIdentificationEnabled: false,

@@ -18,16 +18,26 @@ import { APP_NAME } from './app-surface';
  * the person's answers to it.
  */
 
-export type OperatorModelChoice = 'local' | 'chutes';
+export type OperatorModelChoice = 'local' | 'chutes' | 'anthropic' | 'deepseek';
+
+/** What to do when the chosen model has no saved key. */
+export function missingKey(choice: OperatorModelChoice): string {
+  if (choice === 'anthropic') return 'Save an Anthropic key on the Tasks page first.';
+  if (choice === 'deepseek') return 'Save a DeepSeek key on the Tasks page first.';
+  return 'Save a Chutes key on the Tasks page first.';
+}
 
 interface OperatorServiceDeps {
-  config: () => { excludedApps: readonly string[]; agentDesktopPath: string; operatorModel: OperatorModelChoice };
-  hands: (binary: string) => OperatorHands;
-  /** The chosen model, or undefined when it cannot be used, such as Chutes with no saved key. */
+  config: () => { excludedApps: readonly string[]; agentDesktopPath: string; operatorModel: OperatorModelChoice; askBeforeSteps: boolean };
+  /** The hands for one task. The goal names the task's cursor on screen. */
+  hands: (binary: string, goal: string) => OperatorHands;
+  /** The chosen model, or undefined when it cannot be used, such as Anthropic with no saved key. */
   model: (choice: OperatorModelChoice, options: { sharesScreenText: boolean }) => Promise<OperatorModel | undefined>;
   /** Short notes from captured screen text that bear on the goal. */
   memory: (goal: string) => string[];
   hasChutesKey: () => boolean;
+  hasAnthropicKey: () => boolean;
+  hasDeepSeekKey: () => boolean;
   /** The twin's own app names. The operator never reads or acts in its own window. */
   ownApps: readonly string[];
   onChange: () => void;
@@ -72,6 +82,8 @@ export function describeAction(action: OperatorAction, target?: string): string 
       return `Open ${action.app}`;
     case 'focus_app':
       return `Switch to ${action.app}`;
+    case 'menu':
+      return `Choose ${short(action.path.join(' > '))} from the menu`;
     case 'done':
       return `Finished: ${short(action.summary)}`;
     case 'fail':
@@ -112,7 +124,7 @@ export class OperatorService {
       steps: [...this.steps],
       pending: this.waiting ? { id: this.waiting.id, text: this.waiting.text, why: this.waiting.why, detail: this.waiting.detail } : undefined,
       result: this.running ? undefined : this.result,
-      ready: { agentDesktop: isAbsolute(config.agentDesktopPath.trim()), chutesKey: this.deps.hasChutesKey() },
+      ready: { agentDesktop: isAbsolute(config.agentDesktopPath.trim()), chutesKey: this.deps.hasChutesKey(), anthropicKey: this.deps.hasAnthropicKey(), deepseekKey: this.deps.hasDeepSeekKey() },
     };
   }
 
@@ -126,6 +138,7 @@ export class OperatorService {
     const app = typeof request.app === 'string' ? request.app.trim() : '';
     if (goal.length === 0 || goal.length > MAX_GOAL) throw new Error(`Describe the task in 1 to ${MAX_GOAL} characters.`);
     if (!APP_NAME.test(app)) throw new Error('Give the name of the app to start in.');
+    const plan = Array.isArray(request.plan) ? request.plan.filter((step): step is string => typeof step === 'string').slice(0, 8).map(step => step.slice(0, 160)) : [];
     const config = this.deps.config();
     const binary = config.agentDesktopPath.trim();
     if (!isAbsolute(binary)) throw new Error('Set the full agent-desktop program path in Settings first, such as /opt/homebrew/bin/agent-desktop.');
@@ -142,8 +155,8 @@ export class OperatorService {
     let model: OperatorModel | undefined;
     let hands: OperatorHands;
     try {
-      model = await this.deps.model(choice, { sharesScreenText: choice === 'chutes' && shares });
-      hands = this.deps.hands(binary);
+      model = await this.deps.model(choice, { sharesScreenText: choice !== 'local' && shares });
+      hands = this.deps.hands(binary, goal);
     } catch (error) {
       this.finish(goal, app, undefined);
       throw error instanceof Error ? error : new Error('The task could not start.');
@@ -154,15 +167,17 @@ export class OperatorService {
     }
     if (!model) {
       this.finish(goal, app, undefined);
-      throw new Error('Save a Chutes key first, or switch the model to this Mac.');
+      throw new Error(missingKey(choice));
     }
-    // Memory notes come from captured screen text. They go to a model on this Mac, and to Chutes only when the person ticks the box.
+    // Memory notes come from captured screen text. They go to a model on this Mac, and off it only when the person ticks the box.
     const context = shares ? this.deps.memory(goal) : [];
 
-    void runTask({ goal, app, context }, model, hands, {
+    void runTask({ goal, app, context, ...(plan.length > 0 ? { plan } : {}) }, model, hands, {
       excludedApps: [...config.excludedApps, ...this.deps.ownApps],
       excludedAppsNow: () => [...this.deps.config().excludedApps, ...this.deps.ownApps],
       includeValues: shares,
+      // Read when the task starts: approvals stay as they were for the whole task.
+      askBeforeSteps: config.askBeforeSteps,
       maxSteps: MAX_STEPS,
       signal: controller.signal,
       approve: (action, why, signal, target) => this.ask(action, describeAction(action, target), why, signal),
