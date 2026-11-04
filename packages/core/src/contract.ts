@@ -381,13 +381,13 @@ export interface OperatorTaskView {
   state: 'idle' | 'running' | 'waiting';
   goal?: string;
   app?: string;
-  model: 'local' | 'chutes';
+  model: 'local' | 'chutes' | 'anthropic';
   steps: OperatorStepView[];
   /** The step that waits for the person. Answer it with answerTaskStep. */
   pending?: { id: string; text: string; why: string; detail?: string };
   result?: { status: 'done' | 'failed' | 'refused' | 'declined' | 'stopped' | 'step_limit'; summary?: string };
   /** Whether a task can start: the agent-desktop path is set, and a Chutes key is saved when Chutes is chosen. */
-  ready: { agentDesktop: boolean; chutesKey: boolean };
+  ready: { agentDesktop: boolean; chutesKey: boolean; anthropicKey: boolean };
 }
 
 /** What the bar's planner made of a task: the app it starts in and its steps. planned is false when the model gave no plan. */
@@ -695,6 +695,9 @@ export interface TwinBridge {
   /** Saves the Chutes key in the OS keychain. The key never returns to the page. */
   setChutesKey(key: string): Promise<void>;
   clearChutesKey(): Promise<void>;
+  /** Saves the Anthropic API key for tasks, sealed by the system keychain. It is never sent back to a page. */
+  setAnthropicKey(key: string): Promise<void>;
+  clearAnthropicKey(): Promise<void>;
 
   exportData(): Promise<string>;
   deleteAll(): Promise<void>;

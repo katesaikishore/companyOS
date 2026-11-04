@@ -53,6 +53,8 @@ export const IPC = {
   answerTaskStep: 'twin:answer-task-step',
   setChutesKey: 'twin:set-chutes-key',
   clearChutesKey: 'twin:clear-chutes-key',
+  setAnthropicKey: 'twin:set-anthropic-key',
+  clearAnthropicKey: 'twin:clear-anthropic-key',
   exportData: 'twin:export-data',
   deleteAll: 'twin:delete-all',
   openMainWindow: 'twin:open-main-window',

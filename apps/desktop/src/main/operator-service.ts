@@ -18,17 +18,18 @@ import { APP_NAME } from './app-surface';
  * the person's answers to it.
  */
 
-export type OperatorModelChoice = 'local' | 'chutes';
+export type OperatorModelChoice = 'local' | 'chutes' | 'anthropic';
 
 interface OperatorServiceDeps {
   config: () => { excludedApps: readonly string[]; agentDesktopPath: string; operatorModel: OperatorModelChoice };
   /** The hands for one task. The goal names the task's cursor on screen. */
   hands: (binary: string, goal: string) => OperatorHands;
-  /** The chosen model, or undefined when it cannot be used, such as Chutes with no saved key. */
+  /** The chosen model, or undefined when it cannot be used, such as Anthropic with no saved key. */
   model: (choice: OperatorModelChoice, options: { sharesScreenText: boolean }) => Promise<OperatorModel | undefined>;
   /** Short notes from captured screen text that bear on the goal. */
   memory: (goal: string) => string[];
   hasChutesKey: () => boolean;
+  hasAnthropicKey: () => boolean;
   /** The twin's own app names. The operator never reads or acts in its own window. */
   ownApps: readonly string[];
   onChange: () => void;
@@ -113,7 +114,7 @@ export class OperatorService {
       steps: [...this.steps],
       pending: this.waiting ? { id: this.waiting.id, text: this.waiting.text, why: this.waiting.why, detail: this.waiting.detail } : undefined,
       result: this.running ? undefined : this.result,
-      ready: { agentDesktop: isAbsolute(config.agentDesktopPath.trim()), chutesKey: this.deps.hasChutesKey() },
+      ready: { agentDesktop: isAbsolute(config.agentDesktopPath.trim()), chutesKey: this.deps.hasChutesKey(), anthropicKey: this.deps.hasAnthropicKey() },
     };
   }
 
@@ -144,7 +145,7 @@ export class OperatorService {
     let model: OperatorModel | undefined;
     let hands: OperatorHands;
     try {
-      model = await this.deps.model(choice, { sharesScreenText: choice === 'chutes' && shares });
+      model = await this.deps.model(choice, { sharesScreenText: choice !== 'local' && shares });
       hands = this.deps.hands(binary, goal);
     } catch (error) {
       this.finish(goal, app, undefined);
@@ -156,9 +157,9 @@ export class OperatorService {
     }
     if (!model) {
       this.finish(goal, app, undefined);
-      throw new Error('Save a Chutes key first, or switch the model to this Mac.');
+      throw new Error(choice === 'anthropic' ? 'Save an Anthropic key on the Tasks page first.' : 'Save a Chutes key first, or switch the model to this Mac.');
     }
-    // Memory notes come from captured screen text. They go to a model on this Mac, and to Chutes only when the person ticks the box.
+    // Memory notes come from captured screen text. They go to a model on this Mac, and off it only when the person ticks the box.
     const context = shares ? this.deps.memory(goal) : [];
 
     void runTask({ goal, app, context, ...(plan.length > 0 ? { plan } : {}) }, model, hands, {

@@ -297,6 +297,10 @@ function registerIpc(): void {
     requireRuntime().setChutesKey(text(key, /^cpk_[A-Za-z0-9._-]{10,200}$/, 'That is not a Chutes key. A Chutes key starts with cpk_.')),
   );
   handle(IPC.clearChutesKey, () => requireRuntime().clearChutesKey());
+  handle(IPC.setAnthropicKey, key =>
+    requireRuntime().setAnthropicKey(text(key, /^sk-ant-[A-Za-z0-9_-]{20,300}$/, 'That is not an Anthropic key. An Anthropic key starts with sk-ant-.')),
+  );
+  handle(IPC.clearAnthropicKey, () => requireRuntime().clearAnthropicKey());
 
   // The engine checks the search's shape, and refuses anything it does not accept, so only the object's form is checked here.
   handle(IPC.searchCapture, request => {

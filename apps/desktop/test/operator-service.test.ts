@@ -41,6 +41,7 @@ function setup(options: { model?: OperatorModelChoice; replies?: unknown[]; obse
     ownApps: ['companyOS Twin', 'companyOS', 'Electron'],
     memory: () => ['TextEdit, today: Tue client presentation, final draft due'],
     hasChutesKey: () => options.key !== false,
+    hasAnthropicKey: () => options.key !== false,
     onChange: () => {
       changes += 1;
     },

@@ -74,6 +74,7 @@ import { OperatorService, type OperatorModelChoice } from './operator-service';
 import { agentDesktopHands } from './operator-hands';
 import { agentDesktopServer, mcpHands } from './agent-desktop-mcp';
 import { createChutesChat, validChutesKey } from './remote-model';
+import { createAnthropicChat, validAnthropicKey } from './anthropic-model';
 import { app, clipboard, desktopCapturer, nativeImage, shell, systemPreferences } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { rmSync } from 'node:fs';
@@ -87,13 +88,17 @@ import { KeystrokeService } from './keystroke-service';
 import { AudioCaptureService, WhisperTranscriber, microphoneGranted, type SpeakerIdentifier } from './audio-capture';
 import { SpeakerEmbedder } from './speaker-embedder';
 import {
+  clearAnthropicKey as removeAnthropicKey,
   clearChutesKey as removeChutesKey,
   destroyStoredSecrets,
+  hasAnthropicKey,
   hasChutesKey,
+  loadAnthropicKey,
   loadChutesKey,
   loadOrCreateApiToken,
   loadOrCreateDataKey,
   rotateApiToken as replaceApiToken,
+  saveAnthropicKey,
   saveChutesKey,
 } from './keys';
 import { spawnNativeOcr } from './native-ocr';
@@ -445,8 +450,8 @@ export class TwinRuntime {
       fetchImpl: options.fetchImpl,
     });
     this.operator = new OperatorService({
-      // Tasks are worked out by the Chutes model. The local model is no longer offered for them.
-      config: () => ({ ...this.agent.configuration, operatorModel: 'chutes' }),
+      // Tasks are worked out by Claude on Anthropic. The local model is no longer offered for them.
+      config: () => ({ ...this.agent.configuration, operatorModel: 'anthropic' }),
       // The operator reaches agent-desktop through MCP: its hands are a client of an agent-desktop MCP server, joined in
       // memory. Each task's steps are drawn on screen by its own named cursor, in the session automations and swarms share.
       hands: (binary, goal) =>
@@ -459,6 +464,7 @@ export class TwinRuntime {
       model: (choice, modelOptions) => this.operatorModel(choice, modelOptions.sharesScreenText),
       memory: goal => this.memoryNotes(goal),
       hasChutesKey: () => hasChutesKey(options.userData),
+      hasAnthropicKey: () => hasAnthropicKey(options.userData),
       // The twin never operates its own window: its pages show captured text and the approvals themselves.
       ownApps: OWN_APPS,
       onChange: () => {
@@ -1011,7 +1017,7 @@ export class TwinRuntime {
   }
 
   /**
-   * Runs a task typed in the bar. The Chutes model plans it from the words, the apps that are running and the app that was
+   * Runs a task typed in the bar. Claude plans it from the words, the apps that are running and the app that was
    * in front: the app to start in and a few steps. Then the operator does it as it does a task from the Tasks page, every
    * step checked and the risky ones asked about. Without a plan, the task starts in the app that was in front.
    */
@@ -1022,8 +1028,8 @@ export class TwinRuntime {
     const off = new Set([...this.agent.configuration.excludedApps, ...OWN_APPS].map(name => name.toLowerCase()));
     const front = this.barFrontApp && !off.has(this.barFrontApp.toLowerCase()) ? this.barFrontApp : undefined;
     const running = (await this.runningApps()).filter(name => !off.has(name.toLowerCase()));
-    // The plan is made by the Chutes model, from the goal and app names only, never screen text.
-    const planner = await this.operatorModel('chutes', false);
+    // The plan is made by Claude, from the goal and app names only, never screen text.
+    const planner = await this.operatorModel('anthropic', false);
     let plan: TaskPlan | undefined;
     try {
       if (!planner) throw new Error('No model for the plan.');
@@ -1075,10 +1081,26 @@ export class TwinRuntime {
     this.options.onChange();
   }
 
-  /** The model the operator uses. Chutes needs a saved key; without one there is no model, and the task does not start. */
+  /** Saves the Anthropic key for tasks in the keychain. It is never sent back to a page. */
+  async setAnthropicKey(key: string): Promise<void> {
+    if (!validAnthropicKey(key)) throw new Error('That is not an Anthropic key. An Anthropic key starts with sk-ant-.');
+    await saveAnthropicKey(this.options.userData, key);
+    this.options.onChange();
+  }
+
+  clearAnthropicKey(): void {
+    removeAnthropicKey(this.options.userData);
+    this.options.onChange();
+  }
+
+  /** The model the operator uses. A remote model needs a saved key; without one there is no model, and the task does not start. */
   private async operatorModel(choice: OperatorModelChoice, sharesScreenText: boolean): Promise<OperatorModel | undefined> {
     const record = (entry: NetworkEntry): void => this.agent.recordNetworkCall(entry);
     if (choice === 'local') return createOllamaChat({ record });
+    if (choice === 'anthropic') {
+      const key = await loadAnthropicKey(this.options.userData);
+      return key && validAnthropicKey(key) ? createAnthropicChat({ apiKey: key, sharesScreenText, record }) : undefined;
+    }
     const key = await loadChutesKey(this.options.userData);
     return key && validChutesKey(key) ? createChutesChat({ apiKey: key, sharesScreenText, record }) : undefined;
   }

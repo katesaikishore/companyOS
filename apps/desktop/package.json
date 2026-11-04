@@ -21,6 +21,7 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.4.0",
     "@companyos/twin-core": "0.1.0",
     "@huggingface/transformers": "4.3.1",
     "@modelcontextprotocol/sdk": "^1.32.2",

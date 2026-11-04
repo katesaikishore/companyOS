@@ -84,7 +84,8 @@ function approvalPanel(waiting: NonNullable<OperatorTaskView['pending']>): HTMLE
 function taskForm(status: TwinStatus): HTMLElement {
   const form = state.task;
   const ready = status.operator.ready;
-  const chutes = status.config.operatorModel === 'chutes';
+  // Tasks run on Claude, off this Mac, so the box for screen text shows and the Anthropic key is needed.
+  const chutes = true;
   const goal = h('textarea', {
     class: 'input task-goal',
     rows: 3,
@@ -123,8 +124,8 @@ function taskForm(status: TwinStatus): HTMLElement {
 
   const blocked = !ready.agentDesktop
     ? 'Set the agent-desktop program path in Settings first.'
-    : chutes && !ready.chutesKey
-      ? 'Save a Chutes key below, or switch the model to this Mac.'
+    : !ready.anthropicKey
+      ? 'Save an Anthropic key below first.'
       : undefined;
   return panel(
     { testid: 'task-form' },
@@ -191,7 +192,7 @@ function proposalsPanel(status: TwinStatus): HTMLElement {
 }
 
 function proposalRow(task: ProposedTask, status: TwinStatus): HTMLElement {
-  const blocked = !status.operator.ready.agentDesktop || (status.config.operatorModel === 'chutes' && !status.operator.ready.chutesKey);
+  const blocked = !status.operator.ready.agentDesktop || !status.operator.ready.anthropicKey;
   return h(
     'li',
     { class: 'ov-wait-row', 'data-testid': 'task-proposal' },
@@ -272,15 +273,15 @@ function resultPanel(operator: OperatorTaskView): HTMLElement {
 
 function modelPanel(status: TwinStatus): HTMLElement {
   const running = status.operator.state !== 'idle';
-  // Tasks are worked out by the Chutes model; the local model is no longer offered for them.
+  // Tasks are worked out by Claude on Anthropic; the local model is no longer offered for them.
   const parts: Child[] = [
     panelHead('Model for tasks'),
     h(
       'p',
-      { class: 'muted small', 'data-testid': 'task-chutes-note' },
-      'Tasks are planned and worked out by a large model on Chutes, which reaches the app through agent-desktop. Each step sends the task’s goal, the window title and the app’s control names to llm.chutes.ai. A task from the bar is planned there too, from its goal and the names of the apps that are running. The text in the app’s fields and memory notes from your screen go only when you tick the box for a task. Every call shows in the network ledger, with whether it carried screen text.',
+      { class: 'muted small', 'data-testid': 'task-anthropic-note' },
+      'Tasks are planned and worked out by Claude Opus 5.5 on Anthropic, which reaches the app through agent-desktop. Each step sends the task’s goal, the window title and the app’s control names to api.anthropic.com. A task from the bar is planned there too, from its goal and the names of the apps that are running. The text in the app’s fields and memory notes from your screen go only when you tick the box for a task. Every call shows in the network ledger, with whether it carried screen text. Get a key at console.anthropic.com.',
     ),
-    status.operator.ready.chutesKey ? keySaved(running) : keyForm(),
+    status.operator.ready.anthropicKey ? keySaved(running) : keyForm(),
   ];
   return panel({ testid: 'task-model-panel' }, ...parts);
 }
@@ -293,7 +294,7 @@ function keySaved(running: boolean): HTMLElement {
     button('Remove key', {
       testid: 'task-key-remove',
       disabled: running || pending('task-key'),
-      onClick: () => void act('task-key', () => bridge().clearChutesKey()),
+      onClick: () => void act('task-key', () => bridge().clearAnthropicKey()),
     }),
   );
 }
@@ -304,8 +305,8 @@ function keyForm(): HTMLElement {
     type: 'password',
     autocomplete: 'off',
     spellcheck: false,
-    placeholder: 'cpk_…',
-    'aria-label': 'Chutes API key',
+    placeholder: 'sk-ant-…',
+    'aria-label': 'Anthropic API key',
     'data-testid': 'task-key-input',
     oninput: () => state.dirty.add(KEY_KEY),
     onblur: () => state.dirty.delete(KEY_KEY),
@@ -322,7 +323,7 @@ function keyForm(): HTMLElement {
           const key = input.value.trim();
           input.value = '';
           state.dirty.delete(KEY_KEY);
-          await bridge().setChutesKey(key);
+          await bridge().setAnthropicKey(key);
         }),
     }),
   );
