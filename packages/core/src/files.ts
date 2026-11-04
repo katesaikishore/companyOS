@@ -39,6 +39,8 @@ export interface FileRecord {
   /** The embedding, compressed to one signed byte per number, and its scale, as base64. */
   vector?: string;
   scale?: number;
+  /** The model that made the vector. A vector from another model is made again, from the record's text and facts. */
+  vectorModel?: string;
 }
 
 /** What one query asks for, as the local model reads it. */

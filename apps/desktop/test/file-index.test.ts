@@ -51,13 +51,14 @@ describe('indexFiles', () => {
     const kept = (name: string, extra: Partial<FileRecord>): FileRecord => {
       const path = join(root, 'Documents', name);
       const stats = statSync(path);
-      return { path, name, folder: 'Documents', kind: 'document', size: stats.size, mtime: stats.mtimeMs, text: '', facts: [], factsVersion: FACTS_VERSION, vector: 'AA==', scale: 1, ...extra };
+      return { path, name, folder: 'Documents', kind: 'document', size: stats.size, mtime: stats.mtimeMs, text: '', facts: [], factsVersion: FACTS_VERSION, vector: 'AA==', scale: 1, vectorModel: 'test-model', ...extra };
     };
     const embedded: string[] = [];
     let saved: FileRecord[] = [];
     await indexFiles({
       helper: join(root, 'no-helper'),
       embedder: { embed: async texts => (embedded.push(...texts), texts.map(() => [1, 0])) },
+      vectorModel: 'test-model',
       previous: () => [kept('opened.txt', { cloudOnly: true }), kept('old-rules.txt', { factsVersion: FACTS_VERSION - 1 }), kept('same.txt', { text: 'as it was' })],
       save: records => (saved = records),
       onProgress: () => undefined,
@@ -69,6 +70,49 @@ describe('indexFiles', () => {
     expect(opened?.cloudOnly).toBeUndefined();
     expect(opened?.facts).toEqual(expect.arrayContaining(['type:bank statement', 'org:icici bank']));
     expect(saved.find(record => record.name === 'same.txt')?.text).toBe('as it was');
+  });
+});
+
+describe('indexFiles after the embedding model changes', () => {
+  it('embeds again every record another model made, from what it already holds, without reading the file again', async () => {
+    const root = home({ 'Documents/kept.txt': 'unchanged' });
+    const path = join(root, 'Documents', 'kept.txt');
+    const stats = statSync(path);
+    const old: FileRecord = { path, name: 'kept.txt', folder: 'Documents', kind: 'document', size: stats.size, mtime: stats.mtimeMs, text: 'as stored', facts: ['type:invoice'], factsVersion: FACTS_VERSION, vector: 'AAA=', scale: 1, vectorModel: 'all-minilm' };
+    const embedded: string[] = [];
+    let saved: FileRecord[] = [];
+    await indexFiles({
+      helper: join(root, 'no-helper'),
+      embedder: { embed: async texts => (embedded.push(...texts), texts.map(() => [0.5, 0.5, 0])) },
+      vectorModel: 'bge-base-en',
+      previous: () => [old],
+      save: records => (saved = records),
+      onProgress: () => undefined,
+      home: root,
+    });
+    expect(embedded).toEqual(['kept.txt | Documents | invoice | as stored']);
+    expect(saved[0]).toMatchObject({ text: 'as stored', vectorModel: 'bge-base-en' });
+    expect(Buffer.from(saved[0].vector!, 'base64')).toHaveLength(3);
+  });
+
+  it('drops a vector from another model when the new model cannot run, so no two models are compared', async () => {
+    const root = home({ 'Documents/kept.txt': 'unchanged' });
+    const path = join(root, 'Documents', 'kept.txt');
+    const stats = statSync(path);
+    const old: FileRecord = { path, name: 'kept.txt', folder: 'Documents', kind: 'document', size: stats.size, mtime: stats.mtimeMs, text: '', facts: [], factsVersion: FACTS_VERSION, vector: 'AAA=', scale: 1, vectorModel: 'all-minilm' };
+    let saved: FileRecord[] = [];
+    const done = await indexFiles({
+      helper: join(root, 'no-helper'),
+      embedder: { embed: async () => Promise.reject(new Error('still downloading')) },
+      vectorModel: 'bge-base-en',
+      previous: () => [old],
+      save: records => (saved = records),
+      onProgress: () => undefined,
+      home: root,
+    });
+    expect(done.noEmbeddings).toBe(true);
+    expect(saved[0].vector).toBeUndefined();
+    expect(saved[0].vectorModel).toBeUndefined();
   });
 });
 

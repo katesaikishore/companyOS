@@ -79,8 +79,11 @@ export interface OperatorResult {
 }
 
 export const DEFAULT_MAX_STEPS = 20;
-/** The most controls the model is shown. Only these can be acted on, so the model never acts on a control it did not see. */
-const MAX_CONTROLS = 120;
+/**
+ * The most controls the model is shown each turn: those that bear most on the task, in their order on the screen. Only these
+ * can be acted on, so the model never acts on a control it did not see. A small model chooses better from fewer.
+ */
+const SHOWN_CONTROLS = 60;
 const MAX_INVALID_IN_A_ROW = 3;
 const HISTORY_TURNS = 8;
 const MODEL_ATTEMPTS = 2;
@@ -97,6 +100,7 @@ const SYSTEM =
   'You operate one desktop app for the person through its accessibility controls. ' +
   'Each turn you see the goal, the app in front, its controls with refs, and what you did before. ' +
   'Reply with exactly one next action as JSON. Give the ref of the control from this turn in "ref", because refs change after every action, and its exact name in "name". ' +
+  'The ref must be one listed this turn. Leave it empty for press, launch, focus_app, done and fail. ' +
   'Do one small step at a time, and check the controls to see whether the last step worked. ' +
   'The actions are: click a control; type text into a field; press a key combo such as cmd+n, cmd+s or return; ' +
   'scroll a control up or down; launch an app or focus an app by name; done; fail. ' +
@@ -117,6 +121,49 @@ function quoted(text: string, max: number): string {
 
 /** Roles that take text. A small model clicks them instead of typing, so their line says how to use them. */
 const TEXT_ROLES = new Set(['textfield', 'textarea', 'searchfield', 'combobox']);
+/** Roles that hold a window's layout rather than something to act on. */
+const LAYOUT_ROLES = new Set(['group', 'toolbar', 'menu', 'menubar', 'list', 'scrollarea', 'splitgroup', 'splitter', 'tabgroup', 'layoutarea', 'unknown']);
+const WORD = /[\p{L}\p{N}]{3,}/gu;
+/** Words of a goal that say nothing about which control to use. */
+const FILLER_WORDS = new Set(['the', 'and', 'for', 'with', 'into', 'onto', 'then', 'that', 'this', 'from', 'click', 'type', 'press', 'please', 'app']);
+
+/**
+ * The controls the model is shown: all of them when they are few, otherwise the ones that bear most on the task, kept in
+ * their order on the screen. Text fields come first, as typing goes there, then controls whose name, description or value
+ * shares words with the goal or the plan; layout groups with no name come last.
+ */
+export function relevantControls(controls: Observation['controls'], task: Pick<OperatorTask, 'goal' | 'plan'>): Observation['controls'] {
+  if (controls.length <= SHOWN_CONTROLS) return [...controls];
+  const wanted = new Set(([task.goal, ...(task.plan ?? [])].join(' ').toLowerCase().match(WORD) ?? []).filter(word => !FILLER_WORDS.has(word)));
+  const score = (control: Observation['controls'][number]): number => {
+    const label = `${control.name} ${control.description ?? ''} ${control.value ?? ''}`.toLowerCase();
+    const shared = new Set((label.match(WORD) ?? []).filter(word => wanted.has(word))).size;
+    let points = Math.min(3, shared) * 2;
+    if (TEXT_ROLES.has(control.role)) points += 3;
+    if (LAYOUT_ROLES.has(control.role)) points -= 2;
+    if (!control.name.trim() && !control.value) points -= 1;
+    return points;
+  };
+  return controls
+    .map((control, index) => ({ control, index, points: score(control) }))
+    .sort((a, b) => b.points - a.points || a.index - b.index)
+    .slice(0, SHOWN_CONTROLS)
+    .sort((a, b) => a.index - b.index)
+    .map(entry => entry.control);
+}
+
+/**
+ * The reply's shape for one turn: the action shape, with "ref" held to the refs shown this turn or empty. The model client
+ * enforces the shape while generating, so the model cannot make up a ref; the reply is still checked after.
+ */
+export function actionSchema(controls: Observation['controls']): Readonly<Record<string, unknown>> {
+  return { ...ACTION_SCHEMA, properties: { ...ACTION_SCHEMA.properties, ref: { type: 'string', enum: ['', ...new Set(controls.map(control => control.ref))] } } };
+}
+
+/** The model request for one turn, as the operator sends it. */
+export function operatorRequest(task: OperatorTask, observation: Observation, history: readonly OperatorStep[]): { system: string; prompt: string; schema: Readonly<Record<string, unknown>> } {
+  return { system: SYSTEM, prompt: operatorPrompt(task, observation, history), schema: actionSchema(observation.controls) };
+}
 
 function controlLine(control: Observation['controls'][number]): string {
   const description = control.description && control.description !== control.name ? ` (${quoted(control.description, SHOWN_NAME)})` : '';
@@ -226,12 +273,12 @@ export async function runTask(task: OperatorTask, model: OperatorModel, hands: O
       record({ n, app, error: 'The app could not be read.' });
       return { status: 'failed', summary: 'The app could not be read.', steps };
     }
-    const shown = observed.controls.slice(0, MAX_CONTROLS);
+    const shown = relevantControls(observed.controls, task);
     const controls = options.includeValues === false ? shown.map(({ value: _value, ...control }) => control) : shown;
     const observation: Observation = { ...observed, controls };
 
     // One retry covers a passing model or network error. A second failure ends the task.
-    const request = { system: SYSTEM, prompt: operatorPrompt(task, observation, steps), schema: ACTION_SCHEMA, maxTokens: MAX_REPLY_TOKENS, signal: options.signal };
+    const request = { ...operatorRequest(task, observation, steps), maxTokens: MAX_REPLY_TOKENS, signal: options.signal };
     let reply: unknown;
     let answered = false;
     let failure: string | undefined;

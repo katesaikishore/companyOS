@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CompletionRequest } from '../src/llm/types';
-import { operatorPrompt } from '../src/operator/loop';
+import { actionSchema, operatorPrompt, relevantControls } from '../src/operator/loop';
 import { planTask } from '../src/operator/plan-task';
 
 function model(reply: unknown) {
@@ -38,5 +38,29 @@ describe('the plan in the operator’s prompt', () => {
     expect(prompt).toContain('Plan (a guide; follow what the screen shows when it differs):\n1. "Open slides.new"');
     expect(prompt.split('\n').filter(line => line.startsWith('Goal:'))).toEqual(['Goal: Make a slide']);
     expect(operatorPrompt({ goal: 'x', app: 'Finder' }, { app: 'Finder', controls: [] }, [])).not.toContain('Plan (');
+  });
+});
+
+describe('the controls the model is shown, and the refs it may answer with', () => {
+  const control = (n: number, role: string, name: string) => ({ ref: `@s:e${n}`, role, name });
+
+  it('shows every control when there are few, and otherwise the sixty that bear most on the task, in screen order', () => {
+    const few = [control(1, 'button', 'OK'), control(2, 'textfield', '')];
+    expect(relevantControls(few, { goal: 'x' })).toEqual(few);
+    const many = [
+      ...Array.from({ length: 115 }, (_, i) => control(i + 1, i % 3 === 2 ? 'group' : 'button', i % 3 === 2 ? '' : `Bookmark ${i}`)),
+      control(200, 'button', 'New slide (Ctrl+M)'),
+      control(201, 'textfield', 'Address and search bar'),
+    ];
+    const shown = relevantControls(many, { goal: 'Add a new slide', plan: ['Open slides.new'] });
+    expect(shown).toHaveLength(60);
+    expect(shown.map(entry => entry.ref)).toEqual(expect.arrayContaining(['@s:e200', '@s:e201']));
+    expect(shown.filter(entry => entry.role === 'group')).toEqual([]);
+    expect(shown.map(entry => Number(entry.ref.slice(4)))).toEqual([...shown.map(entry => Number(entry.ref.slice(4)))].sort((a, b) => a - b));
+  });
+
+  it('holds the reply’s ref to the refs shown, or empty', () => {
+    const schema = actionSchema([control(1, 'button', 'OK'), control(2, 'textfield', '')]) as { properties: { ref: { enum: string[] } } };
+    expect(schema.properties.ref.enum).toEqual(['', '@s:e1', '@s:e2']);
   });
 });

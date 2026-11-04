@@ -64,7 +64,7 @@ function filesPanel(status: TwinStatus): HTMLElement {
     toggleRow({
       testid: 'files-toggle',
       label: 'Index Desktop, Documents, Downloads and Pictures',
-      note: 'Photos and scanned PDFs are read by Apple’s on-device Vision, and documents by their text. What each file is, who issued it, who and which account it is about, and the months it covers are kept as facts in a knowledge graph, and each file is described by a small local model. Files only in iCloud are found by their names until they are on this Mac.',
+      note: 'Photos and scanned PDFs are read by Apple’s on-device Vision, and documents by their text. What each file is, who issued it, who and which account it is about, and the months it covers are kept as facts in a knowledge graph, and BGE, an embedding model on this Mac (110 MB, downloaded once from Hugging Face), gives each file its meaning. Files only in iCloud are found by their names until they are on this Mac.',
       checked: enabled,
       disabled: pending('files-toggle'),
       onChange: checked =>

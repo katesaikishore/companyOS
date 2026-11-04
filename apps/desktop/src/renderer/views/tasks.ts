@@ -272,47 +272,16 @@ function resultPanel(operator: OperatorTaskView): HTMLElement {
 
 function modelPanel(status: TwinStatus): HTMLElement {
   const running = status.operator.state !== 'idle';
-  const choice = running ? status.operator.model : status.config.operatorModel;
-  const chutes = choice === 'chutes';
-  const select = h(
-    'select',
-    {
-      class: 'select',
-      'data-testid': 'task-model',
-      'aria-label': 'Model for tasks',
-      disabled: running || pending('task-model'),
-      onchange: () => {
-        state.task.shareMemory = false;
-        void act('task-model', async () => void (await bridge().updateConfig({ operatorModel: select.value === 'chutes' ? 'chutes' : 'local' })));
-      },
-    },
-    h('option', { value: 'local' }, 'On this Mac (Ollama)'),
-    h('option', { value: 'chutes' }, 'Chutes (a large model, off this Mac)'),
-  );
-  select.value = choice;
-
+  // Tasks are worked out by the Chutes model; the local model is no longer offered for them.
   const parts: Child[] = [
     panelHead('Model for tasks'),
-    h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Who picks each step'), select),
+    h(
+      'p',
+      { class: 'muted small', 'data-testid': 'task-chutes-note' },
+      'Tasks are planned and worked out by a large model on Chutes, which reaches the app through agent-desktop. Each step sends the task’s goal, the window title and the app’s control names to llm.chutes.ai. A task from the bar is planned there too, from its goal and the names of the apps that are running. The text in the app’s fields and memory notes from your screen go only when you tick the box for a task. Every call shows in the network ledger, with whether it carried screen text.',
+    ),
+    status.operator.ready.chutesKey ? keySaved(running) : keyForm(),
   ];
-  if (!chutes) {
-    parts.push(
-      h(
-        'p',
-        { class: 'muted small' },
-        'Runs with Ollama on this Mac, so nothing leaves the device. Tasks are worked out and planned by Qwen3 4B (2.5 GB): ollama pull qwen3:4b-instruct-2507-q4_K_M. Tasks from your screen also need all-minilm (46 MB).',
-      ),
-    );
-  } else {
-    parts.push(
-      h(
-        'p',
-        { class: 'muted small', 'data-testid': 'task-chutes-note' },
-        'Each step sends the task’s goal, the window title and the app’s control names to llm.chutes.ai. The text in the app’s fields and memory notes from your screen go only when you tick the box for a task. Every call shows in the network ledger, with whether it carried screen text.',
-      ),
-      status.operator.ready.chutesKey ? keySaved(running) : keyForm(),
-    );
-  }
   return panel({ testid: 'task-model-panel' }, ...parts);
 }
 

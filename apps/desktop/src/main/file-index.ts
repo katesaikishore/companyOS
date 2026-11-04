@@ -162,6 +162,8 @@ function describeWithHelper(helper: string, paths: readonly string[], onEach: ()
 export interface FileIndexOptions {
   helper: string;
   embedder: TextEmbedder;
+  /** The embedding model's id. Records whose vector it did not make are embedded again. */
+  vectorModel: string;
   /** The records from the last pass. */
   previous: () => FileRecord[];
   save: (records: FileRecord[]) => void;
@@ -181,7 +183,7 @@ export async function indexFiles(options: FileIndexOptions): Promise<FileIndexPr
   const fresh = found.filter(file => {
     const old = previous.get(file.path);
     // A file that was only in iCloud and is on this Mac now, because it was opened, is read for the first time.
-    return !old || old.mtime !== file.mtime || old.size !== file.size || !old.vector || old.factsVersion !== FACTS_VERSION || (old.cloudOnly === true && !file.cloudOnly);
+    return !old || old.mtime !== file.mtime || old.size !== file.size || old.factsVersion !== FACTS_VERSION || (old.cloudOnly === true && !file.cloudOnly);
   });
   const progress: FileIndexProgress = { running: true, files: found.length, images: 0, documents: 0, done: 0, total: fresh.length };
   options.onProgress({ ...progress });
@@ -221,19 +223,29 @@ export async function indexFiles(options: FileIndexOptions): Promise<FileIndexPr
     records.push(record);
   }
 
-  // Meaning: embedded in batches. Without the model the records are kept without vectors and searched by name and graph.
+  const updated = new Map(records.map(record => [record.path, record]));
+  const kept = found.map(file => updated.get(file.path) ?? previous.get(file.path)).filter((record): record is FileRecord => record !== undefined);
+
+  // Meaning: every record without a vector from this model is embedded, in batches, from its name, folder, facts and text.
+  // That covers new and changed files, and every file after the embedding model changes, without reading them again.
+  // Without the model the records are kept without vectors and searched by name, text and the graph.
+  const stale = kept.filter(record => !record.vector || record.vectorModel !== options.vectorModel);
   try {
-    for (let start = 0; start < records.length; start += EMBED_BATCH) {
-      const batch = records.slice(start, start + EMBED_BATCH);
+    for (let start = 0; start < stale.length; start += EMBED_BATCH) {
+      const batch = stale.slice(start, start + EMBED_BATCH);
       const vectors = await options.embedder.embed(batch.map(embeddingText));
-      batch.forEach((record, index) => Object.assign(record, compress(vectors[index])));
+      batch.forEach((record, index) => Object.assign(record, compress(vectors[index]), { vectorModel: options.vectorModel }));
     }
   } catch {
     progress.noEmbeddings = true;
+    // A vector another model made cannot be compared with this model's question vectors, so it is dropped.
+    for (const record of stale) {
+      if (record.vectorModel === options.vectorModel) continue;
+      delete record.vector;
+      delete record.scale;
+      delete record.vectorModel;
+    }
   }
-
-  const updated = new Map(records.map(record => [record.path, record]));
-  const kept = found.map(file => updated.get(file.path) ?? previous.get(file.path)).filter((record): record is FileRecord => record !== undefined);
   options.save(kept);
   return {
     ...progress,

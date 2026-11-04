@@ -58,19 +58,21 @@ import {
   normalizeAppName,
   type Identity,
 } from '@companyos/twin-core';
-import { SPEAKER_MIN_SAMPLES, SPEAKER_MODEL_ID, WHISPER_MODEL_ID } from '@companyos/twin-core';
+import { BGE_MODEL_ID, BGE_QUERY_PREFIX, SPEAKER_MIN_SAMPLES, SPEAKER_MODEL_ID, WHISPER_MODEL_ID } from '@companyos/twin-core';
 import { discoverFromScreen, proposeTasks, recapBlocks, writeRecap, type DayRecap, type ProposedTask, type ScreenDiscovery } from '@companyos/twin-core';
 import { answerFromItems, closestItems, discordLine, selfCheck, type DiscordStatusView, type MemoryAnswer, type MemoryItem } from '@companyos/twin-core';
 import { DiscordReader } from './discord-reader';
 import { FileSearchIndex, parseQuery, type FileHitView, type FileSearchView } from '@companyos/twin-core';
 import { accountIdentity, indexFiles, QueryVectors, type FileIndexProgress } from './file-index';
 import { readSurface } from './app-surface';
-import { createOllamaChat, createOllamaEmbedder, createOllamaVision, visionModelReady } from './vision-ollama';
+import { createOllamaChat, createOllamaVision, visionModelReady } from './vision-ollama';
+import { BgeEmbedder } from './bge-embedder';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { planTask, type OperatorModel, type OperatorTaskRequest, type OperatorTaskView, type TaskPlan, type TaskPlanView } from '@companyos/twin-core';
 import { OperatorService, type OperatorModelChoice } from './operator-service';
 import { agentDesktopHands } from './operator-hands';
+import { agentDesktopServer, mcpHands } from './agent-desktop-mcp';
 import { createChutesChat, validChutesKey } from './remote-model';
 import { app, clipboard, desktopCapturer, nativeImage, shell, systemPreferences } from 'electron';
 import { randomUUID } from 'node:crypto';
@@ -210,7 +212,7 @@ const FILE_RESULTS = 12;
 /** The longest a search waits for its query embedding before ranking without meaning. */
 const QUERY_EMBED_TIMEOUT_MS = 400;
 const execFileAsync = promisify(execFile);
-/** The longest the bar waits for the local model's plan, which covers loading the model. */
+/** The longest the bar waits for the plan. */
 const PLAN_TIMEOUT_MS = 60_000;
 /** The twin's own app names. The operator never reads or acts in its own window. */
 const OWN_APPS = ['companyOS Twin', 'companyOS', 'Electron'];
@@ -281,12 +283,17 @@ export class TwinRuntime {
   private discordCounts = { messages: 0, conversations: 0 };
   /** The file search index in memory, with its knowledge graph, rebuilt after each pass. */
   private files: FileSearchIndex | undefined;
+  /** Whether BGE was installed when the models last changed, so its arrival starts a pass. */
+  private embeddingWasInstalled: boolean | undefined;
   /** The app in front when the bar last opened. */
   private barFrontApp: string | undefined;
   /** Who uses this computer, read from the account once, for questions that say "my". */
   private identity: Identity | undefined;
   /** Query embeddings by their words, so a repeated query does not wait for the model. */
-  private readonly queryVectors = new QueryVectors(createOllamaEmbedder({ record: entry => this.agent.recordNetworkCall(entry) }));
+  // A search question carries BGE's retrieval instruction; the files it is compared with are embedded as they are.
+  private readonly queryVectors = new QueryVectors({ embed: (texts, signal) => this.textEmbedder.embed(texts.map(text => `${BGE_QUERY_PREFIX}${text}`), signal) });
+  /** BGE base on this Mac: the meaning behind file search, Discord recall and tasks from the screen. */
+  private readonly textEmbedder: BgeEmbedder;
   /** Result previews by path, newest last. */
   private readonly previews = new Map<string, string>();
   private fileProgress: FileIndexProgress = { running: false, files: 0, images: 0, documents: 0, done: 0, total: 0 };
@@ -392,6 +399,18 @@ export class TwinRuntime {
       modelsDir: join(options.userData, 'models'),
     });
     // Voices are compared in a process of their own, and only while the person has turned speaker identification on.
+    this.textEmbedder = new BgeEmbedder({
+      workerPath: join(__dirname, 'bge-worker.js'),
+      modelsDir: join(options.userData, 'models'),
+      installed: () => this.agent.configuration.installedModels.some(model => model.id === BGE_MODEL_ID),
+      install: () => {
+        try {
+          this.models.install(BGE_MODEL_ID);
+        } catch {
+          // The models folder is being deleted. The next request asks again.
+        }
+      },
+    });
     this.speakerEmbedder = new SpeakerEmbedder({
       workerPath: join(__dirname, 'speaker-worker.js'),
       modelsDir: join(options.userData, 'models'),
@@ -420,14 +439,23 @@ export class TwinRuntime {
       onChange: () => {
         // A speech model that is installed or removed changes whether the microphone may run.
         this.noteSpeechModel();
+        this.noteEmbeddingModel();
         options.onChange();
       },
       fetchImpl: options.fetchImpl,
     });
     this.operator = new OperatorService({
-      config: () => this.agent.configuration,
-      // Each task's steps are drawn on screen by its own named cursor, in the session automations and swarms share.
-      hands: (binary, goal) => agentDesktopHands(binary, undefined, { session: this.handsSession, cursor: cursorFor('operator-task', cursorLabel('companyOS', goal)) }),
+      // Tasks are worked out by the Chutes model. The local model is no longer offered for them.
+      config: () => ({ ...this.agent.configuration, operatorModel: 'chutes' }),
+      // The operator reaches agent-desktop through MCP: its hands are a client of an agent-desktop MCP server, joined in
+      // memory. Each task's steps are drawn on screen by its own named cursor, in the session automations and swarms share.
+      hands: (binary, goal) =>
+        mcpHands(() =>
+          agentDesktopServer(
+            agentDesktopHands(binary, undefined, { session: this.handsSession, cursor: cursorFor('operator-task', cursorLabel('companyOS', goal)) }),
+            () => this.runningApps(),
+          ),
+        ),
       model: (choice, modelOptions) => this.operatorModel(choice, modelOptions.sharesScreenText),
       memory: goal => this.memoryNotes(goal),
       hasChutesKey: () => hasChutesKey(options.userData),
@@ -754,7 +782,7 @@ export class TwinRuntime {
     const hits = this.agent.searchCapture({ text: '', kind: 'screen', from: to - UNDERSTAND_WINDOW_MS, to });
     const record = (entry: NetworkEntry): void => this.agent.recordNetworkCall(entry);
     return proposeTasks(hits, {
-      embedder: createOllamaEmbedder({ record }),
+      embedder: this.textEmbedder,
       // Screen text is text, and the 4B planner understood it far better than the 2B vision model on the same documents.
       // Using one model for both stages also keeps a single model in memory.
       model: createOllamaChat({ record }),
@@ -802,10 +830,10 @@ export class TwinRuntime {
   indexFilesNow(): Promise<void> {
     if (this.fileIndexing) return this.fileIndexing;
     if (!this.agent.configuration.fileSearchEnabled || this.agent.configuration.capturePaused) return Promise.resolve();
-    const record = (entry: NetworkEntry): void => this.agent.recordNetworkCall(entry);
     const job = indexFiles({
       helper: app.isPackaged ? join(process.resourcesPath, 'companyos-ocr') : join(app.getAppPath(), 'native-bin', 'companyos-ocr'),
-      embedder: createOllamaEmbedder({ record }),
+      embedder: this.textEmbedder,
+      vectorModel: BGE_MODEL_ID,
       previous: () => [...(this.files?.records ?? this.agent.fileIndex())],
       // A pass that finishes after file search was turned off, or after a pause, keeps nothing.
       save: records => {
@@ -925,7 +953,7 @@ export class TwinRuntime {
     const text = question.trim();
     if (text.length < 3 || text.length > 500) throw new Error('Ask in 3 to 500 characters.');
     const record = (entry: NetworkEntry): void => this.agent.recordNetworkCall(entry);
-    const shown = await closestItems(text, this.discordItems(), createOllamaEmbedder({ record }), this.discordVectors);
+    const shown = await closestItems(text, this.discordItems(), this.textEmbedder, this.discordVectors);
     return answerFromItems(text, shown, createOllamaChat({ record }));
   }
 
@@ -983,7 +1011,7 @@ export class TwinRuntime {
   }
 
   /**
-   * Runs a task typed in the bar. The local model plans it from the words, the apps that are running and the app that was
+   * Runs a task typed in the bar. The Chutes model plans it from the words, the apps that are running and the app that was
    * in front: the app to start in and a few steps. Then the operator does it as it does a task from the Tasks page, every
    * step checked and the risky ones asked about. Without a plan, the task starts in the app that was in front.
    */
@@ -994,10 +1022,12 @@ export class TwinRuntime {
     const off = new Set([...this.agent.configuration.excludedApps, ...OWN_APPS].map(name => name.toLowerCase()));
     const front = this.barFrontApp && !off.has(this.barFrontApp.toLowerCase()) ? this.barFrontApp : undefined;
     const running = (await this.runningApps()).filter(name => !off.has(name.toLowerCase()));
-    const record = (entry: NetworkEntry): void => this.agent.recordNetworkCall(entry);
+    // The plan is made by the Chutes model, from the goal and app names only, never screen text.
+    const planner = await this.operatorModel('chutes', false);
     let plan: TaskPlan | undefined;
     try {
-      plan = await planTask(goal, { running, ...(front ? { front } : {}) }, createOllamaChat({ record }), AbortSignal.timeout(PLAN_TIMEOUT_MS));
+      if (!planner) throw new Error('No model for the plan.');
+      plan = await planTask(goal, { running, ...(front ? { front } : {}) }, planner, AbortSignal.timeout(PLAN_TIMEOUT_MS));
     } catch {
       plan = undefined;
     }
@@ -1749,10 +1779,23 @@ export class TwinRuntime {
   /** Deletes every speaker profile and forgets the session speakers. The speaker process is stopped first, so nothing is matched after it. */
   forgetSpeakers(): void {
     this.speakerEmbedder.stop();
+    this.textEmbedder.stop();
     this.agent.forgetSpeakers();
   }
 
   /** Restarts the microphone decision when the speech model is installed or removed, and does nothing otherwise. */
+  /**
+   * When BGE has just been installed, a pass of the file index runs at once, so every file gets its meaning from what the
+   * index already holds instead of at the next pass hours later. Only a change counts: the first look only remembers.
+   */
+  private noteEmbeddingModel(): void {
+    const installed = this.agent.configuration.installedModels.some(model => model.id === BGE_MODEL_ID);
+    const before = this.embeddingWasInstalled;
+    this.embeddingWasInstalled = installed;
+    if (before === undefined || installed === before) return;
+    if (installed && this.agent.configuration.fileSearchEnabled) void this.indexFilesNow().catch(() => undefined);
+  }
+
   private noteSpeechModel(): void {
     const installed = this.speechInstalled();
     if (installed === this.speechWasInstalled) return;
@@ -1868,6 +1911,7 @@ export class TwinRuntime {
     this.audio.stop();
     this.systemAudio.stop();
     this.speakerEmbedder.stop();
+    this.textEmbedder.stop();
     return this.screen.stop();
   }
 
