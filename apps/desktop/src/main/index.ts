@@ -21,6 +21,7 @@ import {
   type SaveDialogOptions,
 } from 'electron';
 import { isMicrophoneCaptureUrl, isSystemCaptureUrl } from './capture-source';
+import { PULSE_MS, taskIndicator, type IndicatedTask } from './task-indicator';
 import { writeFileSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -266,11 +267,17 @@ function registerIpc(): void {
   handle(IPC.hideSearch, () => searchWindow?.hide());
   handle(IPC.runPrompt, async prompt => {
     barTask = true;
+    // The menu bar shows the task from Enter on, while the plan is made, not only once its steps run.
+    planningGoal = typeof prompt === 'string' ? prompt : '';
+    refreshTaskIndicator();
     try {
       return await requireRuntime().runPrompt(prompt);
     } catch (error) {
       barTask = false;
       throw error;
+    } finally {
+      planningGoal = undefined;
+      refreshTaskIndicator();
     }
   });
   handle(IPC.dayRecap, day => {
@@ -582,6 +589,7 @@ let taskWasRunning = false;
  * bar hides while the task works, so the operator's app stays in front.
  */
 function noticeTask(task: OperatorTaskView): void {
+  showTaskIndicator(task);
   if (!barTask) return;
   const pending = task.pending?.id;
   if (pending && pending !== shownTaskStep) {
@@ -595,6 +603,52 @@ function noticeTask(task: OperatorTaskView): void {
     showBar('do', 'task');
   }
   taskWasRunning = running;
+}
+
+let indicatorTask: OperatorTaskView | undefined;
+/** The words given in the bar while its planner works, before the operator has the task. */
+let planningGoal: string | undefined;
+let indicatorTick = 0;
+let indicatorTimer: ReturnType<typeof setInterval> | undefined;
+
+function showTaskIndicator(task: OperatorTaskView): void {
+  indicatorTask = task;
+  refreshTaskIndicator();
+}
+
+/** The task the menu bar shows: the operator's while it has one, otherwise the bar's while it plans. */
+function indicatedTask(): IndicatedTask | undefined {
+  if (indicatorTask && indicatorTask.state !== 'idle') return indicatorTask;
+  if (planningGoal !== undefined) return { state: 'planning', goal: planningGoal, steps: [] };
+  return indicatorTask;
+}
+
+/**
+ * A dot beside the menu bar icon while a task works, from the bar or the Tasks page, so the person sees it from any app.
+ * It pulses while the task is planned and runs, and goes when the task ends.
+ */
+function refreshTaskIndicator(): void {
+  const state = indicatedTask()?.state;
+  const running = state === 'running' || state === 'planning';
+  if (running && !indicatorTimer) {
+    indicatorTimer = setInterval(() => {
+      indicatorTick += 1;
+      paintTaskIndicator();
+    }, PULSE_MS);
+  } else if (!running && indicatorTimer) {
+    clearInterval(indicatorTimer);
+    indicatorTimer = undefined;
+    indicatorTick = 0;
+  }
+  paintTaskIndicator();
+}
+
+function paintTaskIndicator(): void {
+  const task = indicatedTask();
+  if (!tray || tray.isDestroyed() || !task) return;
+  const { title, tooltip } = taskIndicator(task, indicatorTick);
+  if (process.platform === 'darwin') tray.setTitle(title);
+  tray.setToolTip(tooltip);
 }
 
 /** The search bar: centred near the top of the screen with the pointer, above other windows, hidden when it loses focus. */

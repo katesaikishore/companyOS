@@ -110,6 +110,29 @@ describe('createChutesChat when a model is busy', () => {
     expect(refused.models).toHaveLength(1);
   });
 
+  it('asks the next model when one says nothing in time, and passes on a stop as the caller’s own', async () => {
+    const models: string[] = [];
+    const stuckThenOk = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      models.push(JSON.parse(String(init?.body)).model);
+      if (models.length > 1) return new Response(JSON.stringify(ok[1]), { status: 200 });
+      // The first model never answers: the call ends only when its signal does.
+      return new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(init.signal?.reason)));
+    }) as typeof fetch;
+    const records: NetworkEntry[] = [];
+    const model = createChutesChat({ apiKey: KEY, sharesScreenText: false, record: entry => records.push(entry), fetchImpl: stuckThenOk, callTimeoutMs: 20 });
+    expect(await model.complete(REQUEST)).toEqual({ action: 'done' });
+    expect(models).toEqual(['Qwen/Qwen3.5-397B-A17B-TEE', 'deepseek-ai/DeepSeek-V3.2-TEE']);
+    expect(records.map(entry => entry.outcome)).toEqual(['failed', 'ok']);
+
+    const neverAnswers = (async (_input: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(init.signal?.reason)))) as typeof fetch;
+    const silent = createChutesChat({ apiKey: KEY, sharesScreenText: false, record: () => undefined, fetchImpl: neverAnswers, callTimeoutMs: 10 });
+    await expect(silent.complete(REQUEST)).rejects.toThrow('No Chutes model answered within 30 seconds');
+    const caller = createChutesChat({ apiKey: KEY, sharesScreenText: false, record: () => undefined, fetchImpl: neverAnswers });
+    const error = (await caller.complete({ ...REQUEST, signal: AbortSignal.timeout(10) }).catch((thrown: Error) => thrown)) as Error;
+    expect(error.name).toBe('TimeoutError');
+  });
+
   it('sorts a busy answer into capacity or a key limit, and nothing else', () => {
     expect(busyKind('{"detail":"Infrastructure is at maximum capacity, try again later"}')).toBe('capacity');
     expect(busyKind('{"detail":"No instances available"}')).toBe('capacity');

@@ -218,7 +218,8 @@ const FILE_RESULTS = 12;
 const QUERY_EMBED_TIMEOUT_MS = 400;
 const execFileAsync = promisify(execFile);
 /** The longest the bar waits for the plan. */
-const PLAN_TIMEOUT_MS = 60_000;
+/** Room for each of the three Chutes models to be tried in turn when one is stuck. */
+const PLAN_TIMEOUT_MS = 100_000;
 /** The twin's own app names. The operator never reads or acts in its own window. */
 const OWN_APPS = ['companyOS Twin', 'companyOS', 'Electron'];
 /** Files that would run when opened: apps, scripts, installers and shortcuts. */
@@ -1037,10 +1038,10 @@ export class TwinRuntime {
       plan = await planTask(goal, { running, ...(front ? { front } : {}) }, planner, AbortSignal.timeout(PLAN_TIMEOUT_MS));
     } catch (error) {
       // The model clients' errors are fixed sentences, such as a busy Chutes, so they can be shown as they are.
-      failure = error instanceof Error && error.name === 'TimeoutError' ? 'The model did not answer within a minute.' : error instanceof Error ? error.message.slice(0, 200) : undefined;
+      failure = error instanceof Error && error.name === 'TimeoutError' ? `The model did not answer within ${PLAN_TIMEOUT_MS / 1000} seconds.` : error instanceof Error ? error.message.slice(0, 200) : undefined;
     }
     // Without a plan nothing starts: the app in front may be any app, and steps run without asking.
-    if (!plan) throw new Error(`The task could not be planned. ${failure ?? 'The model gave no plan.'} Try again.`);
+    if (!plan) throw new Error(`The task could not be planned. ${failure ?? 'The model gave no plan; try again.'}`);
     if (off.has(plan.app.toLowerCase())) throw new Error(`The plan starts in ${plan.app}, which the twin does not operate.`);
     await this.operator.start({ goal, app: plan.app, plan: plan.steps });
     return { app: plan.app, steps: plan.steps, planned: true };

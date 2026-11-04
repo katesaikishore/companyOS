@@ -14,14 +14,20 @@ const CHUTES_ENDPOINT = 'https://llm.chutes.ai/v1/chat/completions';
 const CHUTES_MODELS = ['Qwen/Qwen3.5-397B-A17B-TEE', 'deepseek-ai/DeepSeek-V3.2-TEE', 'moonshotai/Kimi-K2.6-TEE'];
 /** Answers that mean this model is busy right now: worth a short wait and one more try before the next model. */
 const BUSY = new Set([429, 503]);
+/** A model that did not answer in time. Not a status Chutes sends: the client stands it for a call it gave up on. */
+const NO_ANSWER = 408;
 /** Answers after which the next model is tried. */
-const NEXT_MODEL = new Set([404, 429, 503]);
+const NEXT_MODEL = new Set([404, NO_ANSWER, 429, 503]);
 const TRIES_PER_MODEL = 2;
 const FIRST_WAIT_MS = 1_500;
 /** The longest wait for one retry, whatever Retry-After asks. */
 const MAX_WAIT_MS = 8_000;
 const KEY_SHAPE = /^cpk_[A-Za-z0-9._-]{10,200}$/;
-const CALL_TIMEOUT_MS = 120_000;
+/**
+ * How long one model gets to answer. A step or a plan is a short reply that comes back in 5 to 15 seconds; a model that
+ * has said nothing after this is stuck, and the next model is asked instead of waiting it out.
+ */
+export const CALL_TIMEOUT_MS = 30_000;
 
 export function validChutesKey(key: string): boolean {
   return KEY_SHAPE.test(key);
@@ -39,6 +45,8 @@ interface ChutesChatOptions {
   now?: () => number;
   /** Waits between retries. Tests pass one that does not wait. */
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+  /** How long one model gets to answer. Tests pass a short one. */
+  callTimeoutMs?: number;
 }
 
 /** What a busy answer's body says, sorted into a few kinds. The body itself never leaves this file. */
@@ -58,6 +66,7 @@ export function chutesFailure(status: number, kind?: BusyKind): string {
   if (status === 401 || status === 403) return `Chutes refused the key (${status}). Remove the key on the Tasks page and save one that works.`;
   if (status === 402) return 'Chutes says the account has no balance or quota left (402). Top it up on chutes.ai, then try again.';
   if (status === 404) return 'Chutes does not offer these models at the moment (404).';
+  if (status === NO_ANSWER) return `No Chutes model answered within ${CALL_TIMEOUT_MS / 1000} seconds. Chutes may be overloaded; try again in a minute.`;
   if (status === 429 && kind === 'capacity') return 'Chutes says its models are at capacity (429). Every model was tried; try again in a minute.';
   if (status === 429 && kind === 'limit') return 'Chutes is limiting calls for this key (429). Wait a minute, then try again.';
   if (status === 429) return 'Chutes answered busy (429) for every model it was asked. Wait a minute, then try again.';
@@ -93,6 +102,7 @@ export function createChutesChat(options: ChutesChatOptions): OperatorModel {
   const fetchImpl = options.fetchImpl ?? fetch;
   const now = options.now ?? Date.now;
   const sleep = options.sleep ?? pause;
+  const callTimeoutMs = options.callTimeoutMs ?? CALL_TIMEOUT_MS;
 
   /** One call to one model: the parsed reply, or the status and kind of a failed answer. */
   const ask = async (model: string, request: CompletionRequest): Promise<{ reply: unknown } | { status: number; kind?: BusyKind; waitMs?: number }> => {
@@ -122,18 +132,24 @@ export function createChutesChat(options: ChutesChatOptions): OperatorModel {
         });
 
       let response: Response;
+      const deadline = AbortSignal.timeout(callTimeoutMs);
       try {
         response = await fetchImpl(url, {
           method: 'POST',
           redirect: 'error',
           headers: { authorization: `Bearer ${options.apiKey}`, 'content-type': 'application/json' },
           body,
-          signal: AbortSignal.any([...(request.signal ? [request.signal] : []), AbortSignal.timeout(CALL_TIMEOUT_MS)]),
+          signal: AbortSignal.any([...(request.signal ? [request.signal] : []), deadline]),
         });
       } catch (error) {
-        // A Stop is not a failure of Chutes, so it is not reported as one.
-        log(request.signal?.aborted ? 'cancelled' : 'failed');
-        if (error instanceof Error && error.name === 'TimeoutError') throw new Error('Chutes did not answer within 2 minutes. Try again.');
+        // A Stop, or the caller's own time limit, is not a failure of Chutes: it is passed on as it is.
+        if (request.signal?.aborted) {
+          log('cancelled');
+          throw request.signal.reason instanceof Error ? request.signal.reason : new Error('The task was stopped.');
+        }
+        log('failed');
+        // A model that says nothing in time hands over to the next one, as a busy one does.
+        if (deadline.aborted) return { status: NO_ANSWER };
         throw new Error('Chutes could not be reached. Check the internet connection.');
       }
       if (!response.ok) {
