@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { CompletionRequest, NetworkEntry } from '@companyos/twin-core';
 import { createDeepSeekChat, deepseekFailure, validDeepSeekKey } from '../src/main/deepseek-model';
 
-const KEY = 'sk-0123456789abcdef0123456789abcdef';
+// Not a key: built from words, so no secret scanner reads it as one. A real DeepSeek key is sk- and 32 hex characters.
+const KEY = `sk-${'notarealkey'.repeat(3)}`;
 const REQUEST: CompletionRequest = { system: 'system text', prompt: 'goal and controls', schema: { type: 'object', properties: { action: { type: 'string' } } }, maxTokens: 600 };
 
 function replying(answers: Array<[number, unknown, string?]>, seen: { url: string; init?: RequestInit }[] = []): typeof fetch {
