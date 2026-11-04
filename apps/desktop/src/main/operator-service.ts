@@ -21,7 +21,7 @@ import { APP_NAME } from './app-surface';
 export type OperatorModelChoice = 'local' | 'chutes' | 'anthropic';
 
 interface OperatorServiceDeps {
-  config: () => { excludedApps: readonly string[]; agentDesktopPath: string; operatorModel: OperatorModelChoice };
+  config: () => { excludedApps: readonly string[]; agentDesktopPath: string; operatorModel: OperatorModelChoice; askBeforeSteps: boolean };
   /** The hands for one task. The goal names the task's cursor on screen. */
   hands: (binary: string, goal: string) => OperatorHands;
   /** The chosen model, or undefined when it cannot be used, such as Anthropic with no saved key. */
@@ -166,6 +166,8 @@ export class OperatorService {
       excludedApps: [...config.excludedApps, ...this.deps.ownApps],
       excludedAppsNow: () => [...this.deps.config().excludedApps, ...this.deps.ownApps],
       includeValues: shares,
+      // Read when the task starts: approvals stay as they were for the whole task.
+      askBeforeSteps: config.askBeforeSteps,
       maxSteps: MAX_STEPS,
       signal: controller.signal,
       approve: (action, why, signal, target) => this.ask(action, describeAction(action, target), why, signal),

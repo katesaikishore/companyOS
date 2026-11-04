@@ -1,5 +1,5 @@
 import type { AssignedTaskView, OperatorStepView, OperatorTaskView, ProposedTask, TwinStatus } from '@companyos/twin-core';
-import { h, type Child } from '../dom.js';
+import { h } from '../dom.js';
 import { button, chip, emptyState, pageHeader, panel, panelHead, type ChipTone } from '../components/ui.js';
 import { formatWhen, plural } from '../format.js';
 import { levelLabel } from '../labels.js';
@@ -50,7 +50,7 @@ export function tasksView(status: TwinStatus): HTMLElement {
     operator.state === 'idle' && operator.result ? resultPanel(operator) : undefined,
     assignedPanel(status),
     modelPanel(status),
-    rulesPanel(),
+    rulesPanel(status),
   );
 }
 
@@ -84,8 +84,9 @@ function approvalPanel(waiting: NonNullable<OperatorTaskView['pending']>): HTMLE
 function taskForm(status: TwinStatus): HTMLElement {
   const form = state.task;
   const ready = status.operator.ready;
-  // Tasks run on Claude, off this Mac, so the box for screen text shows and the Anthropic key is needed.
+  // Tasks run off this Mac, on Chutes or Anthropic, so the box for screen text always shows.
   const chutes = true;
+  const keyReady = taskModelOf(status) === 'anthropic' ? ready.anthropicKey : ready.chutesKey;
   const goal = h('textarea', {
     class: 'input task-goal',
     rows: 3,
@@ -124,8 +125,8 @@ function taskForm(status: TwinStatus): HTMLElement {
 
   const blocked = !ready.agentDesktop
     ? 'Set the agent-desktop program path in Settings first.'
-    : !ready.anthropicKey
-      ? 'Save an Anthropic key below first.'
+    : !keyReady
+      ? `Save ${taskModelOf(status) === 'anthropic' ? 'an Anthropic' : 'a Chutes'} key below first.`
       : undefined;
   return panel(
     { testid: 'task-form' },
@@ -192,7 +193,7 @@ function proposalsPanel(status: TwinStatus): HTMLElement {
 }
 
 function proposalRow(task: ProposedTask, status: TwinStatus): HTMLElement {
-  const blocked = !status.operator.ready.agentDesktop || !status.operator.ready.anthropicKey;
+  const blocked = !status.operator.ready.agentDesktop || !(taskModelOf(status) === 'anthropic' ? status.operator.ready.anthropicKey : status.operator.ready.chutesKey);
   return h(
     'li',
     { class: 'ov-wait-row', 'data-testid': 'task-proposal' },
@@ -271,22 +272,49 @@ function resultPanel(operator: OperatorTaskView): HTMLElement {
   );
 }
 
-function modelPanel(status: TwinStatus): HTMLElement {
-  const running = status.operator.state !== 'idle';
-  // Tasks are worked out by Claude on Anthropic; the local model is no longer offered for them.
-  const parts: Child[] = [
-    panelHead('Model for tasks'),
-    h(
-      'p',
-      { class: 'muted small', 'data-testid': 'task-anthropic-note' },
-      'Tasks are planned and worked out by Claude Opus 5.5 on Anthropic, which reaches the app through agent-desktop. Each step sends the task’s goal, the window title and the app’s control names to api.anthropic.com. A task from the bar is planned there too, from its goal and the names of the apps that are running. The text in the app’s fields and memory notes from your screen go only when you tick the box for a task. Every call shows in the network ledger, with whether it carried screen text. Get a key at console.anthropic.com.',
-    ),
-    status.operator.ready.anthropicKey ? keySaved(running) : keyForm(),
-  ];
-  return panel({ testid: 'task-model-panel' }, ...parts);
+/** The model tasks use: Anthropic when picked, otherwise Chutes, as the app decides. */
+function taskModelOf(status: TwinStatus): 'chutes' | 'anthropic' {
+  const choice = status.operator.state !== 'idle' ? status.operator.model : status.config.operatorModel;
+  return choice === 'anthropic' ? 'anthropic' : 'chutes';
 }
 
-function keySaved(running: boolean): HTMLElement {
+const MODEL_NOTES = {
+  chutes:
+    'Tasks are planned and worked out on Chutes, by Qwen3.5 397B, or DeepSeek V3.2 or Kimi K2.6 when it is busy, all run in trusted execution environments; they reach the app through agent-desktop. Each step sends the task’s goal, the window title and the app’s control names to llm.chutes.ai. A task from the bar is planned there too, from its goal and the names of the apps that are running. The text in the app’s fields and memory notes from your screen go only when you tick the box for a task. Every call shows in the network ledger, with whether it carried screen text.',
+  anthropic:
+    'Tasks are planned and worked out by Claude Opus 5.5 on Anthropic, which reaches the app through agent-desktop. Each step sends the task’s goal, the window title and the app’s control names to api.anthropic.com. A task from the bar is planned there too, from its goal and the names of the apps that are running. The text in the app’s fields and memory notes from your screen go only when you tick the box for a task. Every call shows in the network ledger, with whether it carried screen text. Get a key at console.anthropic.com.',
+} as const;
+
+function modelPanel(status: TwinStatus): HTMLElement {
+  const running = status.operator.state !== 'idle';
+  const choice = taskModelOf(status);
+  const select = h(
+    'select',
+    {
+      class: 'select',
+      'data-testid': 'task-model',
+      'aria-label': 'Model for tasks',
+      disabled: running || pending('task-model'),
+      onchange: () => {
+        state.task.shareMemory = false;
+        void act('task-model', async () => void (await bridge().updateConfig({ operatorModel: select.value === 'anthropic' ? 'anthropic' : 'chutes' })));
+      },
+    },
+    h('option', { value: 'chutes' }, 'Chutes (Qwen3.5 397B, off this Mac)'),
+    h('option', { value: 'anthropic' }, 'Anthropic (Claude Opus 5.5, off this Mac)'),
+  );
+  select.value = choice;
+  const saved = choice === 'anthropic' ? status.operator.ready.anthropicKey : status.operator.ready.chutesKey;
+  return panel(
+    { testid: 'task-model-panel' },
+    panelHead('Model for tasks'),
+    h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Who picks each step'), select),
+    h('p', { class: 'muted small', 'data-testid': `task-${choice}-note` }, MODEL_NOTES[choice]),
+    saved ? keySaved(choice, running) : keyForm(choice),
+  );
+}
+
+function keySaved(choice: 'chutes' | 'anthropic', running: boolean): HTMLElement {
   return h(
     'div',
     { class: 'actions' },
@@ -294,19 +322,19 @@ function keySaved(running: boolean): HTMLElement {
     button('Remove key', {
       testid: 'task-key-remove',
       disabled: running || pending('task-key'),
-      onClick: () => void act('task-key', () => bridge().clearAnthropicKey()),
+      onClick: () => void act('task-key', () => (choice === 'anthropic' ? bridge().clearAnthropicKey() : bridge().clearChutesKey())),
     }),
   );
 }
 
-function keyForm(): HTMLElement {
+function keyForm(choice: 'chutes' | 'anthropic'): HTMLElement {
   const input = h('input', {
     class: 'input',
     type: 'password',
     autocomplete: 'off',
     spellcheck: false,
-    placeholder: 'sk-ant-…',
-    'aria-label': 'Anthropic API key',
+    placeholder: choice === 'anthropic' ? 'sk-ant-…' : 'cpk_…',
+    'aria-label': choice === 'anthropic' ? 'Anthropic API key' : 'Chutes API key',
     'data-testid': 'task-key-input',
     oninput: () => state.dirty.add(KEY_KEY),
     onblur: () => state.dirty.delete(KEY_KEY),
@@ -323,21 +351,31 @@ function keyForm(): HTMLElement {
           const key = input.value.trim();
           input.value = '';
           state.dirty.delete(KEY_KEY);
-          await bridge().setAnthropicKey(key);
+          await (choice === 'anthropic' ? bridge().setAnthropicKey(key) : bridge().setChutesKey(key));
         }),
     }),
   );
 }
 
-function rulesPanel(): HTMLElement {
+function rulesPanel(status: TwinStatus): HTMLElement {
+  const asks = status.config.askBeforeSteps;
+  const box = h('input', {
+    type: 'checkbox',
+    checked: asks,
+    'data-testid': 'task-ask',
+    disabled: pending('task-ask'),
+    onchange: () => void act('task-ask', async () => void (await bridge().updateConfig({ askBeforeSteps: box.checked }))),
+  });
   return panel(
     { testid: 'task-rules' },
     panelHead('What the twin may do on its own'),
+    h('label', { class: 'field-inline' }, box, h('span', null, ' Ask me before steps that may send, delete or act outside TextEdit, Notes and Stickies')),
     h(
       'ul',
       { class: 'muted small' },
-      h('li', null, 'In TextEdit, Notes and Stickies, steps run on their own unless they may send, share, delete or sign in.'),
-      h('li', null, 'In every other app, each step waits for you.'),
+      asks
+        ? h('li', null, 'In TextEdit, Notes and Stickies, steps run on their own unless they may send, share, delete or sign in. In every other app, each step waits for you.')
+        : h('li', null, 'Every step runs on its own, in every app, including ones that may send, share or delete. A change applies from the next task.'),
       h('li', null, 'Password managers, terminals and script tools are never used, and passwords are never typed.'),
       h('li', null, 'Stop task, or Stop all automations, ends a task at once.'),
     ),

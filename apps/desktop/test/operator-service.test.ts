@@ -5,7 +5,7 @@ import { OperatorService, describeAction, type OperatorModelChoice } from '../sr
 const slack: Observation = { app: 'Slack', controls: [{ ref: '@s:e1', role: 'button', name: 'Send now' }] };
 const textEdit: Observation = { app: 'TextEdit', controls: [{ ref: '@t:e1', role: 'button', name: 'New Document' }] };
 
-function setup(options: { model?: OperatorModelChoice; replies?: unknown[]; observation?: Observation; path?: string; key?: boolean; brokenHands?: boolean; slowModel?: Promise<void>; modelError?: string } = {}) {
+function setup(options: { model?: OperatorModelChoice; replies?: unknown[]; observation?: Observation; path?: string; key?: boolean; brokenHands?: boolean; slowModel?: Promise<void>; modelError?: string; ask?: boolean } = {}) {
   const prompts: string[] = [];
   const acted: string[] = [];
   let i = 0;
@@ -28,7 +28,7 @@ function setup(options: { model?: OperatorModelChoice; replies?: unknown[]; obse
   let changes = 0;
   const shares: boolean[] = [];
   const service = new OperatorService({
-    config: () => ({ excludedApps: DEFAULT_CONFIG.excludedApps, agentDesktopPath: options.path ?? '/opt/homebrew/bin/agent-desktop', operatorModel: options.model ?? 'local' }),
+    config: () => ({ excludedApps: DEFAULT_CONFIG.excludedApps, agentDesktopPath: options.path ?? '/opt/homebrew/bin/agent-desktop', operatorModel: options.model ?? 'local', askBeforeSteps: options.ask ?? true }),
     hands: () => {
       if (options.brokenHands) throw new Error('The agent-desktop program path must be absolute.');
       return hands;
@@ -78,6 +78,15 @@ describe('OperatorService', () => {
     expect(acted).toHaveLength(0);
     service.answer(waiting.id, true);
     await until(() => service.view().state === 'idle');
+    expect(acted).toEqual(['click']);
+    expect(service.view().result?.status).toBe('done');
+  });
+
+  it('runs every step without waiting when approvals are off', async () => {
+    const { service, acted } = setup({ ask: false, observation: slack, replies: [{ action: 'click', ref: '@s:e1', name: '', reason: 'send' }, { action: 'done', ref: '', name: '', reason: 'Sent.' }] });
+    await service.start({ goal: 'Reply to Jordan', app: 'Slack' });
+    await until(() => service.view().state === 'idle');
+    expect(service.view().pending).toBeUndefined();
     expect(acted).toEqual(['click']);
     expect(service.view().result?.status).toBe('done');
   });

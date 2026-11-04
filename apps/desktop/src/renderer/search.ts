@@ -5,7 +5,7 @@ import { bridge, errorText } from './store.js';
 /**
  * The bar, opened with Ctrl+Space to find files or Ctrl+Shift+Space to give the agent a task; Tab switches between the two.
  * To find files, the words go to the app, where they are read as a search and the index of the person's files answers:
- * Enter opens the selected result, Cmd+Enter shows it in Finder. To do a task, Enter sends the words to the local model,
+ * Enter opens the selected result, Cmd+Enter shows it in Finder. To do a task, Enter sends the words to the task model,
  * which plans the task, and the operator does it with agent-desktop. The bar steps aside while the task works, and comes
  * back when a step needs the person's yes and when the task ends. Escape hides the bar.
  */
@@ -291,7 +291,7 @@ function taskPanel(): HTMLElement {
     'div',
     { class: 'task-panel', 'data-testid': 'bar-task' },
     error ? h('p', { class: 'search-note' }, error) : undefined,
-    starting ? h('p', { class: 'search-note' }, 'The local model is planning the task…') : undefined,
+    starting ? h('p', { class: 'search-note' }, 'Planning the task…') : undefined,
     // A step that waits for the person comes first, with its buttons, so it is never below the fold.
     pending
       ? h(
@@ -328,7 +328,7 @@ function taskPanel(): HTMLElement {
           ...operator.steps.slice(pending ? -SHOWN_WAITING_STEPS : -SHOWN_TASK_STEPS).map(step => h('li', { value: String(step.n) }, `${step.text} · ${OUTCOME_WORDS[step.outcome]}`)),
         )
       : undefined,
-    !starting && !shown && !error ? h('p', { class: 'search-note' }, 'Enter plans the task and starts it · the agent asks before it sends, pays or deletes · Esc closes') : undefined,
+    !starting && !shown && !error ? h('p', { class: 'search-note' }, 'Enter plans the task and starts it · Stop the task ends it at once · Esc closes') : undefined,
   );
 }
 

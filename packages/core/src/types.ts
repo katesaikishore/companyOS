@@ -212,7 +212,9 @@ export const TwinConfigSchema = z
     /** Optional agent-desktop program for the focus and key steps. Blank keeps the built-in adapters. The app does not bundle it. */
     agentDesktopPath: z.string().trim().max(512).default(''),
     /** The model that picks the task operator's steps. local stays on this Mac. chutes sends the goal and control names to Chutes. */
-    operatorModel: z.enum(['local', 'chutes', 'anthropic']).default('anthropic'),
+    operatorModel: z.enum(['local', 'chutes', 'anthropic']).default('chutes'),
+    /** Whether a task step that may send, delete or act outside the editors waits for the person. Off: every step runs. */
+    askBeforeSteps: z.boolean().default(false),
     /** The step keys of each dismissed routine, joined with '>'. A near copy of a dismissed routine is hidden too. */
     dismissedRoutineSignatures: z.array(z.string().min(1).max(MAX_SIGNATURE_CHARS)).max(500).default([]),
     /** When each routine was last declined or dismissed, and how many times in a row. Kept so a restart keeps the wait. */
@@ -300,7 +302,8 @@ export const DEFAULT_CONFIG: TwinConfig = {
   installedModels: [],
   dismissedRoutineIds: [],
   agentDesktopPath: '',
-  operatorModel: 'anthropic',
+  operatorModel: 'chutes',
+  askBeforeSteps: false,
   dismissedRoutineSignatures: [],
   declinedRoutines: [],
   // Screen and microphone capture, and the local API, stay off until the person turns them on.

@@ -52,6 +52,11 @@ export interface OperatorOptions extends JudgeOptions {
    * opted in for the task; without it the model works from control names and step results.
    */
   includeValues?: boolean;
+  /**
+   * Whether a held step waits for the person. True by default. When false, every step runs at once; refusals still stand:
+   * excluded apps, shells and script tools are never operated, and passwords are never typed.
+   */
+  askBeforeSteps?: boolean;
 }
 
 export interface OperatorStep {
@@ -70,6 +75,8 @@ export interface OperatorStep {
   noAnswer?: boolean;
   /** The name of the control the action targets, for showing the step to the person. */
   target?: string;
+  /** The role of that control, such as button, so the model can tell a step on a "1" button from one on a "1" cell. */
+  role?: string;
 }
 
 export interface OperatorResult {
@@ -85,6 +92,11 @@ export const DEFAULT_MAX_STEPS = 20;
  */
 const SHOWN_CONTROLS = 60;
 const MAX_INVALID_IN_A_ROW = 3;
+/**
+ * How many times in a row one step may land. A calculator may need the same key twice or three times; more than that is a
+ * model that cannot tell its step worked, such as All Clear on a display it cannot read, and the task ends.
+ */
+const MAX_SAME_IN_A_ROW = 3;
 const HISTORY_TURNS = 8;
 const MODEL_ATTEMPTS = 2;
 /** The longest model error kept for the person. The clients' errors are short fixed sentences. */
@@ -102,11 +114,13 @@ const SYSTEM =
   'Reply with exactly one next action as JSON. Give the ref of the control from this turn in "ref", because refs change after every action, and its exact name in "name". ' +
   'The ref must be one listed this turn. Leave it empty for press, launch, focus_app, done and fail. ' +
   'Do one small step at a time, and check the controls to see whether the last step worked. ' +
+  'The app may still hold work from before, such as a half-done entry: clear it first when the goal needs a fresh start. ' +
   'The actions are: click a control; type text into a field; press a key combo such as cmd+n, cmd+s or return; ' +
   'scroll a control up or down; launch an app or focus an app by name; done; fail. ' +
   'When the app has no window, or a click does not land, a menu shortcut such as cmd+n often does the same job. ' +
   'To write into a text field or text area, use type on it directly. Do not click it first. Typed text goes after the text already there, so to add a line to a document start the text with a new line (\\n). ' +
   'Never click Close, Minimize or Full Screen: they act on the window, not the work. ' +
+  'A step marked done worked even when the screen looks the same: do not do it again unless the goal needs it twice. ' +
   'A step marked "may have landed" may already have worked: check before doing it again. ' +
   'The window title shows where the app is, such as the open folder or document. When it already matches the goal, reply done. ' +
   'Keep the reason under 20 words. ' +
@@ -172,15 +186,22 @@ function controlLine(control: Observation['controls'][number]): string {
   return `- ${control.ref} ${control.role} ${quoted(control.name, SHOWN_NAME)}${description}${value}${hint}`;
 }
 
+/** The control a step acted on, by its name and role, as refs change after every action and say nothing a turn later. */
+function named(step: OperatorStep): string {
+  return step.target ? `${quoted(step.target, SHOWN_NAME)}${step.role ? ` ${step.role}` : ''}` : 'a control';
+}
+
 function stepLine(step: OperatorStep): string {
   const action = step.action;
   if (!action) return `${step.n}. no valid action (${step.error ?? 'unknown'})`;
   const target =
-    action.type === 'type' ? `${action.ref} ${quoted(action.text, 60)}` :
-    action.type === 'click' || action.type === 'scroll' ? action.ref :
+    action.type === 'type' ? `${quoted(action.text, 60)} into ${named(step)}` :
+    action.type === 'click' || action.type === 'scroll' ? named(step) :
     action.type === 'press' ? action.keys :
     action.type === 'launch' || action.type === 'focus_app' ? action.app : '';
   const outcome =
+    step.delivery === 'delivered' ? 'done' :
+    step.delivery === 'unverified' ? 'done (the app does not confirm it, so treat it as done)' :
     step.delivery === 'unknown' ? 'may have landed, check before repeating' :
     step.delivery === 'not_delivered' ? 'did not land, do not repeat it: try a different action' :
     step.delivery ?? (step.verdict === 'ask' ? 'held for the person' : step.verdict ?? '');
@@ -250,6 +271,7 @@ export async function runTask(task: OperatorTask, model: OperatorModel, hands: O
   let app = task.app;
   let invalidInARow = 0;
   let last: { key: string; delivery: ActResult['delivery'] } | undefined;
+  let sameInARow = 0;
   /** Text steps that landed or may have. Typing the same text into the same field again would write it twice. */
   const typed = new Set<string>();
   const rules = (): JudgeOptions => ({ excludedApps: options.excludedAppsNow?.() ?? options.excludedApps, autonomousApps: options.autonomousApps });
@@ -320,6 +342,7 @@ export async function runTask(task: OperatorTask, model: OperatorModel, hands: O
 
     const control = 'ref' in action ? observation.controls.find(candidate => candidate.ref === action.ref) : undefined;
     const target = control ? control.name || control.description || `unnamed ${control.role}` : undefined;
+    const role = control?.role;
     let verdict = judge(action, observation, rules());
     // The same step again, after one that landed or may have landed, could do it twice. It waits for the person.
     const key = sameStep(action, observation);
@@ -329,16 +352,24 @@ export async function runTask(task: OperatorTask, model: OperatorModel, hands: O
       verdict = { verdict: 'ask', why: 'This text was already typed into this field.' };
     }
     if (verdict.verdict === 'deny') {
-      record({ n, app, action, target, verdict: 'deny', why: verdict.why });
+      record({ n, app, action, target, role, verdict: 'deny', why: verdict.why });
       return { status: 'refused', summary: verdict.why, steps };
     }
+    const repeating = last !== undefined && last.key === key && last.delivery !== 'not_delivered';
+    if (repeating && sameInARow >= MAX_SAME_IN_A_ROW) {
+      const why = `The model kept repeating the same step${target ? ` on "${target.slice(0, 60)}"` : ''}, so the task stopped.`;
+      record({ n, app, action, target, role, error: why });
+      return { status: 'failed', summary: why, steps };
+    }
+    // With approvals off, a step that would wait runs at once.
+    if (verdict.verdict === 'ask' && options.askBeforeSteps === false) verdict = { verdict: 'allow' };
     let approved: boolean | undefined;
     if (verdict.verdict === 'ask') {
       const answer = await Promise.race([options.approve(action, verdict.why, options.signal, target).catch(() => false), whenStopped(options.signal)]);
       if (answer === 'stopped') return { status: 'stopped', steps };
       approved = answer;
       if (!approved) {
-        record({ n, app, action, target, verdict: 'ask', why: verdict.why, approved: false });
+        record({ n, app, action, target, role, verdict: 'ask', why: verdict.why, approved: false });
         return { status: 'declined', summary: verdict.why, steps };
       }
     }
@@ -350,7 +381,8 @@ export async function runTask(task: OperatorTask, model: OperatorModel, hands: O
     } catch {
       result = { delivery: 'unknown', code: 'act_failed' };
     }
-    record({ n, app, action, target, verdict: verdict.verdict, why: 'why' in verdict ? verdict.why : undefined, approved, delivery: result.delivery, code: result.code });
+    record({ n, app, action, target, role, verdict: verdict.verdict, why: 'why' in verdict ? verdict.why : undefined, approved, delivery: result.delivery, code: result.code });
+    sameInARow = repeating ? sameInARow + 1 : 1;
     last = { key, delivery: result.delivery };
     if (action.type === 'type' && result.delivery !== 'not_delivered') typed.add(key);
     // Switch apps only when the launch or focus landed. Otherwise the model sees the app it was in and can try again.

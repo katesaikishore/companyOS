@@ -450,8 +450,8 @@ export class TwinRuntime {
       fetchImpl: options.fetchImpl,
     });
     this.operator = new OperatorService({
-      // Tasks are worked out by Claude on Anthropic. The local model is no longer offered for them.
-      config: () => ({ ...this.agent.configuration, operatorModel: 'anthropic' }),
+      // Tasks are worked out on Chutes, or on Anthropic when the person picks it. The local model is no longer offered for them.
+      config: () => ({ ...this.agent.configuration, operatorModel: this.taskModel() }),
       // The operator reaches agent-desktop through MCP: its hands are a client of an agent-desktop MCP server, joined in
       // memory. Each task's steps are drawn on screen by its own named cursor, in the session automations and swarms share.
       hands: (binary, goal) =>
@@ -1017,7 +1017,7 @@ export class TwinRuntime {
   }
 
   /**
-   * Runs a task typed in the bar. Claude plans it from the words, the apps that are running and the app that was
+   * Runs a task typed in the bar. The model picked for tasks plans it from the words, the apps that are running and the app that was
    * in front: the app to start in and a few steps. Then the operator does it as it does a task from the Tasks page, every
    * step checked and the risky ones asked about. Without a plan, the task starts in the app that was in front.
    */
@@ -1028,19 +1028,22 @@ export class TwinRuntime {
     const off = new Set([...this.agent.configuration.excludedApps, ...OWN_APPS].map(name => name.toLowerCase()));
     const front = this.barFrontApp && !off.has(this.barFrontApp.toLowerCase()) ? this.barFrontApp : undefined;
     const running = (await this.runningApps()).filter(name => !off.has(name.toLowerCase()));
-    // The plan is made by Claude, from the goal and app names only, never screen text.
-    const planner = await this.operatorModel('anthropic', false);
+    // The plan is made by the model picked for tasks, from the goal and app names only, never screen text.
+    const planner = await this.operatorModel(this.taskModel(), false);
+    if (!planner) throw new Error(this.taskModel() === 'anthropic' ? 'Save an Anthropic key on the Tasks page first.' : 'Save a Chutes key on the Tasks page first.');
     let plan: TaskPlan | undefined;
+    let failure: string | undefined;
     try {
-      if (!planner) throw new Error('No model for the plan.');
       plan = await planTask(goal, { running, ...(front ? { front } : {}) }, planner, AbortSignal.timeout(PLAN_TIMEOUT_MS));
-    } catch {
-      plan = undefined;
+    } catch (error) {
+      // The model clients' errors are fixed sentences, such as a busy Chutes, so they can be shown as they are.
+      failure = error instanceof Error && error.name === 'TimeoutError' ? 'The model did not answer within a minute.' : error instanceof Error ? error.message.slice(0, 200) : undefined;
     }
-    const app = plan && !off.has(plan.app.toLowerCase()) ? plan.app : (front ?? 'Finder');
-    const steps = plan?.steps ?? [];
-    await this.operator.start({ goal, app, plan: steps });
-    return { app, steps, planned: plan !== undefined };
+    // Without a plan nothing starts: the app in front may be any app, and steps run without asking.
+    if (!plan) throw new Error(`The task could not be planned. ${failure ?? 'The model gave no plan.'} Try again.`);
+    if (off.has(plan.app.toLowerCase())) throw new Error(`The plan starts in ${plan.app}, which the twin does not operate.`);
+    await this.operator.start({ goal, app: plan.app, plan: plan.steps });
+    return { app: plan.app, steps: plan.steps, planned: true };
   }
 
   /** The apps with windows the person works in, by name, as agent-desktop lists them. Empty when it cannot. */
@@ -1079,6 +1082,11 @@ export class TwinRuntime {
   clearChutesKey(): void {
     removeChutesKey(this.options.userData);
     this.options.onChange();
+  }
+
+  /** The model tasks use: Anthropic when the person picked it, otherwise Chutes. A setting left at the local model counts as Chutes. */
+  private taskModel(): OperatorModelChoice {
+    return this.agent.configuration.operatorModel === 'anthropic' ? 'anthropic' : 'chutes';
   }
 
   /** Saves the Anthropic key for tasks in the keychain. It is never sent back to a page. */

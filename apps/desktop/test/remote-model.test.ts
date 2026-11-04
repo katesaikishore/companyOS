@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CompletionRequest, NetworkEntry } from '@companyos/twin-core';
-import { chutesFailure, createChutesChat, validChutesKey } from '../src/main/remote-model';
+import { busyKind, chutesFailure, createChutesChat, validChutesKey } from '../src/main/remote-model';
 import { createOllamaChat } from '../src/main/vision-ollama';
 
 const KEY = 'cpk_test_0123456789abcdef';
@@ -60,6 +60,62 @@ describe('createChutesChat', () => {
     await expect(model.complete({ ...REQUEST, signal: controller.signal })).rejects.toThrow();
     expect(records.map(entry => entry.outcome)).toEqual(['failed', 'cancelled']);
     expect(records[0]).not.toHaveProperty('status');
+  });
+});
+
+describe('createChutesChat when a model is busy', () => {
+  /** Answers each call in turn from a list of [status, body, retry-after], recording which model each call asked. */
+  function sequence(answers: Array<[number, unknown, string?]>) {
+    const models: string[] = [];
+    let i = 0;
+    const impl = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      models.push(JSON.parse(String(init?.body)).model);
+      const [status, body, retryAfter] = answers[Math.min(i++, answers.length - 1)];
+      return new Response(typeof body === 'string' ? body : JSON.stringify(body), { status, headers: retryAfter ? { 'retry-after': retryAfter } : {} });
+    }) as typeof fetch;
+    return { models, impl };
+  }
+  const ok: [number, unknown] = [200, { choices: [{ message: { content: '{"action":"done"}' } }] }];
+  const atCapacity: [number, unknown] = [429, { detail: 'Infrastructure is at maximum capacity, try again later' }];
+
+  it('waits as Chutes asks, tries again, then asks the next model, and returns its reply', async () => {
+    const waits: number[] = [];
+    const { models, impl } = sequence([[429, { detail: 'Infrastructure is at maximum capacity' }, '3'], atCapacity, ok]);
+    const model = createChutesChat({ apiKey: KEY, sharesScreenText: false, record: () => undefined, fetchImpl: impl, sleep: async ms => void waits.push(ms) });
+    expect(await model.complete(REQUEST)).toEqual({ action: 'done' });
+    expect(models).toEqual(['Qwen/Qwen3.5-397B-A17B-TEE', 'Qwen/Qwen3.5-397B-A17B-TEE', 'deepseek-ai/DeepSeek-V3.2-TEE']);
+    expect(waits).toEqual([3000]);
+  });
+
+  it('says every model was at capacity in its own words, never in the answer’s, after trying each twice', async () => {
+    const records: NetworkEntry[] = [];
+    const { models, impl } = sequence([atCapacity]);
+    const model = createChutesChat({ apiKey: KEY, sharesScreenText: false, record: entry => records.push(entry), fetchImpl: impl, sleep: async () => undefined });
+    const error = (await model.complete(REQUEST).catch((thrown: Error) => thrown)) as Error;
+    expect(error.message).toBe(chutesFailure(429, 'capacity'));
+    expect(error.message).not.toContain('Infrastructure');
+    expect(models).toHaveLength(6);
+    expect(records.every(entry => entry.status === 429 && entry.outcome === 'failed')).toBe(true);
+    expect(JSON.stringify(records)).not.toContain('Infrastructure');
+  });
+
+  it('hands a model that is not offered over to the next at once, and stops at a refused key', async () => {
+    const waits: number[] = [];
+    const offered = sequence([[404, 'gone'], ok]);
+    expect(await createChutesChat({ apiKey: KEY, sharesScreenText: false, record: () => undefined, fetchImpl: offered.impl, sleep: async ms => void waits.push(ms) }).complete(REQUEST)).toEqual({ action: 'done' });
+    expect(offered.models).toEqual(['Qwen/Qwen3.5-397B-A17B-TEE', 'deepseek-ai/DeepSeek-V3.2-TEE']);
+    expect(waits).toEqual([]);
+    const refused = sequence([[401, 'bad key'], ok]);
+    await expect(createChutesChat({ apiKey: KEY, sharesScreenText: false, record: () => undefined, fetchImpl: refused.impl }).complete(REQUEST)).rejects.toThrow('refused the key (401)');
+    expect(refused.models).toHaveLength(1);
+  });
+
+  it('sorts a busy answer into capacity or a key limit, and nothing else', () => {
+    expect(busyKind('{"detail":"Infrastructure is at maximum capacity, try again later"}')).toBe('capacity');
+    expect(busyKind('{"detail":"No instances available"}')).toBe('capacity');
+    expect(busyKind('{"detail":"Rate limit exceeded"}')).toBe('limit');
+    expect(busyKind('{"detail":"Too many requests"}')).toBe('limit');
+    expect(busyKind('something else')).toBeUndefined();
   });
 });
 

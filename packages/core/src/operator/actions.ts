@@ -137,13 +137,14 @@ export function parseAction(reply: unknown, observation: Observation): { action:
   if (!parsed.success) return { invalid: 'The reply does not match the action shape.' };
   const { action, ref, name, text, keys, app, direction, reason } = parsed.data;
   const refs = new Set(observation.controls.map(control => control.ref));
-  // A ref from this turn wins. Otherwise a control name counts only when exactly one control on the screen has that name.
+  // A name counts only when exactly one control on the screen has it. A ref is a long code that differs from its neighbour's
+  // by one character, so when a ref from this turn names one control and the name another, the name is what the model meant.
   const needsRef = (): string | undefined => {
-    if (ref && refs.has(ref)) return ref;
     const wanted = name?.trim().toLowerCase();
-    if (!wanted) return undefined;
-    const matches = observation.controls.filter(control => control.name.trim().toLowerCase() === wanted);
-    return matches.length === 1 ? matches[0].ref : undefined;
+    const matches = wanted ? observation.controls.filter(control => control.name.trim().toLowerCase() === wanted) : [];
+    const named = matches.length === 1 ? matches[0].ref : undefined;
+    if (ref && refs.has(ref)) return named ?? ref;
+    return named;
   };
   switch (action) {
     case 'click': {
