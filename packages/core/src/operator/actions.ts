@@ -66,8 +66,9 @@ export const ACTION_SCHEMA = {
     direction: { type: 'string', enum: ['up', 'down'] },
     reason: { type: 'string' },
   },
-  // ref, name and text are always present, empty when unused, so a small model cannot leave the target or the text out.
-  required: ['action', 'ref', 'name', 'text', 'reason'],
+  // ref, name, text and menu are always present, empty when unused, so a model cannot leave the target, the text or the
+  // menu path out. A model held to a schema tends to skip a field that is optional.
+  required: ['action', 'ref', 'name', 'text', 'menu', 'reason'],
 } as const;
 
 /** The apps the operator may act in without asking each step: local editors where a step cannot send anything. */
@@ -78,7 +79,7 @@ const APP_NAME = /^[\p{L}\p{N}][\p{L}\p{N} .\-()]{0,79}$/u;
 const BUNDLE_ID = /^[a-z0-9-]+(?:\.[a-z0-9-]+){2,}$/i;
 const KEYS = /^[a-z0-9]+(?:\+[a-z0-9]+){0,3}$/;
 const MAX_TEXT = 2000;
-const MENU_SEPARATOR = /\s*(?:>|→|›)\s*/;
+const MENU_SEPARATOR = /\s*(?:>|→|›|▸|»)\s*/;
 
 /**
  * A menu path the model wrote, such as "View > Use Stacks", as its labels. Three dots become the ellipsis the menus show,
@@ -190,10 +191,15 @@ export function parseAction(reply: unknown, observation: Observation): { action:
       return { action: { type: action, app: appName, reason } };
     }
     case 'menu': {
-      // Models often put the path in "name", the one target field every reply fills. It counts only when it is a path.
-      const raw = menu || (name && MENU_SEPARATOR.test(name) ? name : undefined);
+      // Models also put the path in "name" or "text", fields every reply fills. Either counts only when it is a path.
+      const isPath = (value: string | undefined): value is string => value !== undefined && MENU_SEPARATOR.test(value);
+      const raw = [menu, name, text].find(isPath) ?? menu;
       const path = raw ? parseMenuPath(raw) : undefined;
-      if (!path) return { invalid: 'The menu path is not one that can be chosen. Write it as "Menu > Item", with the labels as the app shows them.' };
+      if (!path) {
+        // The model sees what it wrote, so it can correct the path rather than send the same one again.
+        const given = raw ? ` ${JSON.stringify(raw.slice(0, 80))} is not one.` : ' None was given.';
+        return { invalid: `Put a menu path in "menu", such as "View > Sort By > Kind", with the labels as the app shows them.${given}` };
+      }
       return { action: { type: 'menu', path, reason } };
     }
     case 'done':

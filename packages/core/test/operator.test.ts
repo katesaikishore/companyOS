@@ -139,6 +139,13 @@ describe('menu action', () => {
     expect(parseAction({ action: 'menu', ref: '', name: 'File → New Folder', text: '', reason: 'x' }, finder)).toEqual({ action: { type: 'menu', path: ['File', 'New Folder'], reason: 'x' } });
     // A name that is not a path, such as a button called Delete, never becomes a menu step.
     expect(parseAction({ action: 'menu', ref: '', name: 'Delete', text: '', reason: 'x' }, finder)).toHaveProperty('invalid');
+    // A model held to a schema may leave "menu" empty and write the path in "text".
+    expect(parseAction({ action: 'menu', ref: '', name: 'Kind', text: 'View ▸ Sort By ▸ Kind', menu: '', reason: 'x' }, finder)).toEqual({ action: { type: 'menu', path: ['View', 'Sort By', 'Kind'], reason: 'x' } });
+  });
+
+  it('quotes a path it cannot use, so the model can correct it', () => {
+    expect(parseAction({ action: 'menu', ref: '', name: '', text: '', menu: 'View > "Kind"', reason: 'x' }, finder)).toEqual({ invalid: expect.stringContaining('"View > \\"Kind\\"" is not one') });
+    expect(parseAction({ action: 'menu', ref: '', name: '', text: '', menu: '', reason: 'x' }, finder)).toEqual({ invalid: expect.stringContaining('None was given') });
   });
 
   it('writes three dots as the ellipsis the menus show, and refuses labels that are not labels', () => {
