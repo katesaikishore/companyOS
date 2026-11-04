@@ -82,6 +82,8 @@ export function describeAction(action: OperatorAction, target?: string): string 
       return `Open ${action.app}`;
     case 'focus_app':
       return `Switch to ${action.app}`;
+    case 'menu':
+      return `Choose ${short(action.path.join(' > '))} from the menu`;
     case 'done':
       return `Finished: ${short(action.summary)}`;
     case 'fail':

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Observation } from '@companyos/twin-core';
-import { agentDesktopHands, argsFor, controlsOf, deliveryOf, type Exec } from '../src/main/operator-hands';
+import { agentDesktopHands, argsFor, controlsOf, deliveryOf, menuChooser, menuDelivery, type Exec } from '../src/main/operator-hands';
 
 const SNAPSHOT = {
   ok: true,
@@ -306,5 +306,60 @@ describe('the operator’s cursor on screen', () => {
     const none = fakeExec(OK);
     await agentDesktopHands('/bin/agent-desktop', none.exec).act({ type: 'type', ref: '@d:e2', text: 'Hi', reason: 'x' }, textEdit);
     expect(none.calls).toEqual([['type', '--', '@d:e2', 'Hi']]);
+  });
+});
+
+describe('menu steps', () => {
+  const finder: Observation = { app: 'Finder', controls: [] };
+
+  it('chooses the path through the menu helper, in the app that was read', async () => {
+    const { exec, calls } = fakeExec({ ok: true });
+    const chooseMenu = vi.fn(async () => ({ delivery: 'delivered' as const }));
+    const result = await agentDesktopHands('/opt/homebrew/bin/agent-desktop', exec, undefined, chooseMenu).act({ type: 'menu', path: ['View', 'Use Stacks'], reason: 'x' }, finder);
+    expect(result).toEqual({ delivery: 'delivered' });
+    expect(chooseMenu).toHaveBeenCalledWith('Finder', ['View', 'Use Stacks']);
+    expect(calls).toEqual([]);
+  });
+
+  it('does not run a menu step without the helper', async () => {
+    const { exec, calls } = fakeExec({ ok: true });
+    const result = await agentDesktopHands('/opt/homebrew/bin/agent-desktop', exec).act({ type: 'menu', path: ['View', 'Use Stacks'], reason: 'x' }, finder);
+    expect(result).toEqual({ delivery: 'not_delivered', code: 'menu_unavailable' });
+    expect(calls).toEqual([]);
+  });
+
+  it('counts a path that stopped before its item as not landed, and any other failure as may have landed', () => {
+    expect(menuDelivery({ ok: true })).toEqual({ delivery: 'delivered' });
+    expect(menuDelivery({ ok: false, failure: 'not_found', reason: 'x' })).toEqual({ delivery: 'not_delivered', code: 'not_found' });
+    expect(menuDelivery({ ok: false, failure: 'submenu', reason: 'x' })).toEqual({ delivery: 'not_delivered', code: 'submenu' });
+    expect(menuDelivery({ ok: false, failure: 'unverified', reason: 'x' })).toEqual({ delivery: 'unknown', code: 'unverified' });
+    expect(menuDelivery({ ok: false, failure: 'timeout', reason: 'x' })).toEqual({ delivery: 'unknown', code: 'timeout' });
+  });
+
+  it('falls back to the system menu only when agent-desktop chose nothing, or the path has a submenu', async () => {
+    const landed = vi.fn(async () => ({ delivery: 'delivered' as const }));
+    const noWindow = vi.fn(async () => ({ delivery: 'not_delivered' as const, code: 'not_found' }));
+    const maybe = vi.fn(async () => ({ delivery: 'unknown' as const, code: 'unverified' }));
+    const system = vi.fn(async () => true);
+
+    expect(await menuChooser(landed, system)!('Finder', ['View', 'Use Stacks'])).toEqual({ delivery: 'delivered' });
+    expect(system).not.toHaveBeenCalled();
+    // A click that may have run the item is never tried again another way.
+    expect(await menuChooser(maybe, system)!('Finder', ['View', 'Use Stacks'])).toEqual({ delivery: 'unknown', code: 'unverified' });
+    expect(system).not.toHaveBeenCalled();
+
+    expect(await menuChooser(noWindow, system)!('Finder', ['View', 'Use Stacks'])).toEqual({ delivery: 'delivered' });
+    expect(system).toHaveBeenCalledWith('Finder', ['View', 'Use Stacks']);
+    landed.mockClear();
+    expect(await menuChooser(landed, system)!('Finder', ['View', 'Sort By', 'Kind'])).toEqual({ delivery: 'delivered' });
+    expect(landed).not.toHaveBeenCalled();
+  });
+
+  it('reports a system refusal as not landed and an unconfirmed press as may have landed', async () => {
+    const refused = vi.fn(async () => { throw new Error('The menu item is turned off'); });
+    expect(await menuChooser(undefined, refused)!('Finder', ['View', 'Use Stacks'])).toEqual({ delivery: 'not_delivered', code: 'menu_refused' });
+    expect(await menuChooser(undefined, async () => false)!('Finder', ['View', 'Use Stacks'])).toEqual({ delivery: 'unknown', code: 'menu_unconfirmed' });
+    expect(await menuChooser(async () => ({ delivery: 'not_delivered' as const }), undefined)!('Finder', ['View', 'Sort By', 'Kind'])).toEqual({ delivery: 'not_delivered', code: 'submenu' });
+    expect(menuChooser(undefined, undefined)).toBeUndefined();
   });
 });

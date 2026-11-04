@@ -112,11 +112,13 @@ const SYSTEM =
   'You operate one desktop app for the person through its accessibility controls. ' +
   'Each turn you see the goal, the app in front, its controls with refs, and what you did before. ' +
   'Reply with exactly one next action as JSON. Give the ref of the control from this turn in "ref", because refs change after every action, and its exact name in "name". ' +
-  'The ref must be one listed this turn. Leave it empty for press, launch, focus_app, done and fail. ' +
+  'The ref must be one listed this turn. Leave it empty for press, launch, focus_app, menu, done and fail. ' +
   'Do one small step at a time, and check the controls to see whether the last step worked. ' +
   'The app may still hold work from before, such as a half-done entry: clear it first when the goal needs a fresh start. ' +
   'The actions are: click a control; type text into a field; press a key combo such as cmd+n, cmd+s or return; ' +
-  'scroll a control up or down; launch an app or focus an app by name; done; fail. ' +
+  'scroll a control up or down; launch an app or focus an app by name; menu; done; fail. ' +
+  'menu chooses an item from the app\'s menu bar: put the path in "menu" as "Menu > Item", or "Menu > Submenu > Item", such as "View > Use Stacks" or "View > Sort By > Kind", with the labels as the app shows them. ' +
+  'It works even when the item is not among the controls and when the app has no window open. ' +
   'When the app has no window, or a click does not land, a menu shortcut such as cmd+n often does the same job. ' +
   'To write into a text field or text area, use type on it directly. Do not click it first. Typed text goes after the text already there, so to add a line to a document start the text with a new line (\\n). ' +
   'Never click Close, Minimize or Full Screen: they act on the window, not the work. ' +
@@ -198,7 +200,8 @@ function stepLine(step: OperatorStep): string {
     action.type === 'type' ? `${quoted(action.text, 60)} into ${named(step)}` :
     action.type === 'click' || action.type === 'scroll' ? named(step) :
     action.type === 'press' ? action.keys :
-    action.type === 'launch' || action.type === 'focus_app' ? action.app : '';
+    action.type === 'launch' || action.type === 'focus_app' ? action.app :
+    action.type === 'menu' ? quoted(action.path.join(' > '), SHOWN_NAME) : '';
   const outcome =
     step.delivery === 'delivered' ? 'done' :
     step.delivery === 'unverified' ? 'done (the app does not confirm it, so treat it as done)' :

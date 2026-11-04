@@ -71,7 +71,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { planTask, type OperatorModel, type OperatorTaskRequest, type OperatorTaskView, type TaskPlan, type TaskPlanView } from '@companyos/twin-core';
 import { OperatorService, missingKey, type OperatorModelChoice } from './operator-service';
-import { agentDesktopHands } from './operator-hands';
+import { agentDesktopHands, menuChooser, menuDelivery } from './operator-hands';
 import { agentDesktopServer, mcpHands } from './agent-desktop-mcp';
 import { createChutesChat, validChutesKey } from './remote-model';
 import { createAnthropicChat, validAnthropicKey } from './anthropic-model';
@@ -118,7 +118,7 @@ import { LayaDecisionModel } from './decision-laya';
 import { ModelManager, SharedModelClients, createRoutineNamer } from './models';
 import { InputLock } from './input-lock';
 import { browserCapturePaths, installNativeHost, isBrowserCaptureSupported, removeNativeHost } from './native-host-install';
-import { AgentDesktopSession, CURSOR_COLOURS, cursorFor, cursorLabel, handsExecutor, type HandsCursor } from './agent-desktop';
+import { AgentDesktopSession, CURSOR_COLOURS, chooseMenuWithAgentDesktop, cursorFor, cursorLabel, handsExecutor, type HandsCursor } from './agent-desktop';
 import { gatherDuplicates } from './file-actions';
 import { choosePlatform, executorFor, type Platform } from './platform';
 import { PipeScheduler, removeLegacyPipeFiles } from './pipes';
@@ -460,13 +460,24 @@ export class TwinRuntime {
       config: () => ({ ...this.agent.configuration, operatorModel: this.taskModel() }),
       // The operator reaches agent-desktop through MCP: its hands are a client of an agent-desktop MCP server, joined in
       // memory. Each task's steps are drawn on screen by its own named cursor, in the session automations and swarms share.
-      hands: (binary, goal) =>
-        mcpHands(() =>
-          agentDesktopServer(
-            agentDesktopHands(binary, undefined, { session: this.handsSession, cursor: cursorFor('operator-task', cursorLabel('companyOS', goal)) }),
-            () => this.runningApps(),
-          ),
-        ),
+      hands: (binary, goal) => {
+        const cursor = cursorFor('operator-task', cursorLabel('companyOS', goal));
+        // A menu step goes through agent-desktop's menu helper, which checks that each click opened what it should.
+        const viaAgentDesktop = async (app: string, path: readonly string[]) =>
+          menuDelivery(await chooseMenuWithAgentDesktop({ binary, session: this.handsSession, cursor }, app, path));
+        // The system's menu access reaches what agent-desktop cannot: a submenu, or an app with no window open. The app is
+        // brought forward first, as an app turns off menu items that act on its own content while another app is in front:
+        // Finder's View items for the desktop are off while a browser is.
+        const platform = this.platform;
+        const viaSystem = platform?.chooseMenu
+          ? async (app: string, path: readonly string[]) => {
+              await platform.focus(app).catch(() => false);
+              return platform.chooseMenu?.(app, path) ?? false;
+            }
+          : undefined;
+        const chooseMenu = menuChooser(viaAgentDesktop, viaSystem);
+        return mcpHands(() => agentDesktopServer(agentDesktopHands(binary, undefined, { session: this.handsSession, cursor }, chooseMenu), () => this.runningApps()));
+      },
       model: (choice, modelOptions) => this.operatorModel(choice, modelOptions.sharesScreenText),
       memory: goal => this.memoryNotes(goal),
       hasChutesKey: () => hasChutesKey(options.userData),

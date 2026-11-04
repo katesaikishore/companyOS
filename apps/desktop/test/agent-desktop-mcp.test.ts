@@ -43,7 +43,7 @@ describe('agent-desktop over MCP', () => {
     const client = new Client({ name: 'test', version: '1.0.0' });
     await client.connect(clientSide);
     const names = (await client.listTools()).tools.map(tool => tool.name).sort();
-    expect(names).toEqual(['click', 'focus_app', 'launch', 'list_apps', 'observe', 'press', 'scroll', 'type']);
+    expect(names).toEqual(['click', 'focus_app', 'launch', 'list_apps', 'menu', 'observe', 'press', 'scroll', 'type']);
     const apps = await client.callTool({ name: 'list_apps', arguments: {} });
     expect(JSON.parse((apps.content as Array<{ text: string }>)[0].text)).toEqual(['TextEdit', 'Finder']);
   });
@@ -51,5 +51,6 @@ describe('agent-desktop over MCP', () => {
   it('turns each action into its tool call, launch and focus by the app they name', () => {
     expect(toolCall({ type: 'click', ref: '@a:e1', reason: 'x' }, 'Finder')).toEqual({ name: 'click', arguments: { app: 'Finder', ref: '@a:e1', reason: 'x' } });
     expect(toolCall({ type: 'launch', app: 'TextEdit', reason: 'x' }, 'Finder')).toEqual({ name: 'launch', arguments: { app: 'TextEdit', reason: 'x' } });
+    expect(toolCall({ type: 'menu', path: ['View', 'Use Stacks'], reason: 'x' }, 'Finder')).toEqual({ name: 'menu', arguments: { app: 'Finder', path: ['View', 'Use Stacks'], reason: 'x' } });
   });
 });

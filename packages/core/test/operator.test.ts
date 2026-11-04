@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { judge, normalizeKeys, parseAction, type Observation, type OperatorAction } from '../src/operator/actions';
+import { judge, normalizeKeys, parseAction, parseMenuPath, type Observation, type OperatorAction } from '../src/operator/actions';
 import { operatorPrompt, runTask, type ActResult, type OperatorHands, type OperatorModel } from '../src/operator/loop';
 import { DEFAULT_CONFIG } from '../src/types';
 
@@ -128,6 +128,45 @@ describe('parseAction', () => {
     expect(parseAction({ action: 'done', ref: '', name: page, text: '', reason: 'Added the line.' }, textEditDocument)).toEqual({ action: { type: 'done', summary: 'Added the line.' } });
     // A long name can never pick a control, so a click with one and no ref is still refused.
     expect(parseAction({ action: 'click', ref: '', name: `New Document ${page}`, reason: 'x' }, textEditPicker)).toEqual({ invalid: 'The ref is not on the screen.' });
+  });
+});
+
+describe('menu action', () => {
+  const finder: Observation = { app: 'Finder', controls: [] };
+
+  it('reads a menu path from "menu", or from "name" when it is a path', () => {
+    expect(parseAction({ action: 'menu', ref: '', name: '', text: '', menu: 'View > Use Stacks', reason: 'tidy' }, finder)).toEqual({ action: { type: 'menu', path: ['View', 'Use Stacks'], reason: 'tidy' } });
+    expect(parseAction({ action: 'menu', ref: '', name: 'File → New Folder', text: '', reason: 'x' }, finder)).toEqual({ action: { type: 'menu', path: ['File', 'New Folder'], reason: 'x' } });
+    // A name that is not a path, such as a button called Delete, never becomes a menu step.
+    expect(parseAction({ action: 'menu', ref: '', name: 'Delete', text: '', reason: 'x' }, finder)).toHaveProperty('invalid');
+  });
+
+  it('writes three dots as the ellipsis the menus show, and refuses labels that are not labels', () => {
+    expect(parseMenuPath('File > Save As...')).toEqual(['File', 'Save As…']);
+    expect(parseMenuPath('View')).toBeUndefined();
+    expect(parseMenuPath('File > --help')).toBeUndefined();
+    expect(parseMenuPath('File > "quoted"')).toBeUndefined();
+  });
+
+  it('takes a path through a submenu, up to four labels', () => {
+    expect(parseAction({ action: 'menu', ref: '', name: '', text: '', menu: 'View > Sort By > Kind', reason: 'x' }, finder)).toEqual({ action: { type: 'menu', path: ['View', 'Sort By', 'Kind'], reason: 'x' } });
+    expect(parseMenuPath('A > B > C > D > E')).toBeUndefined();
+  });
+
+  it('holds a menu item that may delete or send, and holds every menu step outside the allowed apps', () => {
+    const notes: Observation = { app: 'Notes', controls: [] };
+    expect(judge({ type: 'menu', path: ['Format', 'Bold'], reason: 'x' }, notes, RULES).verdict).toBe('allow');
+    expect(judge({ type: 'menu', path: ['File', 'Delete Note'], reason: 'x' }, notes, RULES).verdict).toBe('ask');
+    expect(judge({ type: 'menu', path: ['File', 'Share'], reason: 'x' }, notes, RULES).verdict).toBe('ask');
+    expect(judge({ type: 'menu', path: ['View', 'Use Stacks'], reason: 'x' }, finder, RULES).verdict).toBe('ask');
+    expect(judge({ type: 'menu', path: ['Shell', 'New Window'], reason: 'x' }, { app: 'Terminal', controls: [] }, RULES).verdict).toBe('deny');
+  });
+
+  it('shows a menu step in the history by its path', () => {
+    const prompt = operatorPrompt({ goal: 'Tidy the desktop', app: 'Finder' }, finder, [
+      { n: 1, app: 'Finder', action: { type: 'menu', path: ['View', 'Use Stacks'], reason: 'x' }, delivery: 'delivered' },
+    ]);
+    expect(prompt).toContain('1. menu "View > Use Stacks" -> done');
   });
 });
 

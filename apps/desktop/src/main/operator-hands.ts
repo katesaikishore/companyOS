@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { isAbsolute } from 'node:path';
 import type { ActResult, Observation, OperatorAction, OperatorHands } from '@companyos/twin-core';
-import { AGENT_ID, sessionEnded, type AgentDesktopSession, type HandsCursor } from './agent-desktop';
+import { AGENT_ID, sessionEnded, type AgentDesktopSession, type HandsCursor, type HandsFailure, type HandsResult } from './agent-desktop';
 import { APP_NAME } from './app-surface';
 
 /**
@@ -107,6 +107,52 @@ export function deliveryOf(result: Envelope | undefined): ActResult {
 }
 
 type HandAction = Exclude<OperatorAction, { type: 'done' } | { type: 'fail' }>;
+/** The actions that are one agent-desktop call. A menu path is several, made by chooseMenu. */
+type CallAction = Exclude<HandAction, { type: 'menu' }>;
+
+/**
+ * Chooses a menu path in an app: the menu bar item, then the item in its menu. The runtime supplies agent-desktop's menu
+ * helper, which checks that each click opened what it should. Without one, a menu step does not run.
+ */
+export type ChooseMenu = (app: string, path: readonly string[]) => Promise<ActResult>;
+
+/** Failures that come before any menu item is clicked to run, so nothing was chosen and the step may be tried another way. */
+const MENU_NOT_RUN: ReadonlySet<HandsFailure> = new Set(['blocked', 'invalid_input', 'not_found', 'submenu', 'ambiguous', 'spawn_error']);
+
+/** agent-desktop's menu helper chooses a menu bar item and one item in its menu, and only while the app has a window open. */
+const AGENT_DESKTOP_MENU_DEPTH = 2;
+
+/**
+ * Chooses a menu path through agent-desktop first, which checks each click, and through the system's own menu access when
+ * agent-desktop could not run it: a path with a submenu, or an app with no window open, such as Finder with only the desktop.
+ * The fallback runs only when nothing was chosen, so an item is never chosen twice. The system chooser answers true when it
+ * pressed the item, false when it cannot tell, and throws to say it chose nothing.
+ */
+export function menuChooser(viaAgentDesktop: ChooseMenu | undefined, viaSystem: ((app: string, path: readonly string[]) => Promise<boolean>) | undefined): ChooseMenu | undefined {
+  if (!viaAgentDesktop && !viaSystem) return undefined;
+  return async (app, path) => {
+    let first: ActResult | undefined;
+    if (viaAgentDesktop && path.length <= AGENT_DESKTOP_MENU_DEPTH) {
+      first = await viaAgentDesktop(app, path);
+      if (first.delivery !== 'not_delivered') return first;
+    }
+    if (!viaSystem) return first ?? { delivery: 'not_delivered', code: 'submenu' };
+    try {
+      return (await viaSystem(app, path)) ? { delivery: 'delivered' } : { delivery: 'unknown', code: 'menu_unconfirmed' };
+    } catch {
+      return { delivery: 'not_delivered', code: 'menu_refused' };
+    }
+  };
+}
+
+/**
+ * The menu helper's result in the operator's delivery words. A path that stopped before its item ran did not land. Any other
+ * failure, such as a last click that could not be confirmed, may have chosen the item, so it may have landed.
+ */
+export function menuDelivery(result: HandsResult): ActResult {
+  if (result.ok) return { delivery: 'delivered' };
+  return MENU_NOT_RUN.has(result.failure) ? { delivery: 'not_delivered', code: result.failure } : { delivery: 'unknown', code: result.failure };
+}
 
 function isTextControl(ref: string, observation: Observation): boolean {
   const target = observation.controls.find(control => control.ref === ref);
@@ -114,7 +160,7 @@ function isTextControl(ref: string, observation: Observation): boolean {
 }
 
 /** The fixed argument list for one action. */
-export function argsFor(action: HandAction, observation: Observation): string[] {
+export function argsFor(action: CallAction, observation: Observation): string[] {
   switch (action.type) {
     case 'click':
       // A text field takes no press action, so a click on one is delivered as what it means: put the cursor there.
@@ -157,7 +203,7 @@ function inSession(args: readonly string[], sessionId: string, agentId: string):
  * program draws the task's named cursor where it reads and acts, as automations and swarms do. A session that cannot start
  * or has ended leaves the call to run without one, so a task never fails for want of a cursor.
  */
-export function agentDesktopHands(binary: string, exec: Exec = defaultExec, cursor?: OperatorCursor): OperatorHands {
+export function agentDesktopHands(binary: string, exec: Exec = defaultExec, cursor?: OperatorCursor, chooseMenu?: ChooseMenu): OperatorHands {
   if (!isAbsolute(binary)) throw new Error('The agent-desktop program path must be absolute.');
   const agentId = cursor && AGENT_ID.test(cursor.cursor.agentId) ? cursor.cursor.agentId : undefined;
   const run = async (args: string[], signal?: AbortSignal): Promise<string> => {
@@ -195,6 +241,10 @@ export function agentDesktopHands(binary: string, exec: Exec = defaultExec, curs
     async act(action, observation, signal) {
       if ((action.type === 'launch' || action.type === 'focus_app') && !APP_NAME.test(action.app)) {
         return { delivery: 'not_delivered', code: 'app_name_refused' };
+      }
+      if (action.type === 'menu') {
+        if (!chooseMenu || !APP_NAME.test(observation.app)) return { delivery: 'not_delivered', code: 'menu_unavailable' };
+        return chooseMenu(observation.app, action.path);
       }
       if (action.type !== 'type') return deliveryOf(envelope(await run(argsFor(action, observation), signal)));
       // Text typed into a field that already holds text goes after it. The model cannot place the cursor, and agent-desktop

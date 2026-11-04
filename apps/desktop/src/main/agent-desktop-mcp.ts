@@ -6,7 +6,7 @@ import { z } from 'zod';
 
 /**
  * agent-desktop as an MCP server, and the task operator's hands as an MCP client of it. Every reading of an app and every
- * action is an MCP tool call: observe, click, type, press, scroll, launch, focus_app, and list_apps for the apps with
+ * action is an MCP tool call: observe, click, type, press, scroll, launch, focus_app, menu, and list_apps for the apps with
  * windows. The two ends are joined in memory inside the app, so nothing listens on a port or a pipe another program could
  * reach. The operator's checks run before a tool is called: an action that may send, share, spend or lose work still waits
  * for the person, and an excluded app is never read.
@@ -71,6 +71,14 @@ export function agentDesktopServer(hands: OperatorHands, listApps: () => Promise
     { description: 'Brings a running app to the front by name.', inputSchema: { app: APP, reason: REASON } },
     async ({ app, reason }, extra) => json(await act(app, { type: 'focus_app', app, reason }, extra.signal)),
   );
+  server.registerTool(
+    'menu',
+    {
+      description: 'Chooses an item from the app’s menu bar: the menu, any submenus, then the item, such as ["View", "Sort By", "Kind"].',
+      inputSchema: { app: APP, path: z.array(z.string().min(1).max(80)).min(2).max(4), reason: REASON },
+    },
+    async ({ app, path, reason }, extra) => json(await act(app, { type: 'menu', path, reason }, extra.signal)),
+  );
   server.registerTool('list_apps', { description: 'Lists the apps that have windows, by name.', inputSchema: {} }, async () => json(await listApps()));
   return server;
 }
@@ -89,6 +97,8 @@ export function toolCall(action: HandAction, app: string): { name: string; argum
     case 'launch':
     case 'focus_app':
       return { name: action.type, arguments: { app: action.app, reason: action.reason } };
+    case 'menu':
+      return { name: 'menu', arguments: { app, path: [...action.path], reason: action.reason } };
   }
 }
 
