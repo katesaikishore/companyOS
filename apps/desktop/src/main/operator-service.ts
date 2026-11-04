@@ -18,7 +18,14 @@ import { APP_NAME } from './app-surface';
  * the person's answers to it.
  */
 
-export type OperatorModelChoice = 'local' | 'chutes' | 'anthropic';
+export type OperatorModelChoice = 'local' | 'chutes' | 'anthropic' | 'deepseek';
+
+/** What to do when the chosen model has no saved key. */
+export function missingKey(choice: OperatorModelChoice): string {
+  if (choice === 'anthropic') return 'Save an Anthropic key on the Tasks page first.';
+  if (choice === 'deepseek') return 'Save a DeepSeek key on the Tasks page first.';
+  return 'Save a Chutes key on the Tasks page first.';
+}
 
 interface OperatorServiceDeps {
   config: () => { excludedApps: readonly string[]; agentDesktopPath: string; operatorModel: OperatorModelChoice; askBeforeSteps: boolean };
@@ -30,6 +37,7 @@ interface OperatorServiceDeps {
   memory: (goal: string) => string[];
   hasChutesKey: () => boolean;
   hasAnthropicKey: () => boolean;
+  hasDeepSeekKey: () => boolean;
   /** The twin's own app names. The operator never reads or acts in its own window. */
   ownApps: readonly string[];
   onChange: () => void;
@@ -114,7 +122,7 @@ export class OperatorService {
       steps: [...this.steps],
       pending: this.waiting ? { id: this.waiting.id, text: this.waiting.text, why: this.waiting.why, detail: this.waiting.detail } : undefined,
       result: this.running ? undefined : this.result,
-      ready: { agentDesktop: isAbsolute(config.agentDesktopPath.trim()), chutesKey: this.deps.hasChutesKey(), anthropicKey: this.deps.hasAnthropicKey() },
+      ready: { agentDesktop: isAbsolute(config.agentDesktopPath.trim()), chutesKey: this.deps.hasChutesKey(), anthropicKey: this.deps.hasAnthropicKey(), deepseekKey: this.deps.hasDeepSeekKey() },
     };
   }
 
@@ -157,7 +165,7 @@ export class OperatorService {
     }
     if (!model) {
       this.finish(goal, app, undefined);
-      throw new Error(choice === 'anthropic' ? 'Save an Anthropic key on the Tasks page first.' : 'Save a Chutes key first, or switch the model to this Mac.');
+      throw new Error(missingKey(choice));
     }
     // Memory notes come from captured screen text. They go to a model on this Mac, and off it only when the person ticks the box.
     const context = shares ? this.deps.memory(goal) : [];

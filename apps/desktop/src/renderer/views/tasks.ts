@@ -84,9 +84,9 @@ function approvalPanel(waiting: NonNullable<OperatorTaskView['pending']>): HTMLE
 function taskForm(status: TwinStatus): HTMLElement {
   const form = state.task;
   const ready = status.operator.ready;
-  // Tasks run off this Mac, on Chutes or Anthropic, so the box for screen text always shows.
+  // Tasks run off this Mac, on Chutes, Anthropic or DeepSeek, so the box for screen text always shows.
   const chutes = true;
-  const keyReady = taskModelOf(status) === 'anthropic' ? ready.anthropicKey : ready.chutesKey;
+  const keyReady = keyReadyFor(status);
   const goal = h('textarea', {
     class: 'input task-goal',
     rows: 3,
@@ -126,7 +126,7 @@ function taskForm(status: TwinStatus): HTMLElement {
   const blocked = !ready.agentDesktop
     ? 'Set the agent-desktop program path in Settings first.'
     : !keyReady
-      ? `Save ${taskModelOf(status) === 'anthropic' ? 'an Anthropic' : 'a Chutes'} key below first.`
+      ? `Save ${MODELS[taskModelOf(status)].article} key below first.`
       : undefined;
   return panel(
     { testid: 'task-form' },
@@ -193,7 +193,7 @@ function proposalsPanel(status: TwinStatus): HTMLElement {
 }
 
 function proposalRow(task: ProposedTask, status: TwinStatus): HTMLElement {
-  const blocked = !status.operator.ready.agentDesktop || !(taskModelOf(status) === 'anthropic' ? status.operator.ready.anthropicKey : status.operator.ready.chutesKey);
+  const blocked = !status.operator.ready.agentDesktop || !keyReadyFor(status);
   return h(
     'li',
     { class: 'ov-wait-row', 'data-testid': 'task-proposal' },
@@ -272,18 +272,35 @@ function resultPanel(operator: OperatorTaskView): HTMLElement {
   );
 }
 
-/** The model tasks use: Anthropic when picked, otherwise Chutes, as the app decides. */
-function taskModelOf(status: TwinStatus): 'chutes' | 'anthropic' {
+type TaskModel = 'chutes' | 'anthropic' | 'deepseek';
+
+/** The model tasks use: Anthropic or DeepSeek when picked, otherwise Chutes, as the app decides. */
+function taskModelOf(status: TwinStatus): TaskModel {
   const choice = status.operator.state !== 'idle' ? status.operator.model : status.config.operatorModel;
-  return choice === 'anthropic' ? 'anthropic' : 'chutes';
+  return choice === 'anthropic' || choice === 'deepseek' ? choice : 'chutes';
 }
 
-const MODEL_NOTES = {
+/** Whether the key for a model is saved: the chosen model's when none is named. */
+function keyReadyFor(status: TwinStatus, choice: TaskModel = taskModelOf(status)): boolean {
+  const ready = status.operator.ready;
+  return choice === 'anthropic' ? ready.anthropicKey : choice === 'deepseek' ? ready.deepseekKey : ready.chutesKey;
+}
+
+const MODEL_NOTES: Record<TaskModel, string> = {
   chutes:
     'Tasks are planned and worked out on Chutes, by Qwen3.5 397B, or DeepSeek V3.2 or Kimi K2.6 when it is busy, all run in trusted execution environments; they reach the app through agent-desktop. Each step sends the task’s goal, the window title and the app’s control names to llm.chutes.ai. A task from the bar is planned there too, from its goal and the names of the apps that are running. The text in the app’s fields and memory notes from your screen go only when you tick the box for a task. Every call shows in the network ledger, with whether it carried screen text.',
   anthropic:
     'Tasks are planned and worked out by Claude Opus 5.5 on Anthropic, which reaches the app through agent-desktop. Each step sends the task’s goal, the window title and the app’s control names to api.anthropic.com. A task from the bar is planned there too, from its goal and the names of the apps that are running. The text in the app’s fields and memory notes from your screen go only when you tick the box for a task. Every call shows in the network ledger, with whether it carried screen text. Get a key at console.anthropic.com.',
-} as const;
+  deepseek:
+    'Tasks are planned and worked out by DeepSeek V4.1 Flash on DeepSeek, with thinking off, which reaches the app through agent-desktop. Each step sends the task’s goal, the window title and the app’s control names to api.deepseek.com. A task from the bar is planned there too, from its goal and the names of the apps that are running. The text in the app’s fields and memory notes from your screen go only when you tick the box for a task. Every call shows in the network ledger, with whether it carried screen text. Get a key at platform.deepseek.com.',
+};
+
+/** How each model is offered, and how its key is asked for and saved. */
+const MODELS: Record<TaskModel, { option: string; article: string; placeholder: string; label: string; save: (key: string) => Promise<void>; clear: () => Promise<void> }> = {
+  chutes: { option: 'Chutes (Qwen3.5 397B, off this Mac)', article: 'a Chutes', placeholder: 'cpk_…', label: 'Chutes API key', save: key => bridge().setChutesKey(key), clear: () => bridge().clearChutesKey() },
+  anthropic: { option: 'Anthropic (Claude Opus 5.5, off this Mac)', article: 'an Anthropic', placeholder: 'sk-ant-…', label: 'Anthropic API key', save: key => bridge().setAnthropicKey(key), clear: () => bridge().clearAnthropicKey() },
+  deepseek: { option: 'DeepSeek (V4.1 Flash, off this Mac)', article: 'a DeepSeek', placeholder: 'sk-…', label: 'DeepSeek API key', save: key => bridge().setDeepSeekKey(key), clear: () => bridge().clearDeepSeekKey() },
+};
 
 function modelPanel(status: TwinStatus): HTMLElement {
   const running = status.operator.state !== 'idle';
@@ -297,14 +314,14 @@ function modelPanel(status: TwinStatus): HTMLElement {
       disabled: running || pending('task-model'),
       onchange: () => {
         state.task.shareMemory = false;
-        void act('task-model', async () => void (await bridge().updateConfig({ operatorModel: select.value === 'anthropic' ? 'anthropic' : 'chutes' })));
+        const value = select.value;
+        void act('task-model', async () => void (await bridge().updateConfig({ operatorModel: value === 'anthropic' || value === 'deepseek' ? value : 'chutes' })));
       },
     },
-    h('option', { value: 'chutes' }, 'Chutes (Qwen3.5 397B, off this Mac)'),
-    h('option', { value: 'anthropic' }, 'Anthropic (Claude Opus 5.5, off this Mac)'),
+    ...(Object.keys(MODELS) as TaskModel[]).map(model => h('option', { value: model }, MODELS[model].option)),
   );
   select.value = choice;
-  const saved = choice === 'anthropic' ? status.operator.ready.anthropicKey : status.operator.ready.chutesKey;
+  const saved = keyReadyFor(status, choice);
   return panel(
     { testid: 'task-model-panel' },
     panelHead('Model for tasks'),
@@ -314,7 +331,7 @@ function modelPanel(status: TwinStatus): HTMLElement {
   );
 }
 
-function keySaved(choice: 'chutes' | 'anthropic', running: boolean): HTMLElement {
+function keySaved(choice: TaskModel, running: boolean): HTMLElement {
   return h(
     'div',
     { class: 'actions' },
@@ -322,19 +339,19 @@ function keySaved(choice: 'chutes' | 'anthropic', running: boolean): HTMLElement
     button('Remove key', {
       testid: 'task-key-remove',
       disabled: running || pending('task-key'),
-      onClick: () => void act('task-key', () => (choice === 'anthropic' ? bridge().clearAnthropicKey() : bridge().clearChutesKey())),
+      onClick: () => void act('task-key', () => MODELS[choice].clear()),
     }),
   );
 }
 
-function keyForm(choice: 'chutes' | 'anthropic'): HTMLElement {
+function keyForm(choice: TaskModel): HTMLElement {
   const input = h('input', {
     class: 'input',
     type: 'password',
     autocomplete: 'off',
     spellcheck: false,
-    placeholder: choice === 'anthropic' ? 'sk-ant-…' : 'cpk_…',
-    'aria-label': choice === 'anthropic' ? 'Anthropic API key' : 'Chutes API key',
+    placeholder: MODELS[choice].placeholder,
+    'aria-label': MODELS[choice].label,
     'data-testid': 'task-key-input',
     oninput: () => state.dirty.add(KEY_KEY),
     onblur: () => state.dirty.delete(KEY_KEY),
@@ -351,7 +368,7 @@ function keyForm(choice: 'chutes' | 'anthropic'): HTMLElement {
           const key = input.value.trim();
           input.value = '';
           state.dirty.delete(KEY_KEY);
-          await (choice === 'anthropic' ? bridge().setAnthropicKey(key) : bridge().setChutesKey(key));
+          await MODELS[choice].save(key);
         }),
     }),
   );

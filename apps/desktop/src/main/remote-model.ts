@@ -75,19 +75,19 @@ export function chutesFailure(status: number, kind?: BusyKind): string {
 }
 
 /** Removes a reasoning block and a code fence, which some models add around the JSON. */
-function unwrap(content: string): string {
+export function unwrap(content: string): string {
   const trimmed = content.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
   const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/.exec(trimmed);
   return fenced ? fenced[1] : trimmed;
 }
 
 /** A Retry-After in seconds, as a wait in milliseconds; undefined for none or a date. */
-function retryAfterMs(response: Response): number | undefined {
+export function retryAfterMs(response: Response): number | undefined {
   const value = Number(response.headers.get('retry-after'));
   return Number.isFinite(value) && value > 0 ? value * 1_000 : undefined;
 }
 
-function pause(ms: number, signal?: AbortSignal): Promise<void> {
+export function pause(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(new Error('The task was stopped.'));
     const timer = setTimeout(resolve, ms);

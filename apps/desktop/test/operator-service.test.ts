@@ -42,6 +42,7 @@ function setup(options: { model?: OperatorModelChoice; replies?: unknown[]; obse
     memory: () => ['TextEdit, today: Tue client presentation, final draft due'],
     hasChutesKey: () => options.key !== false,
     hasAnthropicKey: () => options.key !== false,
+    hasDeepSeekKey: () => options.key !== false,
     onChange: () => {
       changes += 1;
     },

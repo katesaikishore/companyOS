@@ -55,6 +55,8 @@ export const IPC = {
   clearChutesKey: 'twin:clear-chutes-key',
   setAnthropicKey: 'twin:set-anthropic-key',
   clearAnthropicKey: 'twin:clear-anthropic-key',
+  setDeepSeekKey: 'twin:set-deepseek-key',
+  clearDeepSeekKey: 'twin:clear-deepseek-key',
   exportData: 'twin:export-data',
   deleteAll: 'twin:delete-all',
   openMainWindow: 'twin:open-main-window',

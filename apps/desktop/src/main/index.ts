@@ -308,6 +308,10 @@ function registerIpc(): void {
     requireRuntime().setAnthropicKey(text(key, /^sk-ant-[A-Za-z0-9_-]{20,300}$/, 'That is not an Anthropic key. An Anthropic key starts with sk-ant-.')),
   );
   handle(IPC.clearAnthropicKey, () => requireRuntime().clearAnthropicKey());
+  handle(IPC.setDeepSeekKey, key =>
+    requireRuntime().setDeepSeekKey(text(key, /^sk-[A-Za-z0-9]{20,100}$/, 'That is not a DeepSeek key. A DeepSeek key starts with sk- and has letters and digits after it.')),
+  );
+  handle(IPC.clearDeepSeekKey, () => requireRuntime().clearDeepSeekKey());
 
   // The engine checks the search's shape, and refuses anything it does not accept, so only the object's form is checked here.
   handle(IPC.searchCapture, request => {

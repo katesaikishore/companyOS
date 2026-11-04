@@ -70,11 +70,12 @@ import { BgeEmbedder } from './bge-embedder';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { planTask, type OperatorModel, type OperatorTaskRequest, type OperatorTaskView, type TaskPlan, type TaskPlanView } from '@companyos/twin-core';
-import { OperatorService, type OperatorModelChoice } from './operator-service';
+import { OperatorService, missingKey, type OperatorModelChoice } from './operator-service';
 import { agentDesktopHands } from './operator-hands';
 import { agentDesktopServer, mcpHands } from './agent-desktop-mcp';
 import { createChutesChat, validChutesKey } from './remote-model';
 import { createAnthropicChat, validAnthropicKey } from './anthropic-model';
+import { createDeepSeekChat, validDeepSeekKey } from './deepseek-model';
 import { app, clipboard, desktopCapturer, nativeImage, shell, systemPreferences } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { rmSync } from 'node:fs';
@@ -90,16 +91,20 @@ import { SpeakerEmbedder } from './speaker-embedder';
 import {
   clearAnthropicKey as removeAnthropicKey,
   clearChutesKey as removeChutesKey,
+  clearDeepSeekKey as removeDeepSeekKey,
   destroyStoredSecrets,
   hasAnthropicKey,
   hasChutesKey,
+  hasDeepSeekKey,
   loadAnthropicKey,
   loadChutesKey,
+  loadDeepSeekKey,
   loadOrCreateApiToken,
   loadOrCreateDataKey,
   rotateApiToken as replaceApiToken,
   saveAnthropicKey,
   saveChutesKey,
+  saveDeepSeekKey,
 } from './keys';
 import { spawnNativeOcr } from './native-ocr';
 import { LOCAL_API_HOST, LOCAL_API_PORT, createLocalApi, withheldFromLocalApi, type LocalApi } from './local-api';
@@ -451,7 +456,7 @@ export class TwinRuntime {
       fetchImpl: options.fetchImpl,
     });
     this.operator = new OperatorService({
-      // Tasks are worked out on Chutes, or on Anthropic when the person picks it. The local model is no longer offered for them.
+      // Tasks are worked out on Chutes, or on Anthropic or DeepSeek when the person picks one. The local model is no longer offered for them.
       config: () => ({ ...this.agent.configuration, operatorModel: this.taskModel() }),
       // The operator reaches agent-desktop through MCP: its hands are a client of an agent-desktop MCP server, joined in
       // memory. Each task's steps are drawn on screen by its own named cursor, in the session automations and swarms share.
@@ -466,6 +471,7 @@ export class TwinRuntime {
       memory: goal => this.memoryNotes(goal),
       hasChutesKey: () => hasChutesKey(options.userData),
       hasAnthropicKey: () => hasAnthropicKey(options.userData),
+      hasDeepSeekKey: () => hasDeepSeekKey(options.userData),
       // The twin never operates its own window: its pages show captured text and the approvals themselves.
       ownApps: OWN_APPS,
       onChange: () => {
@@ -1031,7 +1037,7 @@ export class TwinRuntime {
     const running = (await this.runningApps()).filter(name => !off.has(name.toLowerCase()));
     // The plan is made by the model picked for tasks, from the goal and app names only, never screen text.
     const planner = await this.operatorModel(this.taskModel(), false);
-    if (!planner) throw new Error(this.taskModel() === 'anthropic' ? 'Save an Anthropic key on the Tasks page first.' : 'Save a Chutes key on the Tasks page first.');
+    if (!planner) throw new Error(missingKey(this.taskModel()));
     let plan: TaskPlan | undefined;
     let failure: string | undefined;
     try {
@@ -1085,9 +1091,22 @@ export class TwinRuntime {
     this.options.onChange();
   }
 
-  /** The model tasks use: Anthropic when the person picked it, otherwise Chutes. A setting left at the local model counts as Chutes. */
+  /** The model tasks use: Anthropic or DeepSeek when the person picked one, otherwise Chutes. A setting left at the local model counts as Chutes. */
   private taskModel(): OperatorModelChoice {
-    return this.agent.configuration.operatorModel === 'anthropic' ? 'anthropic' : 'chutes';
+    const choice = this.agent.configuration.operatorModel;
+    return choice === 'anthropic' || choice === 'deepseek' ? choice : 'chutes';
+  }
+
+  /** Saves the DeepSeek key for tasks in the keychain. It is never sent back to a page. */
+  async setDeepSeekKey(key: string): Promise<void> {
+    if (!validDeepSeekKey(key)) throw new Error('That is not a DeepSeek key. A DeepSeek key starts with sk- and has letters and digits after it.');
+    await saveDeepSeekKey(this.options.userData, key);
+    this.options.onChange();
+  }
+
+  clearDeepSeekKey(): void {
+    removeDeepSeekKey(this.options.userData);
+    this.options.onChange();
   }
 
   /** Saves the Anthropic key for tasks in the keychain. It is never sent back to a page. */
@@ -1109,6 +1128,10 @@ export class TwinRuntime {
     if (choice === 'anthropic') {
       const key = await loadAnthropicKey(this.options.userData);
       return key && validAnthropicKey(key) ? createAnthropicChat({ apiKey: key, sharesScreenText, record }) : undefined;
+    }
+    if (choice === 'deepseek') {
+      const key = await loadDeepSeekKey(this.options.userData);
+      return key && validDeepSeekKey(key) ? createDeepSeekChat({ apiKey: key, sharesScreenText, record }) : undefined;
     }
     const key = await loadChutesKey(this.options.userData);
     return key && validChutesKey(key) ? createChutesChat({ apiKey: key, sharesScreenText, record }) : undefined;

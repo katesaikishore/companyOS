@@ -212,7 +212,7 @@ export const TwinConfigSchema = z
     /** Optional agent-desktop program for the focus and key steps. Blank keeps the built-in adapters. The app does not bundle it. */
     agentDesktopPath: z.string().trim().max(512).default(''),
     /** The model that picks the task operator's steps. local stays on this Mac. chutes sends the goal and control names to Chutes. */
-    operatorModel: z.enum(['local', 'chutes', 'anthropic']).default('chutes'),
+    operatorModel: z.enum(['local', 'chutes', 'anthropic', 'deepseek']).default('chutes'),
     /** Whether a task step that may send, delete or act outside the editors waits for the person. Off: every step runs. */
     askBeforeSteps: z.boolean().default(false),
     /** The step keys of each dismissed routine, joined with '>'. A near copy of a dismissed routine is hidden too. */

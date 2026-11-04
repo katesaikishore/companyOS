@@ -381,13 +381,13 @@ export interface OperatorTaskView {
   state: 'idle' | 'running' | 'waiting';
   goal?: string;
   app?: string;
-  model: 'local' | 'chutes' | 'anthropic';
+  model: 'local' | 'chutes' | 'anthropic' | 'deepseek';
   steps: OperatorStepView[];
   /** The step that waits for the person. Answer it with answerTaskStep. */
   pending?: { id: string; text: string; why: string; detail?: string };
   result?: { status: 'done' | 'failed' | 'refused' | 'declined' | 'stopped' | 'step_limit'; summary?: string };
   /** Whether a task can start: the agent-desktop path is set, and a Chutes key is saved when Chutes is chosen. */
-  ready: { agentDesktop: boolean; chutesKey: boolean; anthropicKey: boolean };
+  ready: { agentDesktop: boolean; chutesKey: boolean; anthropicKey: boolean; deepseekKey: boolean };
 }
 
 /** What the bar's planner made of a task: the app it starts in and its steps. planned is false when the model gave no plan. */
@@ -698,6 +698,9 @@ export interface TwinBridge {
   /** Saves the Anthropic API key for tasks, sealed by the system keychain. It is never sent back to a page. */
   setAnthropicKey(key: string): Promise<void>;
   clearAnthropicKey(): Promise<void>;
+  /** Saves the DeepSeek API key for tasks, sealed by the system keychain. It is never sent back to a page. */
+  setDeepSeekKey(key: string): Promise<void>;
+  clearDeepSeekKey(): Promise<void>;
 
   exportData(): Promise<string>;
   deleteAll(): Promise<void>;
